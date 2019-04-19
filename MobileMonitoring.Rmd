@@ -1,0 +1,36 @@
+---
+title: "Untitled"
+author: "Magali Blanco"
+date: "4/18/2019"
+output: pdf_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60),tidy=TRUE)  
+
+pacman::p_load(dplyr, tidyverse, kable)
+
+```
+
+
+```{r}
+q1 <- readRDS("Data/190115_190331_stop_data.rda")
+
+```
+
+```{r first.instrument.reading}
+#make long format to find min/first date for each measurement 
+q1.long <- q1 %>% gather("pollutant", "value", 9:21) 
+
+q1.start.time <- q1.long %>% 
+    group_by(pollutant) %>% filter(!is.na(value)) %>% 
+    summarise(min(time))
+
+```
+
+```{r}
+
+```
+

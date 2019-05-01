@@ -7,30 +7,88 @@ editor_options:
   chunk_output_type: console
 ---
 
+### --> redownload data so time for BC will be corrected for daylight savings time
+### --> see code - include instrument ID (duplicate instruments)?
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60),tidy=TRUE)  
 
 pacman::p_load(dplyr, tidyverse, kable)
 
-```
-
-
-```{r}
-q1 <- readRDS("Data/190115_190331_stop_data.rda")
+#read in data
+q1 <- readRDS("Data/190222_190331_stop_data.rda")
 
 ```
+
 
 ```{r first.instrument.reading}
-#make long format to find min/first date for each measurement 
+#make long format to find first date each measurement was used
 q1.long <- q1 %>% gather("pollutant", "value", 9:21) 
 
-q1.start.time <- q1.long %>% 
-    group_by(pollutant) %>% filter(!is.na(value)) %>% 
-    summarise(min(time))
+# q1.start.time <- q1.long %>% 
+#     group_by(pollutant) %>% filter(!is.na(value)) %>% 
+#     summarise(min(time))
 
 ```
+
+delete after upload latest dataset
+```{r}
+#only keep data once we had all instruments
+start.date = "2019-02-22"
+q1 <- q1 %>% filter(time >= start.date)
+q1.long <- q1 %>% gather("pollutant", "value", 9:21) 
+
+```
+
+
+histograms of all values
+```{r}
+q1.long %>% #filter(value <0) %>% #negative instrument readings
+  ggplot(aes(x=value)) + geom_histogram() + facet_wrap(~pollutant, scales = "free")
+
+```
+
+
+correlation plots between similar instruments
+
+```{r}
+#ufp_scan_ct_cm3, ufp_disc_ct_cm3, ufp_pt_ct_cm3, ufp_pt_screen_ct_cm3
+
+
+```
+
+
+boxplots of measurements at same locations
+
+```{r}
+#calculate mean of all values (including duration) by location
+
+
+
+# ?histograms of means
+
+
+```
+
+
+temporal trends- diurnal or whole-week patterns
 
 ```{r}
 
+#make new variables for time of day and day of week
+
+
+
+#plot pollutant levels by time of day and day of week
+
+
 ```
 
+
+
+
+
+
+
+
+ 

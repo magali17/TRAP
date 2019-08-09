@@ -1,15 +1,15 @@
 ---
 title: "Untitled"
 author: "Magali Blanco"
-date: "4/18/2019"
+date: " `r Sys.Date()` "
 output: pdf_document
 editor_options: 
   chunk_output_type: console
 ---
 ### --> see paper notes from 5/3 MOVUP mtg 
 
-```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.width = 8, fig.height = 6)  
+```{r setup, include=FALSE} 
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 9)  
 
 # Clear workspace of all objects and unload all extra (non-base) packages
 rm(list = ls(all = TRUE))
@@ -21,48 +21,61 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 
 pacman::p_load(dplyr, tidyverse, chron)  #chronn: is.holiday, is.weekend
 
+#set plot theme
+theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+
 ```
 
-```{r first.instrument.reading}
+```{r read in data} 
 #read in data
 mm.raw <- readRDS("Data/MobileMonitoring/stop_data_190222_190806.rda") %>% 
   #drop unwanted variable values to reduce data size
   filter(!variable %in% c("gps_lat",
                           "gps_long",
-                          "ufp_pt_screen_ct_cm3",
+                          #"ufp_pt_screen_ct_cm3",
                           "ufp_disc_med_size_nm",
                           "bc_uv375nm_ng_m3" #this is not total BC
                          ) 
          )
 
-#give each site unique number ID, based on time (df is sorted by time)
+#give each site unique number ID, based on time when stop was first sampled 
 site_no <- mm.raw %>%  
   arrange(route, time) %>%
   select(site_id) %>% unique() %>% 
   mutate(site_no = seq(1:length(site_id))) 
 
+mm <- mm.raw %>% left_join(site_no) #%>%
+  #left_join(run_no)
+
+#take avg of each stop to REDUCE FILE SIZE
+mm <- mm %>%
+  #get rid of minutes & seconds to only have 1 unique time record per stop visit
+  mutate(time = format(time, "%Y-%m-%d %H:00:00")) %>% 
+  #estimate average reading from each instrument per stop visit
+  group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, duration_sec, time, instrument_id, variable, site_no) %>%
+  summarize(
+    value = mean(value, na.rm = T)
+  ) %>% 
+  #"ungroup" columns by converting to df  (?? why do I have to do this??)
+  as.data.frame()
+
 #give each driving day a unique ID
-run_no <- mm.raw %>% 
+run_no <- mm %>% 
   arrange(runname) %>%
   select(runname) %>% unique() %>%
   mutate(run_no = seq(1:length(runname)))
 
-mm <- mm.raw %>% left_join(site_no) %>%
-  left_join(run_no)
+mm <- mm %>% left_join(run_no)  
 
-```
-
-create temporal variables
-
-```{r}
-#seasons
+#create temporal variables
+##seasons
 winter1 <- as.Date("2018-12-21")
 winter2 <- as.Date("2019-12-21")
 spring <- as.Date("2019-03-20")
 summer <- as.Date("2019-06-21")
 fall <- as.Date("2019-09-23")  
 
-#time of day
+##time of day
 early_am <- seq(5,8)
 am <- seq(9,11)
 noon <- seq(12,15)
@@ -70,14 +83,17 @@ evening <- seq(16,20)
 night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
 
 mm <- mm %>% mutate(
-    #create date column
-    hour = as.numeric(format(mm$time, "%H")),
+    #convert "time" from char to time vector 
+    time = as.POSIXct(time),
+    hour = as.numeric(format(time, "%H")),   
     date = as.Date(substr(time, 1,10)),  #or use runname?
-    day = weekdays(time),
-    weekend =  is.weekend(time),
-    season = ifelse((date >= winter1 & date < spring) | date >= winter2, "winter", 
+    day = factor(weekdays(time), levels= c("Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday")),
+    weekend = factor(ifelse(day =="Saturday" | day == "Sunday", "weekend", "weekday")),
+    season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter", 
                     ifelse(date >= spring & date < summer, "spring",
                            ifelse(date >= summer & date < fall, "summer", "fall"))),
+                    levels = c("winter", "spring", "summer", "fall")),
+    
      time_of_day = factor(ifelse(hour %in% early_am, "early_am",
                        ifelse(hour %in% am, "am",
                               ifelse(hour %in% noon, "noon",
@@ -86,56 +102,229 @@ mm <- mm %>% mutate(
                        )
     )
 
-
-```
-
-## --> 
-# --> add column to ID primary instruments
-
-```{r}
-# instrument.use <- mm %>% group_by(instrument_id) %>%
-#   summarize(
-#     no_runs = length(unique(runname))
-#   )
+#on what days have instruments been used?
+instrument.use <- mm %>% group_by(instrument_id) %>%
+  summarize(
+    no_runs = length(unique(runname))
+  )
  
 #replace BC_0063 with BC_63
 mm$instrument_id[mm$instrument_id == "BC_0063"] <- "BC_63"
 
-mm %>%
-  ggplot(aes(x=run_no, y=value, colour = instrument_id)) + 
-  geom_boxplot() + 
-  facet_wrap(~variable, scales="free")
+# --> relabel other instruments that were incorrectly labeled 
+
+
 
 ```
-
-
-## --> compare primary & secondary instrument agreement 
-
-```{r}
-
-```
-
  
-## new df w/ only 1 instrument at a time
-
 ```{r}
+# #sites in each route
+# mm %>%  
+#   select(site_no, route) %>%   
+#   unique() %>%
+#   #all sites
+#   ggplot(aes(x=site_no, y=route)) + 
+#   geom_point() + 
+#   labs(title = paste("Sites in each route")) 
 
 ```
 
+#Data Collection  
 
 ```{r}
+#instrument used each day
+mm %>%
+  #1 record per variable combination - to reduce file size
+  select(date, instrument_id, variable) %>% 
+  unique() %>%
+  ggplot(aes(x=date, y=instrument_id, colour = instrument_id)) + 
+  geom_point() + 
+  facet_wrap(~variable, scales="free") + 
+  theme(legend.position = "none") + 
+  labs(title = "Instruments used over time")
+
+```
+
+```{r}
+#stops over time 
 start.date = format(min(mm$time), "%Y-%m-%d")
 end.date = format(max(mm$time), "%Y-%m-%d")
 
-```
- 
-number of stops over time 
-
-```{r, fig.height=6}
 mm %>%  
-  ggplot(aes(x=time, y=site_no, colour=route)) + geom_point() + labs(title = paste("Site Stops", start.date, "-", end.date)) + geom_point(data=mm[mm$site_kind=="Collocation",], aes(x=time, y=site_no), colour="black")
+  #1 record per date-site_no to reduce file size
+  select(date, site_no, route, aqs_id) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=date, y=site_no, colour=route)) + 
+  geom_point() + 
+  #aqs sites 
+  geom_point(aes(shape=aqs_id), colour="black") + 
+  labs(title = paste("Sites visited over time", subtitle= paste(start.date, "-", end.date))) 
   
 ```
+
+```{r}
+#stops by season/day of week/time of day/hour 
+##stops by season
+mm %>%  
+  select(runname, site_no, season) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=season)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by season", subtitle= paste(start.date, "-", end.date)) 
+  
+ 
+```
+
+```{r}
+##stops by time of week
+mm %>%  
+  select(runname, site_no, weekend) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=weekend)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by time of week", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+```{r}
+##stops by day of the week
+mm %>%  
+  select(runname, site_no, day) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=day)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by week day", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+```{r}
+##stops by time of day
+mm %>%  
+  select(runname, site_no, time_of_day) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=time_of_day)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by time of day", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+## --> data completeness for each instrument (ask Amanda?)
+
+
+
+#Data Summary
+## --> 
+
+```{r}
+#remove top 1% of values?
+myquantile <- 0.99
+
+```
+
+```{r}
+#histogram of concentrations for each pollutant & instrument
+
+
+```
+
+```{r}
+#histogram comparing all UFP instruments
+
+
+```
+
+
+```{r}
+#concentrations over time, season, day of week, time of week, hour
+
+
+```
+
+
+
+
+
+
+#UFPs
+comparing duplicate DiscMini readings
+
+```{r} 
+#make wide format to compare both DiscMini instruments 
+myquantile <- 0.99
+
+discmini.wide <- mm %>% 
+  #select only values from discminis
+  filter(variable == "ufp_disc_ct_cm3" & 
+          #eliminate very high values
+           value < quantile(value, myquantile, na.rm = T) ) %>%
+  #make wide format
+  spread(instrument_id, value) %>% 
+  #only look at rows where have observations for both discminis
+  drop_na(PMDISC_3, PMDISC_8) %>%
+  #calculate percent difference in estimates
+  mutate(pct.diff = (PMDISC_8 - PMDISC_3)/PMDISC_8*100)
+
+lm.disc <- lm(PMDISC_8 ~ PMDISC_3, data = discmini.wide)
+
+#percent difference between instruments
+pct.diff.median <- round(median(discmini.wide$pct.diff, na.rm = T), 1)
+
+# #RMSE
+# rmse <- discmini.wide %>% summarize(
+#   round(sqrt(mean((PMDISC_8 - PMDISC_3)^2)))
+# )
+
+#compare primary & secondary instrument agreement 
+discmini.wide %>% 
+  ggplot(aes(x=PMDISC_3, y= PMDISC_8)) + 
+  geom_point(alpha=0.3, aes(colour = route)) + 
+  geom_abline(intercept = 0, slope = 1) +
+  geom_smooth(method = "lm", aes(fill="lm")) + 
+  labs(fill="", 
+       title = paste0(discmini.wide$variable[1], ", showing values < quantile ", myquantile),
+       subtitle = paste0("y = ", round(coef(lm.disc)[1], 2), " + ", round(coef(lm.disc)[2], 2), 
+                        "x \nR2 = ", round(summary(lm.disc)$r.squared, 2), 
+                        #"\nRMSE = ", rmse,
+                        "\nmedian percent diff = ", pct.diff.median, "%",
+                        "\nno. pairs = ", nrow(discmini.wide)
+                        )
+       )
+
+
+```
+
+
+```{r}
+#estimate site-specific median pollutant concentrations up until now
+median.conc <- mm %>% 
+  #filter(instrument_id =="PMDISC_8") %>% 
+  group_by(site_id, site_lat, site_long, instrument_id) %>% 
+  rename(lat = site_lat, long = site_long) %>%
+  summarize(
+    median_conc = median(value)
+  )
+
+##estimates for specific pollutants from primary instruments
+ufp.conc <- median.conc %>%
+  filter(instrument_id == "PMDISC_8") %>%
+  rename(median_conc_ct_m3 = median_conc )
+
+no2.conc <- median.conc %>%
+  filter(instrument_id == "NO2_2") %>%
+  rename(median_conc_ppb = median_conc )
+
+write.csv(ufp.conc, "ufp.conc.csv", row.names = F)
+write.csv(no2.conc, "no2.conc.csv", row.names = F)
+
+
+```
+
+
 
 
 
@@ -176,127 +365,6 @@ mm %>%
 
 
 
-########### OLD PLOTS ###########  
-
-#plots of UFP
-
-```{r}
-#histograms of all values
-
-# ### ? some routes seem separated? 
-# mm.long %>% #filter(pollutant != "bc_uv375nm_ng_m3" & pollutant != "bc_uv375nm_ng_m3" ) 
-#   ggplot(aes(x=value)) + geom_histogram() + facet_wrap(~pollutant, scales = "free")
-
-```
-
-\newpage
-PTRAK w/ and w/o screen
-
-```{r}
-mm %>% filter(ufp_pt_ct_cm3 < quantile(ufp_pt_ct_cm3, 0.9, na.rm = T) & ufp_pt_screen_ct_cm3 < quantile(ufp_pt_screen_ct_cm3, 0.9, na.rm = T)) %>%
-  ggplot(aes(x=ufp_pt_ct_cm3, y=ufp_pt_screen_ct_cm3, colour=route)) + 
-  geom_point() + 
-  geom_smooth(method = "loess") + 
-  labs(x="Ptrak (#/cm3)", y= "Ptrak with Screen (#/cm3)", title = "Ptraks")
-
-
-```
-
-\newpage
-UFP instrument comparison
-
-```{r}
-### --> recode pollutant names 
-## --> few nanoscan values b/c they're by the minute
-
-#ufp_scan_ct_cm3, ufp_disc_ct_cm3, ufp_pt_ct_cm3, ufp_pt_screen_ct_cm3
-alpha = 0.4
-
-mm.long %>% filter((pollutant == "ufp_scan_ct_cm3" | 
-                      pollutant =="ufp_disc_ct_cm3" | 
-                      pollutant == "ufp_pt_ct_cm3" | 
-                      pollutant == "ufp_pt_screen_ct_cm3") & 
-                     value < quantile(value, 0.99, na.rm = T)) %>% 
-  #recode_factor(pollutant, "ufp_scan_ct_cm3" = "Scan") %>%
-  
-  ggplot(aes(x=value, fill=pollutant)) +  
-  geom_histogram(position = "dodge") + 
-  labs(title = "Histogram of UFP Values", 
-       subtitle = "top 1% values excluded",
-       x= "#/cm3",
-       fill="instrument"
-       )
-
-```
-
--nanoscan 
-
-```{r}
-mm.long %>% filter((pollutant == "ufp_scan_ct_cm3") & 
-                     value < quantile(value, 0.99, na.rm = T)) %>% 
-  #recode_factor(pollutant, "ufp_scan_ct_cm3" = "Scan") %>%
-  
-  ggplot(aes(x=value, fill=pollutant)) +  
-  geom_histogram(position = "dodge") + 
-  labs(title = "Histogram of UFP Values", 
-       subtitle = "top 1% values excluded",
-       x= "#/cm3",
-       fill="instrument"
-       )
-```
-
-
-
-\newpage
-temporal trends- whole-week patterns
-
-```{r, fig.height=10}
-### -->get rid of gps_long, gps_lat
-### ---> relevel facors & 
-### in main mm df 
-
-
-
-mm.long %>% mutate(day = substr(day, 1,2)) %>% 
-  #levels(as.factor(day), c("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")) %>%
-  
-  ggplot(aes(x=day, y=value)) + geom_boxplot() + facet_wrap(~pollutant, scales="free") + scale_y_log10()
-
-
-
-```
-
-
-
-```{r, fig.height=10}
-### --> ? dont' fill by pollutant
-
-mm.long %>%  
-  ggplot(aes(x=weekend, y=value)) + geom_boxplot() + facet_wrap(~pollutant, scales="free") + scale_y_log10() #fill=route
-
-
-```
-
-\newpage
-temporal trends- diurnal patterns
-
-```{r}
-
-```
-
-
-
-```{r}
-#boxplots of measurements at same locations
-
-#calculate mean of all values (including duration) by location
-
-
-
-# ?histograms of means
-
-
-```
 
 
 

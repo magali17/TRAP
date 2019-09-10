@@ -1,0 +1,139 @@
+---
+title: "MM Clean Up"
+author: "Magali Blanco"
+date: "8/30/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(dplyr, tidyverse, chron, knitr)  #chronn: is.holiday, is.weekend
+
+```
+
+Scipt to reduce data size by calculating stop averages from high temporl resolution data (e.g., 1 sec, 10 sec)
+
+```{r high temporal resolution data}  
+#read in data
+
+mm_full <- readRDS("Data/MobileMonitoring/stop_data_190222_190806.rda") %>%
+  #drop unwanted variable values to reduce data size
+  filter(!variable %in% c("gps_lat",
+                          "gps_long",
+                          #"ufp_pt_screen_ct_cm3",
+                          "ufp_disc_med_size_nm",
+                          "bc_uv375nm_ng_m3" #this is not total BC
+                         )
+         )
+
+#give each site unique number ID, based on time when stop was first sampled
+site_no <- mm_full %>%
+  arrange(route, time) %>%
+  select(site_id) %>% unique() %>%
+  mutate(site_no = seq(1:length(site_id)))
+
+mm_full <- mm_full %>% left_join(site_no)
+
+#relabel instruments that were incorrectly labeled
+mm_full <- mm_full %>%
+  mutate(instrument_id = ifelse(instrument_id == "BC_0063", "BC_63",
+         ifelse(instrument_id == "CO_2", "CO_3",
+                ifelse(instrument_id == "PMSCAN_1", "PMSCAN_3",
+                       instrument_id)))
+         )
+
+#remove top 1% of values for each pollutant and instrument before taking avg
+myquantile <- 0.99
+
+
+mm_full <- mm_full %>%
+  group_by(variable, instrument_id) %>%
+  mutate(value = ifelse(value < quantile(value, myquantile, na.rm = T), value, NA)) %>%
+  #drop rows w/ NA "values"
+  drop_na(value) %>%
+  ungroup()
+
+#take avg of each stop to REDUCE FILE SIZE
+mm <- mm_full %>%
+  group_by(runname, site_id) %>%  #, instrument_id, variable
+  #set time to arrival time, in case a stop elapsed e.g., 2 diff hours
+  mutate(arrival_time = min(time)) %>%
+  select(-time) %>%
+
+  #take avg of each unique site stop for each instrument
+  group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, duration_sec, arrival_time, instrument_id, variable, site_no) %>%
+  summarize(value = mean(value, na.rm = T)) %>%
+  ungroup()
+
+
+#give each driving day a unique ID
+run_no <- mm %>%
+  arrange(runname) %>%
+  select(runname) %>%
+  unique() %>%
+  mutate(run_no = seq(1:length(runname)))
+
+mm <- mm %>% left_join(run_no)
+
+#number of times each site has been visited
+site_id_visit_no <- mm %>%
+  group_by(site_id) %>%
+  select(site_id, runname) %>%
+  unique() %>%
+  #group_by(site_id) %>%
+  mutate(
+    site_id_visit_no = seq(1:n())
+    )
+
+mm <- mm %>% left_join(site_id_visit_no)
+
+#ID if stops are AQS sites
+mm <- mm %>%
+  mutate(aqs_site = ifelse(is.na(aqs_id), 0, 1))
+
+#create temporal variables
+##seasons
+winter1 <- as.Date("2018-12-21")
+winter2 <- as.Date("2019-12-21")
+spring <- as.Date("2019-03-20")
+summer <- as.Date("2019-06-21")
+fall <- as.Date("2019-09-23")
+
+##time of day
+early_am <- seq(5,8)
+am <- seq(9,11)
+noon <- seq(12,15)
+evening <- seq(16,20)
+night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
+
+mm <- mm %>% mutate(
+    #arrival_time = as.POSIXct(arrival_time),
+    date = as.Date(substr(arrival_time, 1,10)),
+    hour = as.numeric(format(arrival_time, "%H")),
+    time_of_day = factor(ifelse(hour %in% early_am, "early_am",
+                 ifelse(hour %in% am, "am",
+                        ifelse(hour %in% noon, "noon",
+                               ifelse(hour %in% evening, "evening", "night")))),
+                 levels= c("early_am", "am", "noon", "evening", "night")
+                 ),
+    day = factor(format(arrival_time, "%a"), levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
+    weekend = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
+    month = factor(format(arrival_time, "%b"), levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
+    season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
+                    ifelse(date >= spring & date < summer, "spring",
+                           ifelse(date >= summer & date < fall, "summer", "fall"))),
+                    levels = c("winter", "spring", "summer", "fall"))
+    )
+
+#saveRDS(mm, file.path("Data", "MobileMonitoring", "summary_data_190222_190806.rda"))
+
+```

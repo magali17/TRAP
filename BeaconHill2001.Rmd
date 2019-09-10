@@ -1,0 +1,146 @@
+---
+title: "Beacon Hill"
+author: "Magali Blanco"
+date: "8/26/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+## --> ? update PNC using middle of that bin since bin #s are for lower cut? 
+## --> ? what instrument to compare it to? need to have mid size estimate to convert to mass?? 
+
+#Notes
+* If there is no "P" in the name, the particle diameter is 0.__ µm.
+V05 is the volume of .05 micrometer particles per cc. V1 through V7 (columns L-R) are for 0.1-0.7 µm particles
+
+*  What are columns S:AH, which have about 5 numbers after the “V”, and some have additional letters (e.g., ‘V83546, V1P0368)?
+0.835 microns and 1.0368 microns  (the P stands for “point”- I didn’t make that one up!)
+
+*  Particle size (e.g., 0.05 µm) is the lowest size limit of the bin 
+
+
+Kim et al. 2004:
+* The sampling height of particle size and gaseous measurements was 4 m above ground.
+* ?? Range: 20 nm
+* ?? are bins total counts greater than that size?
+
+Mobile Monitoring particle counter ranges
+* PTRAK: 20 nm -  1 µm (1,000 nm), screened: 50 nm - 1 µm
+* DiscMini: 10-700 nm
+* Nanoscan: 10-420 nm
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(readxl, dplyr, tidyverse, chron, knitr)  #chronn: is.holiday, is.weekend
+
+#set plot theme
+theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+
+```
+
+```{r}
+ 
+bh <- read_excel("../A3. Historical Traffic/Tim Larson/Beacon Hill size data.xls") %>%
+  #only keep 2001 data; too little 2000 and 2002 data to calculate annual avg
+  filter(format(date, "%Y") == "2001") %>%
+  mutate(month = as.numeric(format(date, "%m")))
+
+```
+
+```{r}
+#how many hourly values do we have? 
+##only have data for 10 months & 23 hours
+# unique(bh$month) #no July or December
+# unique(bh$hour) #no midnight
+
+##No data for July or December, or Midnight. Little data for months 1, 10, 11; more data for hour 23 than the rest. Thus, values need to be reweighted.
+
+bh %>%
+  ggplot(aes(x=hour)) +  #fill= hour
+  geom_bar() + 
+  facet_wrap(~month, labeller = "label_both")
+
+```
+
+```{r}
+# assign month & hour weights
+bh <- bh %>%
+  mutate(
+    #upweigh surrounding months of missing times (no Jul or Dec data)
+    month.wt = ifelse(month == 01 | month == 11 | month == 06 | month == 08, 1.5/12, 1/12),
+    #upweight hr 1 and 23 since no hour 24
+    hour.wt = ifelse(hour == 01 | hour == 23, 1.5/24, 1/24),
+    month.hour.wt = month.wt*hour.wt
+  )  
+
+# #check that sum of weights should be 1. # it is
+# weights <- bh %>% group_by(month, hour) %>%
+#   select(month, hour, month.hour.wt) %>%
+#   unique() %>%
+#   ungroup() %>%
+#   summarize(
+#     sum = sum(month.hour.wt)
+#   )
+
+```
+
+```{r}
+#convert vol conc (µm3/cm3 air) to num conc (particles/cm3 air)
+##make long format
+bh.long <-bh %>%
+  gather(V02:V2P4579, key = "diam_um", value = "vol_conc_um3_cm3")
+
+bins <- unique(bh.long$diam_um)
+
+bh.long <- bh.long %>% 
+            #rename bin column names
+    mutate(diam_um = as.numeric(ifelse(diam_um %in% bins[1:19], 
+                    paste0("0.", substr(diam_um, 2,7)),
+                    paste0(substr(diam_um, 2,2), ".", substr(diam_um, 4,7)))),
+          #calculate particle volume per bin
+         particle_vol_um3_particle = 4/3*pi*(diam_um/2)^3,
+         # calculate number concentration
+         num_conc_particles_cm3 = vol_conc_um3_cm3 / particle_vol_um3_particle
+    ) 
+
+## get a total particle conc for a specific size range (# counts are for particles ">" __ um) & date
+pnc <- bh.long %>%
+    # only keep bin counts for particle sizes similar to what we are collecting in mobile monitoring (PTRAK: 20 nm - 1µm; DiscMini: 10-700 nm; Nanoscan: 10-420 nm). Note: few particles are large, so this doens't make a large difference in the annual avg estimate.
+  ## counts similar to PTRAK
+  filter(diam_um < 1.03680) %>%
+  #select(month, hour, month.hour.wt, diam_um, num_conc_particles_cm3) %>%
+  group_by(date, hour, month, month.hour.wt) %>%
+  summarize(
+            #total particle count for each day and hour
+            pnc_particles_cm3 = sum(num_conc_particles_cm3))
+
+
+# ??? take avg reading from each month-hour (there are multiple readings/month) 
+  pnc <- pnc %>% 
+    group_by(month, hour, month.hour.wt) %>%
+    summarize(
+      # number of observations per month-hour combination 
+      unique_days = n(),
+      avg_pnc_particles_cm3 = mean(pnc_particles_cm3))
+
+#check that weights add up to 1. They do
+#sum(pnc$month.hour.wt)
+  
+# when there is only 1 value for each month-hour, multiply this by month.hour.wt; sum all values to estimate annual avg for total PNC
+(pnc_annual_avg_particles_cm3 <- round(sum(pnc$avg_pnc_particles_cm3 * pnc$month.hour.wt)))
+
+ 
+```
+
+
+  

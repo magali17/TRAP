@@ -40,47 +40,25 @@ theme_set(theme_linedraw() + theme(legend.position="bottom"))
 ### date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")) 
 
 ```{r average stop data}
-#quantile also used in MM clean up script
-myquantile <- 0.99
+source("A2-3_Var&Fns.R")
 
-mm <- readRDS(file.path("Data", "MobileMonitoring", "summary_data_190222_190806.rda"))
+#load stop average data 
+mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190806.rda"))
+mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190806.rda"))
 
-#make wide format. 
-#note: dataframe does NOT include instrument_ID - takes avg reading if 2 instruments were collocated
-mm.wide <- mm %>% 
-  #?? don't care whate instrument took measurement, as long as we have a measurement?
-  select(-instrument_id) %>%
-  # ??? HOW do you account for completely missed stops for which we have no data?
-  #group_by arrival_time first to order by time
-  group_by(arrival_time, runname, site_id, variable, 
-           #variables not immediately necessary
-           route, aqs_id, aqs_location, site_long, site_lat, duration_sec, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, weekend, month, season) %>% 
-  #spread() fn has issues when have dupliate instruments taking readings at same time - so take avg of both the readings
-  summarize(value = mean(value)) %>%
-  ungroup() %>%
-  spread(variable, value) 
-  
+#load overnight AQS site data 
+ptrak <- readRDS(file.path("Data", "MobileMonitoring", "ptrak_190628.rda"))
+
 ```
 
 ```{r definitions}
 #start/end dates
-start.date = min(mm$date)
+#start.date = min(mm$date) #in A2-3 variables.R sourcing
 end.date = max(mm$date)
-
-# #sites  in each route
-# mm %>%  
-#   select(site_no, route) %>%   
-#   unique() %>%
-#   #all sites
-#   ggplot(aes(x=site_no, y=route)) + 
-#   geom_point() + 
-#   labs(title = paste("Sites in each route")) 
 
 #on what days have instruments been used?
 instrument.use <- mm %>% group_by(instrument_id) %>%
-  summarize(
-    no_runs = length(unique(runname))
-  )
+  summarize(no_runs = length(unique(runname)))
  
 #UFP instrument variable names 
 ufp <- c(#"bc_ir880nm_ng_m3", 
@@ -217,146 +195,41 @@ mm %>%
 # Collocations 
 ## Field  
 
-```{r colo.plot fn}
-colo.plot <- function(mydata=mm, primary.instrument, secondary.instrument) {
-# mydata = mm
-# myvariable = "ufp_disc_ct_cm3"
-# primary.instrument = "PMDISC_8"
-# secondary.instrument = "PMDISC_3" 
-
-    data.wide <- mydata %>% 
-    #select only values from desired instruments
-    filter(instrument_id == primary.instrument | instrument_id == secondary.instrument) %>%
-    #make wide format
-    spread(instrument_id, value) %>% 
-    #only look at rows where have observations for both discminis
-    drop_na(primary.instrument, secondary.instrument) 
-  
-  data.wide <- data.wide %>%
-    #as.data.frame() %>%
-    #calculate percent difference in estimates
-    mutate(pct.diff = (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])/data.wide[[primary.instrument]]*100)
-
-
-  lm1 <- lm(formula(paste(secondary.instrument, "~", primary.instrument)), 
-                data = data.wide)
-  
-  #percent difference between instruments
-  pct.diff.median <- round(median(data.wide$pct.diff, na.rm = T), 1)
-  
-  
-  #compare primary & secondary instrument agreement 
-  data.wide %>%
-    ggplot(aes(x= data.wide[[primary.instrument]], y= data.wide[[secondary.instrument]])) + 
-    geom_point(alpha=0.3, aes(colour = route)) + 
-    geom_abline(intercept = 0, slope = 1) +
-    geom_smooth(method = "lm", aes(fill="lm")) + 
-    labs(fill="", 
-         title = paste0(data.wide$variable[1]),
-         subtitle = paste0("y = ", round(coef(lm1)[1], 2), " + ", round(coef(lm1)[2], 2), 
-                          "x \nR2 = ", round(summary(lm1)$r.squared, 3), 
-                          #"\nRMSE = ", rmse,
-                          "\nmedian percent diff = ", pct.diff.median, "%",
-                          "\nno. pairs = ", nrow(data.wide)
-                          ),
-         x=primary.instrument,
-         y=secondary.instrument
-         )
-}
-
-#colo.plot(primary.instrument = "PMDISC_8", secondary.instrument = "PMDISC_3")
-
-```
-
 ### DiscMini's
 
 ```{r} 
-
 colo.plot(primary.instrument = "PMDISC_3", secondary.instrument = "PMDISC_8")
-
-
-# #make wide format to compare both DiscMini instruments 
-# discmini.wide <- mm %>% 
-#   #select only values from discminis
-#   filter(variable == "ufp_disc_ct_cm3") %>%
-#   #make wide format
-#   spread(instrument_id, value) %>% 
-#   #only look at rows where have observations for both discminis
-#   drop_na(PMDISC_3, PMDISC_8) %>%
-#   #calculate percent difference in estimates
-#   mutate(pct.diff = (PMDISC_8 - PMDISC_3)/PMDISC_8*100)
-# 
-# lm.disc <- lm(PMDISC_8 ~ PMDISC_3, data = discmini.wide)
-# 
-# #percent difference between instruments
-# pct.diff.median <- round(median(discmini.wide$pct.diff, na.rm = T), 1)
-# 
-# # #RMSE
-# # rmse <- discmini.wide %>% summarize(
-# #   round(sqrt(mean((PMDISC_8 - PMDISC_3)^2)))
-# # )
-# 
-# #compare primary & secondary instrument agreement 
-# discmini.wide %>% 
-#   ggplot(aes(x=PMDISC_3, y= PMDISC_8)) + 
-#   geom_point(alpha=0.3, aes(colour = route)) + 
-#   geom_abline(intercept = 0, slope = 1) +
-#   geom_smooth(method = "lm", aes(fill="lm")) + 
-#   labs(fill="", 
-#        title = paste0(discmini.wide$variable[1]),
-#        subtitle = paste0("y = ", round(coef(lm.disc)[1], 2), " + ", round(coef(lm.disc)[2], 2), 
-#                         "x \nR2 = ", round(summary(lm.disc)$r.squared, 2), 
-#                         #"\nRMSE = ", rmse,
-#                         "\nmedian percent diff = ", pct.diff.median, "%",
-#                         "\nno. pairs = ", nrow(discmini.wide)
-#                         )
-#        )
-
-```
-
-
-```{r}
-# #estimate site-specific median pollutant concentrations up until now
-# median.conc <- mm %>% 
-#   #filter(instrument_id =="PMDISC_8") %>% 
-#   group_by(site_id, site_lat, site_long, instrument_id) %>% 
-#   rename(lat = site_lat, long = site_long) %>%
-#   summarize(
-#     median_conc = median(value)
-#   )
-# 
-# ##estimates for specific pollutants from primary instruments
-# ufp.conc <- median.conc %>%
-#   filter(instrument_id == "PMDISC_8") %>%
-#   rename(median_conc_ct_m3 = median_conc )
-# 
-# no2.conc <- median.conc %>%
-#   filter(instrument_id == "NO2_2") %>%
-#   rename(median_conc_ppb = median_conc )
-# 
-# # write.csv(ufp.conc, "ufp.conc.csv", row.names = F)
-# # write.csv(no2.conc, "no2.conc.csv", row.names = F)
-
 
 ```
 
 ### PTRAKs
 
 ```{r}
-colo.plot(primary.instrument = "PMPT_93", secondary.instrument = "PMPT_4")
+#need to compare PMPT_1 to PMPT_93 and PMPT_94, and PMPT_93 to PMPT_94
 
+
+
+#the colocations we actually have
+colo.plot(primary.instrument = "PMPT_93", secondary.instrument = "PMPT_4")
 colo.plot(primary.instrument = "PMPT_94", secondary.instrument = "PMPT_4")
+
 
 ```
 
 
-### Neph
-
-
-### BC
+### Neph   
+PM25_176 has always/mostly been used.
 
 ```{r}
- 
+colo.plot(primary.instrument = "PM25_176", secondary.instrument = "PM25_205")
+
+```
+
+### BC    
+Fit is not great, but BC_63 has always/mostly been used.
+
+```{r}
+colo.plot(primary.instrument = "BC_63", secondary.instrument = "BC_66")
 
 ```
 
@@ -392,64 +265,48 @@ colo.plot(primary.instrument = "PMPT_94", secondary.instrument = "PMPT_4")
 # Overnight AQS Site Readings
 Using PST.   
 
-# PTRAK
+## PTRAK
 
 ```{r}
-#attributes()
-#upload datasets, R recognizes that they are in both PST and PDT
-Ptrak.10W <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak 10W.csv") %>% 
-  mutate(Location = as.factor("10W"))  
-
-Ptrak.BH <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak BH.csv") %>% 
-  mutate(Location = as.factor("BH"))  
-
-
-#create temporal variables
-##seasons
-winter1 <- as.Date("2018-12-21")
-winter2 <- as.Date("2019-12-21")
-spring <- as.Date("2019-03-20")
-summer <- as.Date("2019-06-21")
-fall <- as.Date("2019-09-23")
-
-##time of day
-early_am <- seq(5,8)
-am <- seq(9,11)
-noon <- seq(12,15)
-evening <- seq(16,20)
-night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
-
-ptrak <- rbind(Ptrak.10W, Ptrak.BH) %>% 
-  mutate(
-    date_time_local = as.POSIXct(paste(Date, Time), format="%m/%d/%y %H:%M:%S", tz = "America/Los_Angeles"),
-    #convert to PST (this creates a character vector), convert back to date-time format
-    date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")), 
-    date = as.Date(date_time_pst),
-    hour = as.numeric(format(date_time_pst, format="%H")),
-    time_of_day = factor(ifelse(hour %in% early_am, "early_am",
-                 ifelse(hour %in% am, "am",
-                        ifelse(hour %in% noon, "noon",
-                               ifelse(hour %in% evening, "evening", "night")))),
-                 levels= c("early_am", "am", "noon", "evening", "night")),
-    day = factor(format(date_time_pst, "%a"), 
-                 levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-    weekend = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
-    #month = as.numeric(format(date_time_pst, format="%m")),
-    month = factor(format(date_time_pst, "%b"), 
-                   levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
-    season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
-                    ifelse(date >= spring & date < summer, "spring",
-                           ifelse(date >= summer & date < fall, "summer", "fall"))),
-                    levels = c("winter", "spring", "summer", "fall"))
-    ) %>%
-  select(date_time_pst, date, hour, time_of_day, day, weekend, month, season, Conc_pt_cm3, Location)
-
-
-# ??? take median (since not excluding extreme values) or use raw 10-sec values?
-#calculate median/avg concentration per day-hour
-ptrak <- ptrak %>%
-  group_by(date, hour, time_of_day, day, weekend, month, season, Location) %>%
-  summarize(Conc_pt_cm3 = round(median(Conc_pt_cm3)))
+# #attributes()
+# #upload datasets, R recognizes that they are in both PST and PDT
+# Ptrak.10W <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak 10W.csv") %>% 
+#   mutate(Location = as.factor("10W"))  
+# 
+# Ptrak.BH <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak BH.csv") %>% 
+#   mutate(Location = as.factor("BH"))  
+# 
+# ptrak <- rbind(Ptrak.10W, Ptrak.BH) %>% 
+#   mutate(
+#     date_time_local = as.POSIXct(paste(Date, Time), format="%m/%d/%y %H:%M:%S", tz = "America/Los_Angeles"),
+#     #convert to PST (this creates a character vector), convert back to date-time format
+#     date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")), 
+#     date = as.Date(date_time_pst),
+#     hour = as.numeric(format(date_time_pst, format="%H")),
+#     time_of_day = factor(ifelse(hour %in% early_am, "early_am",
+#                  ifelse(hour %in% am, "am",
+#                         ifelse(hour %in% noon, "noon",
+#                                ifelse(hour %in% evening, "evening", "night")))),
+#                  levels= c("early_am", "am", "noon", "evening", "night")),
+#     day = factor(format(date_time_pst, "%a"), 
+#                  levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
+#     weekend = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
+#     #month = as.numeric(format(date_time_pst, format="%m")),
+#     month = factor(format(date_time_pst, "%b"), 
+#                    levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
+#     season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
+#                     ifelse(date >= spring & date < summer, "spring",
+#                            ifelse(date >= summer & date < fall, "summer", "fall"))),
+#                     levels = c("winter", "spring", "summer", "fall"))
+#     ) %>%
+#   select(date_time_pst, date, hour, time_of_day, day, weekend, month, season, Conc_pt_cm3, Location)
+# 
+# 
+# # ??? take median (since not excluding extreme values) or use raw 10-sec values?
+# #calculate median/avg concentration per day-hour
+# ptrak <- ptrak %>%
+#   group_by(date, hour, time_of_day, day, weekend, month, season, Location) %>%
+#   summarize(Conc_pt_cm3 = round(median(Conc_pt_cm3)))
 
 ```
 
@@ -471,15 +328,6 @@ ptrak %>%
   geom_boxplot() + 
   facet_wrap(~Location)
 
-
-```
-
-
-# Calculate Trimmed, Weighted Mean Concentrations 
--per location 
-??? how to do this??
-
-```{r}
 
 ```
 
@@ -518,11 +366,13 @@ mm %>%
                           "\nlog x scale",
                           "\nPTRAK: 20 nm - 1 µm (50 nm - 1 µm w/ screen);\nDiSCmini:10-700 nm; \nNanoScan: 10-420 nm"))
 
-```
+``` 
 
  
 
 ## Concentrations Over Time
+
+### --> add bigger PTRAK plots
 
 ```{r}
 #concentrations by time & season 
@@ -595,8 +445,7 @@ heatmap(cor.table )
 
 
 
-
-
+ 
 
 
 

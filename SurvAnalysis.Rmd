@@ -29,8 +29,10 @@ pacman::p_load(survival, haven, tidyverse, knitr)   #dplyr, flexsurv, survMisc, 
 min.pct <- 0.95
 
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
-dem0 <- read_sas("~/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat", 
+dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), 
     NULL)
+
+
 
 #select relevant columns, e.g. 10-yr estimates
 dem <- dem0 %>%

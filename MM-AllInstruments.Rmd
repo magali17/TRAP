@@ -1,5 +1,5 @@
 ---
-title: "Mobile Monitoring Data Review"
+title: "Mobile Monitoring Data Report - All Instruments"
 author: "Magali Blanco"
 date: ' `r Sys.Date()` '
 output:
@@ -8,10 +8,6 @@ output:
     df_print: paged
     toc: yes
     toc_depth: '3'
-  pdf_document:
-    number_sections: yes
-    toc: yes
-    toc_depth: 3
 editor_options:
   chunk_output_type: console
 ---
@@ -27,7 +23,7 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(dplyr, tidyverse, chron, knitr)  #chronn: is.holiday, is.weekend
+pacman::p_load(dplyr, tidyverse, VCA, knitr)    #chron
 
 #set plot theme
 theme_set(theme_linedraw() + theme(legend.position="bottom")) 
@@ -36,15 +32,12 @@ theme_set(theme_linedraw() + theme(legend.position="bottom"))
 
 ### see Qs in code
 
-### --> convert to PST? 
-### date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")) 
-
 ```{r average stop data}
 source("A2-3_Var&Fns.R")
 
 #load stop average data 
-mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190806.rda"))
-mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190806.rda"))
+mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190917.rda"))
+mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190917.rda"))
 
 #load overnight AQS site data 
 ptrak <- readRDS(file.path("Data", "MobileMonitoring", "ptrak_190628.rda"))
@@ -70,7 +63,7 @@ ufp <- c(#"bc_ir880nm_ng_m3",
 
 ```
 
-Data used in this report are those less than the `r myquantile` quantile.
+Data used in this report are those greater than the `r myquantile_lower` quantile and less than the `r myquantile_upper` quantile.
 
 
 # Data Completeness 
@@ -159,10 +152,10 @@ mm %>%
 ```{r}
 ##stops by time of week
 mm %>%  
-  select(runname, site_no, weekend) %>%   
+  select(runname, site_no, time_of_week) %>%   
   unique() %>%
   #all sites
-  ggplot(aes(x=site_no, fill=weekend)) + 
+  ggplot(aes(x=site_no, fill=time_of_week)) + 
   geom_bar() + 
   labs(title = "Number of visits to each site by time of week", subtitle= paste(start.date, "-", end.date)) 
 
@@ -256,10 +249,6 @@ colo.plot(primary.instrument = "BC_63", secondary.instrument = "BC_66")
 
 
 
-
-
-
-
 ```
 
 # Overnight AQS Site Readings
@@ -267,48 +256,7 @@ Using PST.
 
 ## PTRAK
 
-```{r}
-# #attributes()
-# #upload datasets, R recognizes that they are in both PST and PDT
-# Ptrak.10W <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak 10W.csv") %>% 
-#   mutate(Location = as.factor("10W"))  
-# 
-# Ptrak.BH <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak BH.csv") %>% 
-#   mutate(Location = as.factor("BH"))  
-# 
-# ptrak <- rbind(Ptrak.10W, Ptrak.BH) %>% 
-#   mutate(
-#     date_time_local = as.POSIXct(paste(Date, Time), format="%m/%d/%y %H:%M:%S", tz = "America/Los_Angeles"),
-#     #convert to PST (this creates a character vector), convert back to date-time format
-#     date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")), 
-#     date = as.Date(date_time_pst),
-#     hour = as.numeric(format(date_time_pst, format="%H")),
-#     time_of_day = factor(ifelse(hour %in% early_am, "early_am",
-#                  ifelse(hour %in% am, "am",
-#                         ifelse(hour %in% noon, "noon",
-#                                ifelse(hour %in% evening, "evening", "night")))),
-#                  levels= c("early_am", "am", "noon", "evening", "night")),
-#     day = factor(format(date_time_pst, "%a"), 
-#                  levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-#     weekend = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
-#     #month = as.numeric(format(date_time_pst, format="%m")),
-#     month = factor(format(date_time_pst, "%b"), 
-#                    levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
-#     season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
-#                     ifelse(date >= spring & date < summer, "spring",
-#                            ifelse(date >= summer & date < fall, "summer", "fall"))),
-#                     levels = c("winter", "spring", "summer", "fall"))
-#     ) %>%
-#   select(date_time_pst, date, hour, time_of_day, day, weekend, month, season, Conc_pt_cm3, Location)
-# 
-# 
-# # ??? take median (since not excluding extreme values) or use raw 10-sec values?
-# #calculate median/avg concentration per day-hour
-# ptrak <- ptrak %>%
-#   group_by(date, hour, time_of_day, day, weekend, month, season, Location) %>%
-#   summarize(Conc_pt_cm3 = round(median(Conc_pt_cm3)))
-
-```
+### Plots 
 
 Plotting median hourly concentrations (all data included) at Beacon hill (BH) and 10th & Weller (10W).
 
@@ -316,7 +264,7 @@ Plotting median hourly concentrations (all data included) at Beacon hill (BH) an
 ptrak %>%
   ggplot(aes(x=hour, y=Conc_pt_cm3, group=hour, fill=time_of_day)) + 
   geom_boxplot() + 
-  facet_wrap(~Location) # + weekend
+  facet_wrap(~Location) # + time_of_week
 
 ptrak %>%
   ggplot(aes(x=day, y=Conc_pt_cm3)) + 
@@ -331,10 +279,48 @@ ptrak %>%
 
 ```
 
+### Models by time of day, time of week and season   
+#### LS linear Fit
+
+Weekend is lower than weekday; winter is higher than spring
 
 ```{r}
-#table of obsevations over time before/after weighing (e.g., % samples during day before/after weighting)
+#only spring (vs winter) is significant
+lm(Conc_pt_cm3 ~ time_of_day + time_of_week + season, data=ptrak) %>%
+  summary() 
+ 
+```
 
+#### ANOVA Variance Component Analyses for random models
+
+```{r}
+###### --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week) ?
+
+anovaVCA(Conc_pt_cm3 ~ time_of_day + time_of_week + season, 
+         Data=as.data.frame(ptrak))  
+
+```
+
+### Models by hour, day and month   
+#### LS linear fit   
+
+noon is higher than midnight; Sat & Sun are lower than Monday; April and June are lower than January 
+
+```{r}
+#sign: hour, Sat, Sun, Apr, Jun, Nov
+                      #factor(hour_night)
+lm(Conc_pt_cm3 ~ factor(hour) + day + month, data=ptrak) %>%
+  summary()
+
+```
+
+#### ANOVA Variance Component Analyses for random models
+
+Most of the variation is within groups, some from month, and a minor amount from hour and day.
+
+```{r}
+anovaVCA(Conc_pt_cm3 ~ hour + day + month, 
+         Data=as.data.frame(ptrak)) 
 
 ```
 
@@ -372,13 +358,13 @@ mm %>%
 
 ## Concentrations Over Time
 
-### --> add bigger PTRAK plots
-
 ```{r}
 #concentrations by time & season 
 mm %>%
-  ggplot(aes(x=month, y=value, fill=season)) + 
-  geom_boxplot(notch=T) + 
+  ggplot(aes(x=month, y=value)) + 
+  geom_boxplot(aes(fill=season)) + 
+  # error, doesn't print loess line correctly on x axis
+  #geom_smooth(aes(x=as.numeric(month)), se=F, method = "loess") +  
   facet_wrap(~variable, scales="free", ncol = 2) + 
   labs(title= "Concentrations over time",
        subtitle = paste0(start.date, " - ", end.date))  
@@ -386,22 +372,53 @@ mm %>%
 ```
 
 ```{r}
+##ptraks
+mm %>%
+  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=date, y=value)) + 
+  geom_point(aes(colour=season)) + 
+  geom_smooth(aes(x=date), se=F, method = "loess") +  
+  #formula = y ~ splines::bs(x, 4), 
+  #facet_wrap(~variable, scales="free", ncol = 2) + 
+  labs(title= "PTRAK Concentrations over time",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+
+```
+
+
+```{r}
 #concentrations by week day
 mm %>%
-  ggplot(aes(x=day, y=value, fill=weekend)) + 
-  geom_boxplot(notch=T) + 
+  ggplot(aes(x=day, y=value)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
   facet_wrap(~variable, scales="free", ncol = 3) + 
   labs(title= "Concentrations by week day",
        subtitle = paste0(start.date, " - ", end.date))  
  
 ```
 
+```{r}
+##ptraks
+mm %>%
+  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=day, y=value)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
+  labs(title= "PTRAK Concentrations by week day",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+```
+
 
 ```{r}
 #concentrations by hour and time of day
 mm %>%
-  ggplot(aes(x=hour, y=value, fill=time_of_day, group=hour)) + 
-  geom_boxplot(notch=T) + 
+  ggplot(aes(x=hour, y=value)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
+  geom_smooth(aes(x=hour), se=F, method = "loess") +  
   facet_wrap(~variable, scales="free", ncol = 3) + 
   labs(title= "Concentrations by hour",
        subtitle = paste0(start.date, " - ", end.date))  
@@ -409,7 +426,46 @@ mm %>%
  
 ```
 
-##Concentrations by Geographic Features 
+```{r}
+##ptraks
+mm %>%
+  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=hour, y=value)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
+  geom_smooth(aes(x=hour), se=F, method = "loess") +  
+  labs(title= "PTRAK Concentrations by hour",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+
+```
+
+## Concentrations by Location
+
+```{r}
+mm %>%
+  ggplot(aes(x=site_no, y=value)) + 
+  geom_boxplot(aes(group=site_no)) +  #, fill="green"
+  geom_smooth( se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  labs(title= "Concentrations by Site",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+```
+
+```{r}
+mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=site_no, y=value)) + 
+  geom_boxplot(aes(group=site_no), fill="green") + 
+  geom_smooth( se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  labs(title= "Concentrations by Site",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+```
+
+
+## Concentrations by Geographic Features 
 
 ### --> need geocovariates from Amanda/Data team 
 
@@ -423,6 +479,67 @@ mm %>%
 #elevation
 
 ```
+
+## UFP Models by time of day, time of week and season   
+### LS linear Fit
+
+AM and noon are higher than early AM; weekend is lower than weekday; summer is lower than spring; winter is higher than spring 
+
+```{r}
+   mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+lm(value ~ time_of_day + time_of_week + season, data=.) %>%
+  summary()
+
+```
+
+### ANOVA Variance Component Analyses for random models
+
+Most of the variation is "noise" within groups.
+
+```{r}
+###### --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week) ?
+   mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  as.data.frame() %>%
+  anovaVCA(value ~ time_of_day + time_of_week + season, 
+         Data=.)  
+
+```
+
+## Models by hour, day and month   
+### LS linear fit   
+
+most hours after 5 AM are higher than 5 AM; Tue, Fri and Sun are lower than Mon; Mar and April higher than Feb
+
+```{r}
+ mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+lm(value ~ factor(hour) + day + month, data=.) %>%
+  summary()
+
+```
+
+### ANOVA Variance Component Analyses for random models
+
+Most of the variation is within groups, some from month, and a minor amount from hour and day.
+
+```{r}
+  mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  as.data.frame() %>%
+ anovaVCA(value ~ hour + day + month, 
+         Data=.) 
+
+```
+
+
+
+
+
+
+
+
 
 
 ## Pollutant Correlations  

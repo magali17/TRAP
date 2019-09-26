@@ -1,0 +1,404 @@
+---
+title: "Beacon Hill 2001 UFP Data"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+editor_options:
+  chunk_output_type: console
+---
+
+##--> calcluate medians instead since using all data? 
+
+```{r, echo=F}
+ # --> Rmarkdown doesn't print to html variables from source()? myquantile_lower/upper
+
+```
+
+
+```{r, echo=F}
+# #Notes
+
+# * If there is no "P" in the name, the particle diameter is 0.__ µm.
+# V05 is the volume of .05 micrometer particles per cc. V1 through V7 (columns L-R) are for 0.1-0.7 µm particles   
+# *  What are columns S:AH, which have about 5 numbers after the “V”, and some have additional letters (e.g., ‘V83546, V1P0368)? - 0.835 microns and 1.0368 microns  (the P stands for “point”- I didn’t make that one up!)   
+# *  Particle size (e.g., 0.05 µm) is the lowest size limit of the bin 
+# 
+#missing data
+## The midnight data is missing due to daily calibration procedures at the Beacon Hill site.  Not sure about the July/December missing data.
+#
+# Kim et al. 2004:
+# * The sampling height was 4 m above ground (this is lower than our samples).
+# * Range: 20 - ____ nm
+# * ?? are bins counts within that bin (?Yes); or counts greater than that size?
+# 
+# Mobile Monitoring particle counter ranges
+# * PTRAK: 20 nm -  1 µm, screened: 50 nm - 1 µm
+# * DiscMini: 10-700 nm
+# * Nanoscan: 10-420 nm
+
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(readxl, dplyr, tidyverse, knitr, nlme, lme4, VCA)   
+
+#set plot theme
+theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+
+```
+
+```{r}
+#source common variables (e.g., percentil, time of day)
+source("A2-3_Var&Fns.R")
+
+## ??? ERROR in knit: myquantile_lower / _upper not recognized from source() file ????
+myquantile_lower <- 0.00
+myquantile_upper <- 1.00
+
+#2001 seasons 
+winter1 <- as.Date("2000-12-20")
+winter2 <- as.Date("2001-12-21")
+spring <- as.Date("2001-03-20")
+summer <- as.Date("2001-06-21")
+fall <- as.Date("2001-09-22")
+ 
+
+bh <- read_excel("~/Everything/School/PhD_UW/Dissertation/Write Up/1. Proposal/Aim 3. Hx UFP/Hx Data/Tim Larson/Beacon Hill size data.xls") 
+
+bh <- bh %>%
+  #only keep 2001 data; too little 2000 and 2002 data to calculate annual avg
+  filter(format(date, "%Y") == "2001") %>%
+  mutate(#month = as.numeric(format(date, "%m"))
+    #group night hours together (for plotting)
+    hour_night = ifelse(hour < min(early_am), hour + 24, hour),     
+    time_of_day = factor(ifelse(hour %in% early_am, "early_am",
+                 ifelse(hour %in% am, "am",
+                        ifelse(hour %in% noon, "noon",
+                               ifelse(hour %in% evening, "evening", "night")))),
+                 levels= c("early_am", "am", "noon", "evening", "night")),
+    day = factor(format(date, "%a"), 
+                 levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
+    time_of_week = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
+    month = factor(format(date, "%b"), 
+                    levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
+     season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
+                    ifelse(date >= spring & date < summer, "spring",
+                           ifelse(date >= summer & date < fall, "summer", "fall"))),
+                    levels = c("spring", "summer", "fall", "winter")),
+    
+    # assign temporal weights
+    # #upweigh surrounding months of missing times (no Jul or Dec data)
+    # month.wt = ifelse(month == 01 | month == 11 | month == 06 | month == 08, 1.5/12, 1/12),
+    # #upweight hr 1 and 23 since no hour 24
+    # hour.wt = ifelse(hour == 01 | hour == 23, 1.5/24, 1/24),
+    # month.hour.wt = month.wt*hour.wt
+    season.wt = 1/4,
+    day_of_week.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+    time_of_day.wt = ifelse(time_of_day == "early_am", length(early_am)/24,
+                            ifelse(time_of_day == "am", length(am)/24,
+                                   ifelse(time_of_day == "noon", length(noon)/24,
+                                          ifelse(time_of_day == "evening", length(evening)/24, length(night)/24)))),
+    season_week_hour.wt = season.wt*day_of_week.wt*time_of_day.wt
+    
+    ) 
+
+
+```
+
+```{r}
+# #check that sum of weights should be 1. # it is
+# weights <- bh %>% group_by(season, time_of_week, time_of_day) %>%
+#   select(season, time_of_week, time_of_day, season_week_hour.wt) %>%
+#   unique() %>%
+#   ungroup() %>%
+#   summarize(
+#     sum = sum(season_week_hour.wt)
+#   )
+
+# how many hourly values do we have? 
+##only have data for 10 months & 23 hours
+# unique(bh$month) #no July or December
+# unique(bh$hour) #no midnight
+
+##old: No data for July or December, or Midnight. Little data for months 1, 10, 11; more data for hour 23 than the rest. Thus, values need to be reweighted.
+
+# bh %>%
+#   ggplot(aes(x=hour, fill=time_of)) +  #fill= hour
+#   geom_bar() + 
+#   facet_wrap(~month, labeller = "label_both")
+
+```
+
+# Available Data
+
+```{r}
+bh %>%
+  ggplot(aes(x=time_of_day, fill= time_of_week)) +  #fill= hour
+  geom_bar() + 
+  facet_wrap(~season, labeller = "label_both")
+
+```
+
+
+ 
+```{r}
+# calculate total PNC per hourly 
+
+##convert vol conc (µm3/cm3 air) to num conc (particles/cm3 air)
+###make long format
+bh.long <-bh %>%
+  gather(V02:V2P4579, key = "diam_um_lower", value = "vol_conc_um3_cm3")
+
+bins <- unique(bh.long$diam_um_lower) 
+
+bh.long <- bh.long %>% 
+            #rename bin column names
+    mutate(diam_um_lower = as.numeric(ifelse(diam_um_lower %in% bins[1:19], 
+                    paste0("0.", substr(diam_um_lower, 2,7)),
+                    paste0(substr(diam_um_lower, 2,2), ".", substr(diam_um_lower, 4,7))))) 
+
+##Calculate mean diameter for each bin (bin sizes are for lower size cut)
+diam <- unique(bh.long$diam_um_lower)
+bh.long$diam_um_upper <- NA 
+
+for (i in 1:length(diam)) {
+  bh.long$diam_um_upper[bh.long$diam_um_lower == diam[i]] = diam[i+1]
+}
+
+bh.long$diam_um_center <- rowMeans(bh.long[c("diam_um_lower", "diam_um_upper")])
+ 
+ bh.long <- bh.long %>%
+   mutate(
+     #calculate particle volume per bin      
+     particle_vol_um3_particle = 4/3*pi*(diam_um_upper/2)^3,
+    # calculate number concentration
+    num_conc_particles_cm3 = vol_conc_um3_cm3 / particle_vol_um3_particle
+    ) 
+
+### get a total particle conc for a specific size range (# counts are for particles ">" __ um) & date
+bh.long <- bh.long %>%
+    # only keep bin counts for particle sizes similar to what we are collecting in mobile monitoring (PTRAK: 20 nm - 1µm; DiscMini: 10-700 nm; Nanoscan: 10-420 nm). Note: few particles are large, so this doens't make a large difference in the annual avg estimate.
+  ## counts similar to PTRAK
+  filter(diam_um_lower < 1.03680) %>%
+  #calculate avg total PNC for each hour
+  group_by(date, hour, hour_night, time_of_day, day, time_of_week, month,  season, season_week_hour.wt) %>%
+  summarize(
+            #total particle count for each day and hour
+            pnc_particles_cm3 = sum(num_conc_particles_cm3, na.rm = T)) %>%
+  ungroup()
+
+
+##drop high hourly readings (e.g., new years). this is similar to what will be done with MM data.
+
+bh.long <- bh.long %>%
+  filter(pnc_particles_cm3 > as.numeric(quantile(pnc_particles_cm3, myquantile_lower)) &
+           pnc_particles_cm3 < as.numeric(quantile(pnc_particles_cm3, myquantile_upper))
+         )
+  
+```
+
+Histogram of hourly UFP estimates used to estimate weighted annual average (trimmed lower and upper `r myquantile_lower*100`% of data).
+
+```{r}
+#plot w/o of extreme values
+bh.long %>%
+  ggplot(aes(x=pnc_particles_cm3)) +
+  geom_histogram()
+
+```
+
+
+# Weighted Annual Average UFP (#/cm3)   
+ 
+```{r}
+#take season-week-hour avg's 
+
+# #look to see if there are any extreme values. There are
+# bh.long %>%
+#   ggplot(aes(x=pnc_particles_cm3)) + 
+#   geom_histogram()  
+
+
+
+# take avg reading for each season-week-hour combination  
+  pnc <- bh.long %>% 
+  #group by hour, day & month first since some of these times are sampled more than others; later, take group averages (e.g., season, time_of_week, time_of_day)
+  group_by(hour, time_of_day, day, time_of_week, month, season, season_week_hour.wt) %>%
+    summarize(
+      # number of observations used to calculate each month-hour combination (all use 1-2 obs)
+      unique_hour_samples = n(),
+      # use na.rm=T b/c some values are missing when exclude extremely high values
+      avg_pnc_particles_cm3 = mean(pnc_particles_cm3, na.rm = T)
+      ) %>%
+  #now take avg of larger temporal groups
+  group_by(time_of_day, time_of_week, season, season_week_hour.wt) %>%
+    summarize(
+      # number of observations per month-hour combination 
+      N = n(),
+      # use na.rm=T b/c some values are missing when exclude extremely high values
+      avg_pnc_particles_cm3 = mean(avg_pnc_particles_cm3, na.rm = T)
+      )
+
+#check that weights add up to 1. They do
+#sum(pnc$season_week_hour.wt)
+  
+# when there is only 1 value for each season-week-hour combination, multiply its respective weight; sum all values to estimate annual avg for total PNC
+(pnc_annual_avg_particles_cm3 <- round(sum(pnc$avg_pnc_particles_cm3 * pnc$season_week_hour.wt))) 
+
+#annaul estimates
+## w/o lower/upper 5% values
+### 69,259: using upper bin size 
+### 91,876: using center bin size 
+### 130,647: using lower bin size 
+
+## 54,418: using center cut bin size and without extreme values > 90% 
+## 96,069: using center cut bin size and without extreme values > 99% 
+## ~102,534: using center cut bin size with all values included
+## ~146,514: using lower cut bin size (vol/particle is smaller than using center cut --> vol conc is divided by smaller # --> larger PNC)
+
+```
+
+# Temporal UFP patterns   
+## Plots    
+
+### -->  add adjusted means from LS fits to boxplots? 
+
+```{r}
+#season/month
+bh.long %>%
+  ggplot(aes(x=season, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=month)) + 
+  geom_smooth(aes(x=as.numeric(season)), se=F, formula = y ~ splines::bs(x, 4), method = lm) + 
+  labs(title = "loess fit to month")
+  
+bh.long %>%
+  ggplot(aes(x=month, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=season)) + 
+  geom_smooth(aes(x=as.numeric(month)), se=F, formula = y ~ splines::bs(x, 4), method = lm) + 
+  labs(title = "loess fit to month")
+ 
+#week/time_of_week
+bh.long %>%
+  ggplot(aes(x=day, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, formula = y ~ splines::bs(x, 5), method = lm) 
+
+
+#hour/time_of_day
+bh.long %>%
+  ggplot(aes(x=hour, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
+  geom_smooth(aes(x=as.numeric(hour)), se=F) 
+
+bh.long %>%
+  ggplot(aes(x=hour_night, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour_night)) + 
+  geom_smooth(aes(x=as.numeric(hour_night)), se=F) + 
+  labs(title = paste0("Hours < ", min(early_am), " renumbered to group 'night' hours"))
+
+# bh.long %>%
+#   ggplot(aes(x=time_of_day, y=pnc_particles_cm3)) + 
+#   geom_boxplot(aes(fill=factor(hour_night))) + 
+#   geom_smooth(aes(x=as.numeric(time_of_day)), se=F, formula = y ~ splines::bs(x, 4), method = lm)    
+
+  
+```
+
+## Models by time of day, time of week and season
+
+Similar to mobile monitoring approach.
+
+### LS linear Fit
+
+Only spring is significant. 
+
+```{r}
+#only spring (vs winter) is significant
+lm(avg_pnc_particles_cm3 ~ time_of_day + time_of_week + season, data=pnc) %>%
+  summary()
+
+```
+
+### ANOVA Variance Component Analyses for random models
+
+Most of the variation is random; 1/3 is from season; practically none from time of day or time of week (?)
+
+## --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week)
+
+```{r}
+# ? fits random intercepts for all covariates? 
+
+anovaVCA(avg_pnc_particles_cm3 ~ time_of_day + time_of_week + season, 
+         Data=as.data.frame(pnc))  
+
+```
+
+## Models by hour, day and month
+
+### LS linear fit 
+
+Tue, Sat and Sun are lower than Monday; June is lower than January.
+
+```{r}
+#sign: hour, Sat, Sun, Apr, Jun, Nov
+lm(pnc_particles_cm3 ~ factor(hour_night) + day + month, data=bh.long) %>%
+  summary()
+
+```
+
+### ANOVA Variance Component Analyses for random models
+
+Most of the variation is random, a small amount from month and day.
+
+Error in this model is larger than for time of day, time of week and season model. 
+
+```{r}
+anovaVCA(pnc_particles_cm3 ~ hour + day + month, 
+         Data=as.data.frame(bh.long)) 
+
+```
+
+
+# Mobile Monitoring observations at Beacon Hill  
+
+Mean UFP (#/cm3) from 2/22 - 8/06.
+
+```{r}
+mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190806.rda"))
+
+bh.mm <- mm.wide %>%
+  filter(aqs_location == "Beacon Hill") %>%
+  select(arrival_time, date:season, ufp_pt_noscreen_ct_cm3) %>%
+  drop_na(ufp_pt_noscreen_ct_cm3)
+
+round(mean(bh.mm$ufp_pt_noscreen_ct_cm3)) 
+
+# 4,929 estimate for Beacon Hill through 7/20/19 from PTRAK no screen
+
+```
+
+UFP observations 
+
+```{r}
+bh.mm %>%
+  ggplot(aes(x=ufp_pt_noscreen_ct_cm3)) + 
+  geom_histogram() 
+
+```
+
+  

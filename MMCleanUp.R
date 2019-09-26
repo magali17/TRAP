@@ -1,4 +1,7 @@
-#script to: 1) summarize high temporal resolution mobile monitoring data into stop averages (reduce file size); 2) clean up overnight data from AQS sites
+#script to: 
+##1) summarize high temporal resolution mobile monitoring data into stop MEDIANS (reduce file size); data are not trimmed as of  9/19/19
+
+##2) clean up overnight data from AQS sites, calculate median hourly concentrations
 
 ##########################################################################################
 # Clear workspace of all objects and unload all extra (non-base) packages
@@ -10,7 +13,7 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 }
 
 # load packages 
-pacman::p_load(dplyr, tidyverse, chron, knitr)  #chronn: is.holiday, is.weekend
+pacman::p_load(dplyr, tidyverse, chron, knitr)   
 
 # source global variables & functions
 source("A2-3_Var&Fns.R")
@@ -22,7 +25,7 @@ source("A2-3_Var&Fns.R")
 ############################ read in data ################################################
 
 #mobile monitoring 
-mm_full <- readRDS("Data/MobileMonitoring/all_data_190806.rda") %>%
+mm_full <- readRDS("Data/MobileMonitoring/all_data_190917.rda") %>%
   #drop unwanted variable values to reduce data size
   filter(!variable %in% c("gps_lat",
                           "gps_long",
@@ -50,13 +53,23 @@ mm_full <- mm_full %>%
                                               instrument_id)))
   )
 
+quant_limit_upper <- as.numeric(quantile(mm_full$value, myquantile_upper, na.rm = T))
+quant_limit_lower <- as.numeric(quantile(mm_full$value, myquantile_lower, na.rm = T))
+
 mm_full <- mm_full %>%
   group_by(variable, instrument_id) %>%
   #remove top 1% of values for each pollutant and instrument before taking avg
-  mutate(value = ifelse(value < quantile(value, myquantile, na.rm = T), value, NA)) %>%
-  #drop rows w/ NA "values"
-  drop_na(value) %>%
+  filter(value > as.numeric(quantile(value, myquantile_lower, na.rm = T)) & 
+           value < as.numeric(quantile(value, myquantile_upper, na.rm = T))) %>%
+     # mutate(value = ifelse(value < quantile(value, myquantile_upper, na.rm = T), value, NA)) %>%
+  # #drop rows w/ NA "values"
+#   drop_na(value) %>%
   ungroup()
+
+mm_full2 %>%
+  ggplot(aes(x=value)) + 
+  geom_histogram() + 
+  facet_wrap(~variable, scales="free")
 
 #take avg of each stop to REDUCE FILE SIZE
 mm <- mm_full %>%
@@ -65,18 +78,10 @@ mm <- mm_full %>%
   mutate(arrival_time = min(time)) %>%
   select(-time) %>%
   
-  #take avg of each unique site stop for each instrument
+  #take avg/median of each unique site stop for each instrument
   group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, duration_sec, arrival_time, instrument_id, variable, site_no) %>%
-  summarize(value = mean(value, na.rm = T)) %>%
+  summarize(value = median(value, na.rm = T)) %>%
   ungroup()
-
-#   #? ALTERNATIVE: FOR NOW, CALCULATE weighted 3/4 YR AVG, weigh by season (see BeaconHill2001.Rmd)
-# group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, duration_sec, arrival_time, instrument_id, variable, site_no               ) %>%
-#   summarize(value = mean(value, na.rm = T)) %>%
-#   ungroup()
-
-
-
 
 
 #give each driving day a unique ID
@@ -116,13 +121,15 @@ mm <- mm %>% mutate(
                        levels= c("early_am", "am", "noon", "evening", "night")
   ),
   day = factor(format(arrival_time, "%a"), levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-  weekend = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
+  time_of_week = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
   month = factor(format(arrival_time, "%b"), levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
   season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
                          ifelse(date >= spring & date < summer, "spring",
                                 ifelse(date >= summer & date < fall, "summer", "fall"))),
-                  levels = c("winter", "spring", "summer", "fall"))
+                  levels = c("spring", "summer", "fall", "winter"))
 )
+
+
 
 ############################ make wide format ############################################
 
@@ -134,7 +141,7 @@ mm.wide <- mm %>%
   #group_by arrival_time first to order by time
   group_by(arrival_time, runname, site_id, variable, 
            #variables not immediately necessary
-           route, aqs_id, aqs_location, site_long, site_lat, duration_sec, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, weekend, month, season) %>% 
+           route, aqs_id, aqs_location, site_long, site_lat, duration_sec, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season) %>% 
   #spread() fn has issues when have dupliate instruments taking readings at same time - so take avg of both the readings
   summarize(value = mean(value)) %>%
   ungroup() %>%
@@ -142,8 +149,8 @@ mm.wide <- mm %>%
 
 ############################ save data for quicker access ################################
 
-# saveRDS(mm, file.path("Data", "MobileMonitoring", "mm_190806.rda"))
-# saveRDS(mm.wide, file.path("Data", "MobileMonitoring", "mm.wide_190806.rda"))  
+# saveRDS(mm, file.path("Data", "MobileMonitoring", "mm_190917.rda"))
+# saveRDS(mm.wide, file.path("Data", "MobileMonitoring", "mm.wide_190917.rda"))
 
 ##########################################################################################
 ########################### 2. overnight collocations ####################################
@@ -164,33 +171,42 @@ ptrak <- rbind(Ptrak.10W, Ptrak.BH) %>%
   mutate(
     date_time_local = as.POSIXct(paste(Date, Time), format="%m/%d/%y %H:%M:%S", tz = "America/Los_Angeles"),
     #convert to PST (this creates a character vector), convert back to date-time format
-    date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")), 
-    date = as.Date(date_time_pst),
-    hour = as.numeric(format(date_time_pst, format="%H")),
+    #date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")), 
+    date = as.Date(date_time_local),
+    hour = as.numeric(format(date_time_local, format="%H")),
+    #hour_local = as.numeric(format(date_time_local, format="%H")),
     time_of_day = factor(ifelse(hour %in% early_am, "early_am",
                                 ifelse(hour %in% am, "am",
                                        ifelse(hour %in% noon, "noon",
                                               ifelse(hour %in% evening, "evening", "night")))),
                          levels= c("early_am", "am", "noon", "evening", "night")),
-    day = factor(format(date_time_pst, "%a"), 
+    day = factor(format(date_time_local, "%a"), 
                  levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-    weekend = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
-    #month = as.numeric(format(date_time_pst, format="%m")),
-    month = factor(format(date_time_pst, "%b"), 
+    time_of_week = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
+    #month = as.numeric(format(date_time_local, format="%m")),
+    month = factor(format(date_time_local, "%b"), 
                    levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
     season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
                            ifelse(date >= spring & date < summer, "spring",
                                   ifelse(date >= summer & date < fall, "summer", "fall"))),
-                    levels = c("winter", "spring", "summer", "fall"))
+                    levels = c("spring", "summer", "fall", "winter"))
   ) %>%
-  select(date_time_pst, date, hour, time_of_day, day, weekend, month, season, Conc_pt_cm3, Location)
+  # take out extreme low and high values
+  filter(Conc_pt_cm3 > as.numeric(quantile(Conc_pt_cm3, myquantile_lower, na.rm = T)) &
+           Conc_pt_cm3 < as.numeric(quantile(Conc_pt_cm3, myquantile_upper, na.rm = T))) %>%
+  select(date_time_local, date, hour, time_of_day, day, time_of_week, month, season, Conc_pt_cm3, Location) #hour_local
 
 
-# ??? take median (since not excluding extreme values) or use raw 10-sec values?
-#calculate median/avg concentration per day-hour
+# take median (since not excluding extreme values) concentration of 10-sec day-hour values
 ptrak <- ptrak %>%
-  group_by(date, hour, time_of_day, day, weekend, month, season, Location) %>%
+  group_by(date, hour, time_of_day, day, time_of_week, month, season, Location) %>% #hour_local
   summarize(Conc_pt_cm3 = round(median(Conc_pt_cm3)))
+
+# #before/after daylight savings? 
+# ptrak <- ptrak %>%
+#   mutate(DaylightSavings = date > "2019-03-10" & date < "2019-11-03")
 
 ############################ save data for quicker access ################################
 #saveRDS(ptrak, file.path("Data", "MobileMonitoring", "ptrak_190628.rda"))
+
+ 

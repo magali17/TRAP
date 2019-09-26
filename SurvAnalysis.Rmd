@@ -1,0 +1,276 @@
+---
+title: "Survival Analysis"
+author: "Magali Blanco"
+date: "9/6/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r, echo=F}
+#NOTES
+# see BIOST 537 Ch 5 Lecture, slide 33/57  
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(survival, haven, tidyverse, knitr)   #dplyr, flexsurv, survMisc, msm
+
+#minimum percent of months required for us to consider a prediction "valid"
+min.pct <- 0.95
+
+#To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
+dem0 <- read_sas("~/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat", 
+    NULL)
+
+#select relevant columns, e.g. 10-yr estimates
+dem <- dem0 %>%
+  select(
+    study_id,
+    birthdt,
+    intakedt,
+    last_predx_visit,
+    #birthcohort,
+    age,
+    onsetage,
+    #last_predx_visit, #??
+    anydementia, # ?request "NINDX" (probably/possible AD) ?
+    dsmivdx,
+    
+    #M1, 6, sensitivity analyses
+    exposure_year:exp_mos_coverage20_yr, 
+    
+    #M2
+    apoe,
+    male,
+    education, degree,
+    # --> need median household income
+    race,
+    #birth_cohort, 
+    
+    #M3
+    smoke, pack_years, 
+    exercise, exercise_reg,
+    
+    #M4a
+    Hypertension, Diabetes,
+    CV_DIS, #indicates whether subject has ever reported having stroke, TIA, or CEA.
+    Heart_Dis, #indicates whether subject has ever reported having an MI, Angina, CABG, or Angioplasty.
+    bmi,
+    
+    #M4b
+    CASI_SC, casi_valid
+    ) %>%
+  #create new variables
+  mutate(
+    age_intake = floor(as.numeric(intakedt - birthdt)/365),
+    
+    # --> ?? fix anydementia indicator since many have NA's? Should these be O's?
+    anydementia = ifelse(is.na(anydementia), 0, anydementia),
+    # ??
+    age_at_last_visit = age,
+    #traditional definition used by ACT
+    age_act = ifelse(anydementia==1, onsetage, age_at_last_visit),
+    
+     #Time-varying covariates
+     ## ? is the start/end time the same since this is calculated yearly??
+      age_at_exposure_year = age_at_exposure, 
+      # agestartexpo = age_at_exposure_year - 1
+    
+    ### ? need to change age_at_last_visit to age_act for sensitivity analyses ?
+    dementia_now = ifelse(age_at_exposure_year < age_at_last_visit, 0, anydementia),
+    #clean up variables
+    ## filter out invalid casi_sc scores (e.g., 666.6 - 999.9)
+    casi = ifelse(casi_valid ==1, CASI_SC, NA),
+    ## create AD variable
+    ad_dsmivdx = ifelse(dsmivdx == 1, dsmivdx, NA)
+    
+  ) %>%
+  #drop relabeled/edited variables
+  select(
+    -age, 
+    -age_at_exposure,
+    -casi_valid, -CASI_SC,
+    -dsmivdx
+  ) 
+
+dem <- dem %>%
+  filter(
+  #drop PM10 predictions
+  pollutant %in% c("no2", "pm25"),
+  #only keep observations with predictions at at least 95% of the months in the 10-year period
+  #exp_mos_coverage10_yr > 0.95
+  ) %>%
+  select(
+    study_id,
+    birthdt,
+    intakedt,
+    last_predx_visit,
+    
+    age_intake,
+    age_at_last_visit,
+    age_act,
+    
+    anydementia, #not using this for TVC?
+    ad_dsmivdx,
+    dementia_now,
+    
+    age_at_exposure_year,
+    exposure_year:bmi, 
+    casi
+    
+  )
+
+# #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
+# prop.table(table(dem0$exp_mos_coverage10_yr>0.95)) %>% round(2)
+
+```
+
+Table of baseline characteristics for individuals with at least `r min.pct*100`% of the months requied to estimate predictions (114/120 months for 10-year avg).
+
+```{r baseline characteristics}
+dem.bsl <- dem %>%
+  #keep predictions from baseline. age_at_exposure_year may be < age_intake if ...? Jan 1st
+  #filter(age_at_exposure_year <= age_intake)
+  group_by(study_id, pollutant) %>%
+  filter(
+  #age_at_exposure may be the same or 1 yr younger than age_intake at baseline
+  age_at_exposure_year <= age_intake,  
+  #take first reading (baseline reading)
+  age_at_exposure_year == min(age_at_exposure_year),
+  
+  #only look at baseline predictions where >= 95% of the month data exists 
+  exp_mos_coverage10_yr >= min.pct) %>%
+  ungroup() %>%
+  drop_na(exp_avg10_yr)
+
+#calculate median baseline pollutant levels
+median.bsl.expo <- dem.bsl %>% 
+  group_by(pollutant) %>%
+  summarize(
+    median_conc = median(exp_avg10_yr)
+  )
+
+kable(median.bsl.expo, digits = 0, caption = "Median NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline")
+
+median.bsl.no2 <- median.bsl.expo %>%
+  filter(pollutant == "no2") %>%
+  select(median_conc) %>%
+  as.numeric() %>% round()
+
+median.bsl.pm25 <- median.bsl.expo %>%
+  filter(pollutant == "pm25") %>%
+  select(median_conc) %>%
+  as.numeric() %>% round()
+
+#variable for whether baseline concentrations are above/below median concentration
+dem.bsl <- dem.bsl %>%
+  mutate(
+    no2_median = ifelse(exp_avg10_yr >= median.bsl.no2, "above", "below"),
+    pm25_median = ifelse(exp_avg10_yr >= median.bsl.pm25, "above", "below")
+    )
+
+#
+(t1a <- dem.bsl %>%
+  group_by(pollutant) %>%
+  summarize(
+  N = n(),
+  age_entry_median = median(age_intake),
+  age_entry_iqr = IQR(age_intake),
+  male_n = sum(male),
+  male_pct = round(male_n/N*100, 1),
+  race_known_n = sum(!is.na(race)),
+  race_nonwhite_n = sum(race !=1, na.rm = T),
+  race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
+  edu_known_n = sum(!is.na(degree)),
+  edu_beyond_hs_n = sum(degree >2, na.rm = T),
+  edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
+  #--> update w/ correct income variable
+  # income_median = median(income),
+  # income_iqr = IQR(income),
+  apoe_known_n = sum(!is.na(apoe)),
+  apoe_carrier_n = sum(apoe, na.rm=T),
+  apoe_carrier_pct = apoe_carrier_n/apoe_known_n,
+  smoke_known_n = sum(!is.na(smoke)),
+  smoke_never_n = sum(smoke==0, na.rm = T),
+  smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
+  smoke_former_n = sum(smoke==1, na.rm = T),
+  smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
+  smoke_current_n = sum(smoke==2, na.rm = T),
+  smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
+  exercise_median = median(exercise, na.rm = T),
+  exercise_iqr = IQR(exercise, na.rm = T),
+  exercise_regular_known_n = sum(!is.na(exercise_reg)),
+  exercise_regular_n = sum(exercise_reg==1, na.rm = T),
+  exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1)
+  
+  )  
+
+  )
+
+
+#paste N & pcts together
+
+
+# t(t1a) %>% as.data.frame()
+```
+
+
+
+```{r  }
+
+#M1 (reduced): Age (time axis), NO2 (time-varying)
+
+ 
+
+
+
+
+
+```
+
+```{r PH Cox Model}
+# create survival object w/ TVC dataset, accounting for "delayed entry"
+# s.stanford.tvc = with(stanford.tvc, Surv(tstart,tstop,death))
+
+#PH Cox model
+# summary(coxph(s.stanford.tvc~trt, data=stanford.tvc))
+
+## stratification
+#m1d <- coxph(surv.ccg ~ rx + wbc + age + strata(institution), data=ccg)
+
+## ? CIs
+#survfit.prison0 <- survfit(surv.prison0~1, data=prison0, conf.type="log-log")
+
+##ties
+# coxph(s.mp ~ tx, data=mp, ties="exact")
+
+```
+
+
+```{r lincom}
+# estimating SE & CIs for linear combinations of coefficients
+# m2c <- coxph(surv.addicts ~ dose*prison + strata(clinic), data=addicts)
+# #summary(m2c)
+# 
+# est <- as.numeric(exp(60*coef(m2c)["dose"] + 1*coef(m2c)["prison"] + 100*coef(m2c)["dose:prison"]))
+# 
+# se <- deltamethod(g = ~exp(60*x1 + x2 + 100*x3),
+#                   mean = coef(m2c)[c("dose", "prison", "dose:prison")],
+#                   cov= vcov(m2c)[c("dose", "prison", "dose:prison"), 
+#                                  c("dose", "prison", "dose:prison")],
+#                   ses = T) 
+# 
+# ci = as.numeric(c(est-se*1.96, est+ se*1.96))
+
+```
+

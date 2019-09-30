@@ -33,8 +33,8 @@ pacman::p_load(survival, haven, tidyverse, knitr)   #dplyr, flexsurv, survMisc, 
 min.pct <- 0.95
 
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
-dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
-
+dem0.0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
+dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001_2.sas7bdat"), NULL)
  
 
 #select relevant columns, e.g. 10-yr estimates
@@ -43,12 +43,11 @@ dem <- dem0 %>%
     study_id,
     birthdt,
     intakedt,
-    last_predx_visit,
-    #birthcohort,
-    age,
+    last_visit,
     onsetage,
     anydementia,  
-    dsmivdx,
+    #dsmivdx,
+    nindx,
     
     #M1, 6, sensitivity analyses
     exposure_year:exp_mos_coverage20_yr, 
@@ -57,9 +56,8 @@ dem <- dem0 %>%
     apoe,
     male,
     education, degree,
-    # --> need median household income
+    tr_med_inc_hshld, 
     race,
-    #birth_cohort, 
     
     #M3
     smoke, pack_years, 
@@ -78,13 +76,13 @@ dem <- dem0 %>%
   mutate(
     age_intake = floor(as.numeric(intakedt - birthdt)/365),
     # ?? recalculate? Think "age" is rounded  #? is last_predx_visit actually the 2nd to last visit?
-    age_at_last_visit = floor(as.numeric(last_predx_visit - birthdt)/365),
+    age_last_visit = floor(as.numeric(last_visit - birthdt)/365),
     #traditional definition used by ACT
-    age_act = ifelse(!is.na(onsetage), onsetage, age_at_last_visit),
+    age_act = ifelse(!is.na(onsetage), onsetage, age_last_visit),
     
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
-    dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
+    #dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
     ## create AD variable
     #ad_dsmivdx = ifelse(dsmivdx == 1, dsmivdx, NA),
      #Time-varying covariates
@@ -93,9 +91,9 @@ dem <- dem0 %>%
     #"start" of the exposure period should be < "end" of exposure period for time-varying analysis
     age_at_start_exposure_year = age_at_end_exposure_year-1,
     
-    ### ? need to change age_at_last_visit to age_act for sensitivity analyses ?
+    ### ? need to change age_last_visit to age_act for sensitivity analyses ?
     ## --> EDIT 
-    dementia_now = ifelse(age_at_end_exposure_year < age_at_last_visit, 0, anydementia),
+    dementia_now = ifelse(age_at_end_exposure_year < age_last_visit, 0, anydementia),
     #clean up variables
     ## filter out invalid casi_sc scores (e.g., 666.6 - 999.9)
     casi = ifelse(casi_valid ==1, CASI_SC, NA)
@@ -127,7 +125,7 @@ dem <- dem %>%
     last_predx_visit,
     
     age_intake,
-    age_at_last_visit,
+    age_last_visit,
     onsetage, #delete
     age_act,
     

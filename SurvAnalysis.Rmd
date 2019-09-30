@@ -9,6 +9,10 @@ editor_options:
 ```{r, echo=F}
 #NOTES
 # see BIOST 537 Ch 5 Lecture, slide 33/57  
+# --> use package to calc #s & %s instead of by hand? 
+
+#sensitivity analyses
+##when using ONSET AGE, need to drop last year of exposure estimates (associated w/ year of last visit)? filter(age_at_end_exposure_year <= age_act) & dementia_now = ifelse(age_at_end_exposure_year < age_act, 0, anydementia),
 
 ```
 
@@ -29,10 +33,9 @@ pacman::p_load(survival, haven, tidyverse, knitr)   #dplyr, flexsurv, survMisc, 
 min.pct <- 0.95
 
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
-dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), 
-    NULL)
+dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
 
-#testING
+ 
 
 #select relevant columns, e.g. 10-yr estimates
 dem <- dem0 %>%
@@ -44,8 +47,7 @@ dem <- dem0 %>%
     #birthcohort,
     age,
     onsetage,
-    #last_predx_visit, #??
-    anydementia, # ?request "NINDX" (probably/possible AD) ?
+    anydementia,  
     dsmivdx,
     
     #M1, 6, sensitivity analyses
@@ -75,42 +77,48 @@ dem <- dem0 %>%
   #create new variables
   mutate(
     age_intake = floor(as.numeric(intakedt - birthdt)/365),
-    
-    # --> ?? fix anydementia indicator since many have NA's? Should these be O's?
-    anydementia = ifelse(is.na(anydementia), 0, anydementia),
-    # ??
-    age_at_last_visit = age,
+    # ?? recalculate? Think "age" is rounded  #? is last_predx_visit actually the 2nd to last visit?
+    age_at_last_visit = floor(as.numeric(last_predx_visit - birthdt)/365),
     #traditional definition used by ACT
-    age_act = ifelse(anydementia==1, onsetage, age_at_last_visit),
+    age_act = ifelse(!is.na(onsetage), onsetage, age_at_last_visit),
     
+    # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
+    anydementia = ifelse(is.na(anydementia), 0, anydementia),
+    dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
+    ## create AD variable
+    #ad_dsmivdx = ifelse(dsmivdx == 1, dsmivdx, NA),
      #Time-varying covariates
-     ## ? is the start/end time the same since this is calculated yearly??
-      age_at_exposure_year = age_at_exposure, 
-      # agestartexpo = age_at_exposure_year - 1
+      #recalculate age_at_exposure to be age at ppl's birthdays. this prevents age_at_exposure_year from being smaller than age_intake at times
+      age_at_end_exposure_year = floor(as.numeric(as.Date(paste0(exposure_year, "-", format(birthdt, "%m-%d"))) - birthdt)/365), 
+    #"start" of the exposure period should be < "end" of exposure period for time-varying analysis
+    age_at_start_exposure_year = age_at_end_exposure_year-1,
     
     ### ? need to change age_at_last_visit to age_act for sensitivity analyses ?
-    dementia_now = ifelse(age_at_exposure_year < age_at_last_visit, 0, anydementia),
+    ## --> EDIT 
+    dementia_now = ifelse(age_at_end_exposure_year < age_at_last_visit, 0, anydementia),
     #clean up variables
     ## filter out invalid casi_sc scores (e.g., 666.6 - 999.9)
-    casi = ifelse(casi_valid ==1, CASI_SC, NA),
-    ## create AD variable
-    ad_dsmivdx = ifelse(dsmivdx == 1, dsmivdx, NA)
+    casi = ifelse(casi_valid ==1, CASI_SC, NA)
+    
     
   ) %>%
   #drop relabeled/edited variables
   select(
-    -age, 
+    #-age, 
     -age_at_exposure,
     -casi_valid, -CASI_SC,
-    -dsmivdx
+    #-dsmivdx
   ) 
+
+# #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
+# prop.table(table(dem0$exp_mos_coverage10_yr>0.95)) %>% round(2)
 
 dem <- dem %>%
   filter(
-  #drop PM10 predictions
-  pollutant %in% c("no2", "pm25"),
-  #only keep observations with predictions at at least 95% of the months in the 10-year period
-  #exp_mos_coverage10_yr > 0.95
+    #drop PM10 predictions
+    pollutant %in% c("no2", "pm25"),
+    #only keep observations with predictions at at least 95% of the months in the 10-year period
+    exp_mos_coverage10_yr > 0.95
   ) %>%
   select(
     study_id,
@@ -120,24 +128,28 @@ dem <- dem %>%
     
     age_intake,
     age_at_last_visit,
+    onsetage, #delete
     age_act,
     
     anydementia, #not using this for TVC?
-    ad_dsmivdx,
+    dsmivdx,
+    #ad_dsmivdx,
     dementia_now,
     
-    age_at_exposure_year,
+    age_at_start_exposure_year,
+    age_at_end_exposure_year,
     exposure_year:bmi, 
     casi
     
   )
 
-# #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
-# prop.table(table(dem0$exp_mos_coverage10_yr>0.95)) %>% round(2)
-
 ```
 
-Table of baseline characteristics for individuals with at least `r min.pct*100`% of the months requied to estimate predictions (114/120 months for 10-year avg).
+#Descriptive Statistics 
+
+Statistics calculated for individuals with at least `r min.pct*100`% of the months requied to estimate predictions (114/120 months for 10-year avg).
+
+Median NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline.
 
 ```{r baseline characteristics}
 dem.bsl <- dem %>%
@@ -145,118 +157,326 @@ dem.bsl <- dem %>%
   #filter(age_at_exposure_year <= age_intake)
   group_by(study_id, pollutant) %>%
   filter(
-  #age_at_exposure may be the same or 1 yr younger than age_intake at baseline
-  age_at_exposure_year <= age_intake,  
-  #take first reading (baseline reading)
-  age_at_exposure_year == min(age_at_exposure_year),
-  
-  #only look at baseline predictions where >= 95% of the month data exists 
-  exp_mos_coverage10_yr >= min.pct) %>%
+    #age_at_exposure may be the same or 1 yr younger than age_intake at baseline
+    age_at_exposure_year <= age_intake,  
+    #take first reading (baseline reading)
+    age_at_exposure_year == min(age_at_exposure_year)) %>%
+    
+    #alredy did this above. #only look at baseline predictions where >= 95% of the month data exists 
+    #exp_mos_coverage10_yr >= min.pct) %>%
   ungroup() %>%
   drop_na(exp_avg10_yr)
 
 #calculate median baseline pollutant levels
-median.bsl.expo <- dem.bsl %>% 
+bsl.expo.distrib <- dem.bsl %>% 
   group_by(pollutant) %>%
+  drop_na(exp_avg10_yr) %>%
   summarize(
-    median_conc = median(exp_avg10_yr)
+    N = n(),
+    median = median(exp_avg10_yr),
+    iqr = IQR(exp_avg10_yr),
+    mean = mean(exp_avg10_yr),
+    sd = sd(exp_avg10_yr),
+    min = min(exp_avg10_yr),
+    max = max(exp_avg10_yr)
   )
 
-kable(median.bsl.expo, digits = 0, caption = "Median NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline")
+kable(bsl.expo.distrib, digits = 0, caption = "")
 
-median.bsl.no2 <- median.bsl.expo %>%
+median.bsl.no2 <- bsl.expo.distrib %>%
   filter(pollutant == "no2") %>%
-  select(median_conc) %>%
+  select(median) %>%
   as.numeric() %>% round()
 
-median.bsl.pm25 <- median.bsl.expo %>%
+median.bsl.pm25 <- bsl.expo.distrib %>%
   filter(pollutant == "pm25") %>%
-  select(median_conc) %>%
+  select(median) %>%
   as.numeric() %>% round()
 
 #variable for whether baseline concentrations are above/below median concentration
 dem.bsl <- dem.bsl %>%
   mutate(
-    no2_median = ifelse(exp_avg10_yr >= median.bsl.no2, "above", "below"),
-    pm25_median = ifelse(exp_avg10_yr >= median.bsl.pm25, "above", "below")
+    no2_median = ifelse(pollutant == "no2" & exp_avg10_yr >= median.bsl.no2, "above", 
+                         ifelse(pollutant == "no2" & exp_avg10_yr < median.bsl.no2,"below", NA)),
+    pm25_median = ifelse(pollutant == "pm25" & exp_avg10_yr >= median.bsl.pm25, "above", 
+                         ifelse(pollutant == "pm25" & exp_avg10_yr < median.bsl.pm25,"below", NA))
     )
 
-#
-(t1a <- dem.bsl %>%
+
+```
+
+Participant characteristics based on 10-year average pollutant exposure at baseline. Percents are calculated based on the number of individuals with available data (missing values removed).
+
+```{r}
+#All
+t1a <- dem.bsl %>%
   group_by(pollutant) %>%
   summarize(
-  N = n(),
-  age_entry_median = median(age_intake),
-  age_entry_iqr = IQR(age_intake),
-  male_n = sum(male),
-  male_pct = round(male_n/N*100, 1),
-  race_known_n = sum(!is.na(race)),
-  race_nonwhite_n = sum(race !=1, na.rm = T),
-  race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
-  edu_known_n = sum(!is.na(degree)),
-  edu_beyond_hs_n = sum(degree >2, na.rm = T),
-  edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
-  #--> update w/ correct income variable
-  # income_median = median(income),
-  # income_iqr = IQR(income),
-  apoe_known_n = sum(!is.na(apoe)),
-  apoe_carrier_n = sum(apoe, na.rm=T),
-  apoe_carrier_pct = apoe_carrier_n/apoe_known_n,
-  smoke_known_n = sum(!is.na(smoke)),
-  smoke_never_n = sum(smoke==0, na.rm = T),
-  smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
-  smoke_former_n = sum(smoke==1, na.rm = T),
-  smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
-  smoke_current_n = sum(smoke==2, na.rm = T),
-  smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
-  exercise_median = median(exercise, na.rm = T),
-  exercise_iqr = IQR(exercise, na.rm = T),
-  exercise_regular_known_n = sum(!is.na(exercise_reg)),
-  exercise_regular_n = sum(exercise_reg==1, na.rm = T),
-  exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1)
+    no2_median = "all",
+    pm25_median = "all",
+    N = n(),
+    age_entry_median = median(age_intake),
+    age_entry_iqr = round(IQR(age_intake), 1),
+    male_n = sum(male),
+    male_pct = round(male_n/N*100, 1),
+    race_known_n = sum(!is.na(race)),
+    race_nonwhite_n = sum(race !=1, na.rm = T),
+    race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
+    edu_known_n = sum(!is.na(degree)),
+    edu_beyond_hs_n = sum(degree >2, na.rm = T),
+    edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
+    #--> update w/ correct income variable
+    # income_median = median(income),
+    # income_iqr = IQR(income),
+    apoe_known_n = sum(!is.na(apoe)),
+    apoe_carrier_n = sum(apoe, na.rm=T),
+    apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n, 1),
+    smoke_known_n = sum(!is.na(smoke)),
+    smoke_never_n = sum(smoke==0, na.rm = T),
+    smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
+    smoke_former_n = sum(smoke==1, na.rm = T),
+    smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
+    smoke_current_n = sum(smoke==2, na.rm = T),
+    smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
+    exercise_median = median(exercise, na.rm = T),
+    exercise_iqr = round(IQR(exercise, na.rm = T), 1),
+    exercise_regular_known_n = sum(!is.na(exercise_reg)),
+    exercise_regular_n = sum(exercise_reg==1, na.rm = T),
+    exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1),
+    bmi_median = median(bmi, na.rm = T),
+    bmi_iqr = round(IQR(bmi, na.rm = T), 1),
+    hypertension_known_n = sum(!is.na(Hypertension)),
+    hypertension_n = sum(Hypertension == 1, na.rm=T),
+    hypertension_pct = round(hypertension_n/hypertension_known_n*100, 1),
+    diabetes_known_n = sum(!is.na(Diabetes)),
+    diabetes_n = sum(Diabetes == 1, na.rm=T),
+    diabetes_pct = round(diabetes_n/diabetes_known_n*100, 1),
+    cv_dis_known_n = sum(!is.na(CV_DIS)),
+    cv_dis_n = sum(CV_DIS == 1, na.rm=T),
+    cv_dis_pct = round(cv_dis_n/cv_dis_known_n*100, 1),
+    heart_dis_known_n = sum(!is.na(Heart_Dis)),
+    heart_dis_n = sum(Heart_Dis == 1, na.rm=T),
+    heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, 1)
+  ) %>%
+  as.data.frame()
+
+#Above/Below median
+t1b <- dem.bsl %>%
+  group_by(pollutant, no2_median, pm25_median) %>%
+  summarize(
+    N = n(),
+    age_entry_median = median(age_intake),
+    age_entry_iqr = round(IQR(age_intake), 1),
+    male_n = sum(male),
+    male_pct = round(male_n/N*100, 1),
+    race_known_n = sum(!is.na(race)),
+    race_nonwhite_n = sum(race !=1, na.rm = T),
+    race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
+    edu_known_n = sum(!is.na(degree)),
+    edu_beyond_hs_n = sum(degree >2, na.rm = T),
+    edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
+    #--> update w/ correct income variable
+    # income_median = median(income),
+    # income_iqr = IQR(income),
+    apoe_known_n = sum(!is.na(apoe)),
+    apoe_carrier_n = sum(apoe, na.rm=T),
+    apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n, 1),
+    smoke_known_n = sum(!is.na(smoke)),
+    smoke_never_n = sum(smoke==0, na.rm = T),
+    smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
+    smoke_former_n = sum(smoke==1, na.rm = T),
+    smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
+    smoke_current_n = sum(smoke==2, na.rm = T),
+    smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
+    exercise_median = median(exercise, na.rm = T),
+    exercise_iqr = round(IQR(exercise, na.rm = T), 1),
+    exercise_regular_known_n = sum(!is.na(exercise_reg)),
+    exercise_regular_n = sum(exercise_reg==1, na.rm = T),
+    exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1),
+    bmi_median = median(bmi, na.rm = T),
+    bmi_iqr = round(IQR(bmi, na.rm = T), 1),
+    hypertension_known_n = sum(!is.na(Hypertension)),
+    hypertension_n = sum(Hypertension == 1, na.rm=T),
+    hypertension_pct = round(hypertension_n/hypertension_known_n*100, 1),
+    diabetes_known_n = sum(!is.na(Diabetes)),
+    diabetes_n = sum(Diabetes == 1, na.rm=T),
+    diabetes_pct = round(diabetes_n/diabetes_known_n*100, 1),
+    cv_dis_known_n = sum(!is.na(CV_DIS)),
+    cv_dis_n = sum(CV_DIS == 1, na.rm=T),
+    cv_dis_pct = round(cv_dis_n/cv_dis_known_n*100, 1),
+    heart_dis_known_n = sum(!is.na(Heart_Dis)),
+    heart_dis_n = sum(Heart_Dis == 1, na.rm=T),
+    heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, 1)
+  ) %>%
+  as.data.frame()
+
+#combine tables
+t1 <- rbind(t1a, t1b) %>% 
+  as.data.frame() %>%
+    #paste N & pcts together
+  mutate(
+    median = ifelse(!is.na(no2_median), no2_median, pm25_median),
+    
+    age_median_iqr = paste0(age_entry_median, " (", age_entry_iqr, ")"),
+    male_n_pct = paste0(male_n, " (", male_pct, "%)"),
+    race_nonwhite_n_pct = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
+    edu_beyond_hs_n_pct = paste0(edu_beyond_hs_n, " (", edu_beyond_hs_pct, "%)"),
+    apoe_carrier_n_pct = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
+    smoke_never_n_pct = paste0(smoke_never_n, " (", smoke_never_pct, "%)"),
+    smoke_former_n_pct = paste0(smoke_former_n, " (", smoke_former_pct, "%)"),
+    smoke_current_n_pct = paste0(smoke_current_n, " (", smoke_current_pct, "%)"),
+    exercise_median_iqr = paste0(exercise_median, " (", exercise_iqr, ")"),
+    exercise_regular_n_pct = paste0(exercise_regular_n, " (", exercise_regular_pct, "%)"),
+    bmi_median_iqr = paste0(bmi_median, " (", bmi_iqr, ")"),
+    hypertension_n_pct = paste0(hypertension_n, " (", hypertension_pct, "%)"),
+    diabetes_n_pct = paste0(diabetes_n, " (", diabetes_pct, "%)"),
+    cv_dis_n_pct = paste0(cv_dis_n, " (", cv_dis_pct, "%)"),
+    heart_dis_n_pct = paste0(heart_dis_n, " (", heart_dis_pct, "%)")
+  ) %>%
+  #get rid of repeat columns
+  select(
+    pollutant, 
+    median, 
+    N,
+    age_median_iqr:heart_dis_n_pct
+  ) %>%
+  #place NO2 and PM25 next to eachother 
+  arrange(pollutant)
+
+
+# transpose
+t1 <- t(t1) %>% 
+  as.data.frame() 
+
+t1 %>% kable(caption = "")
   
-  )  
 
-  )
+```
 
+Cases over time. Defining incidence based on date (age) at last study visit. Numbers slightly vary depending on how incidence age is defined. 
 
-#paste N & pcts together
+```{r}
+# events over time
+cases_over_time <- dem %>%
+  filter(pollutant=="no2",
+         dementia_now==1) %>%
+  group_by(study_id) %>%
+  #some cases have multiple dementia_now==1 for years After age_last_visit (since this was created wrong & less than age_onset sometimes?)
+  filter(exposure_year == min(exposure_year)) %>% 
 
+#check that only 1 study_id per "case" # looks good
+#dim(cases_over_time)[1] == length(unique(cases_over_time$study_id))
 
-# t(t1a) %>% as.data.frame()
+  group_by(exposure_year) %>%
+  summarize(
+    cases = sum(dementia_now, na.rm = T)
+  ) 
+
+#total number of cases w/ valid No2 exposure 
+#sum(cases_over_time$cases)
+
+cases_over_time %>%
+  ggplot(aes(x=exposure_year, y=cases)) + 
+  geom_point()
+
 ```
 
 
+# Inferential Statistics
+
+### --> ? filter pollutant??
+
+```{r}
+#1. need to calculate age_at_exposure_year at DOB, not Jan 1st
+#2. then, cacluate age_prior_to_exposure_year as: age_at_exposure_year - 1. Stop time must be > start time, NA created.
+
+#3. create survival object w/ TVC dataset, accounting for "delayed entry"
+# exp: s.stanford.tvc = with(stanford.tvc, Surv(tstart,tstop,death))
+dem.no2 <- dem %>%
+  filter(pollutant== "no2")
+
+s.dem.no2 <- with(dem.no2, Surv(
+  # --> update so that time < time2
+  time = age_at_start_exposure_year,  
+  time2 =age_at_end_exposure_year,  
+  event = dementia_now
+                         )
+             )
+
+```
+
+Model 1 (Reduced): Age (time axis), NO2 (time-varying) 
+
+### --> ? Use cluster(study_id) or robust=T in coxph()? 
+### --> check that results are the same
 
 ```{r  }
 
-#M1 (reduced): Age (time axis), NO2 (time-varying)
-
- 
-
-
-
-
-
-```
-
-```{r PH Cox Model}
-# create survival object w/ TVC dataset, accounting for "delayed entry"
-# s.stanford.tvc = with(stanford.tvc, Surv(tstart,tstop,death))
-
-#PH Cox model
 # summary(coxph(s.stanford.tvc~trt, data=stanford.tvc))
-
-## stratification
-#m1d <- coxph(surv.ccg ~ rx + wbc + age + strata(institution), data=ccg)
+dem.no2 %>%
+  coxph(s.dem.no2 ~ exp_avg10_yr,# +  cluster(study_id),  #or robust=T ?
+        data=., 
+        robust = T,
+        #ties = "exact" #takes Very long time; instead using default Efron approximation
+        ) %>% 
+  summary()
 
 ## ? CIs
 #survfit.prison0 <- survfit(surv.prison0~1, data=prison0, conf.type="log-log")
 
-##ties
-# coxph(s.mp ~ tx, data=mp, ties="exact")
+```
+
+M2 (a priori): M1 + gender, education, median household income, race, calendar year 2 ; APOE stratification  
+
+### --> add median household income
+
+```{r}
+dem.no2 %>%
+  coxph(s.dem.no2 ~ exp_avg10_yr + male + education + factor(race) + exposure_year + strata(apoe), 
+        data=., 
+        robust = T,
+        #ties = "exact"
+        ) %>%
+  summary()
 
 ```
+
+M3 (extended): M2 + smoking + physical activity 
+### --> ? how to treat smoke? factor? use continuous pack_years instead?
+
+```{r}
+
+dem.no2 %>%
+  coxph(s.dem.no2 ~ exp_avg10_yr + male + education + factor(race) + exposure_year + strata(apoe) + factor(smoke) + exercise, 
+        data=., 
+        robust = T,
+        #ties = "exact"
+        ) %>%
+  summary()
+
+```
+
+Model 4 (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
+
+```{r}
+ 
+```
+
+Model 5 (APOE interaction): M2 + NO2*APOE
+
+```{r}
+
+```
+
+Model 6 (copollutant): M2 + PM2.5 (time-varying)
+
+```{r}
+
+```
+
+
+
+
 
 
 ```{r lincom}

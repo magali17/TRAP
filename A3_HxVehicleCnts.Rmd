@@ -30,6 +30,8 @@ pacman::p_load(dplyr, tidyverse, knitr)
 
 ```
 
+Clean up count data for use in GIS. 
+
 ```{r}
 traffic <- read.csv(file.path("Data", "Aim 3", "historic-traffic-volumes.csv")) %>%
   filter(Year >= 1990) %>%
@@ -52,10 +54,97 @@ traffic.wide <- traffic %>%
   summarize(AADT = mean(AADT)) %>%
   spread(Yr_grp, AADT)  %>%
   #only keep locations with values each 5-year period
-  drop_na()
+  drop_na() #%>%
+  #mutate(point_id = row_number())
    
 #write.csv(traffic.wide, "hx.traffic.counts.csv", row.names = F)
 
 ```
 
+compare ramp vs highway counts.
+### ---> why do the curves look so similar over time? 
+
+```{r}
+traffic.in.region0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Hx Traffic Counts/hx.traffic.counts.in.study.region.csv")
+
+traffic.in.region <- traffic.in.region0 %>%
+  select(
+    point_id,
+    X1990:Ramp
+  ) %>%
+  gather(Year=X1990:X2015, "Year", "AADT") %>%
+  mutate(
+    Year = as.numeric(substr(Year, 2,5))
+  )
+
+traffic.in.region %>%
+  #filter(Ramp=="FALSE") %>%
+  ggplot(aes(x=AADT, fill=Ramp)) + 
+  geom_histogram(position = "dodge") + 
+  facet_wrap(~Year)
+
+```
+
+
+Calculate weighted avg of vehicle counts on road segments based on distance of each highway traffic counter (2 traffic counters used per segment).
+
+```{r}
+myjoin0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/joins/JoinedNearest2PtsToEachSection.csv")
+
+#calculate weighted avg based on each point's distance from a road link
+myjoin <- myjoin0 %>%
+  group_by(OBJECTID) %>%
+  mutate(
+    dist_sum = sum(distance),
+    dist_wt = (dist_sum - distance)/dist_sum,
+    wt_1990 = X1990*dist_wt,
+    wt_1995 = X1995*dist_wt,
+    wt_2000 = X2000*dist_wt,
+    wt_2005 = X2005*dist_wt,
+    wt_2010 = X2010*dist_wt,
+    wt_2015 = X2015*dist_wt
+    ) %>%
+  group_by(OBJECTID,
+           #SRID, BegARM, EndARM, Year_2005, Location, LOC_ERROR, Shape_Leng
+           ) %>%
+  summarize(
+    AADT_1990 = round(sum(wt_1990)),
+    AADT_1995 = round(sum(wt_1995)),
+    AADT_2000 = round(sum(wt_2000)),
+    AADT_2005 = round(sum(wt_2005)),
+    AADT_2010 = round(sum(wt_2010)),
+    AADT_2015 = round(sum(wt_2015))
+  )  
+
+#write.csv(myjoin, "wt.avg.counts.by.point.distance.csv", row.names = F)
+
+```
+
+AADT estiamtes in our study region.
+
+```{r}
+HxWtAADT0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/HxWtAvgAADTInStudyArea.csv")
+
+HxWtAADT <- HxWtAADT0 %>%
+  select(
+    OBJECTID,
+    Shape_Leng,
+    X1990:X2015
+  ) %>%
+  rename(
+    "1990" = X1990,
+    "1995" = X1995,
+    "2000" = X2000,
+    "2005" = X2005,
+    "2010" = X2010,
+    "2015" = X2015
+    ) %>%
+  gather(Year = "1990":"2015", "Year", "AADT")
+
+# traffic %>%
+#   ggplot(aes(x=AADT, fill=Ramp)) + 
+#   geom_histogram(position = "dodge") + 
+#   facet_wrap(~Yr_grp)
+
+```
  

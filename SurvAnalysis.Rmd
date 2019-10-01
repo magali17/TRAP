@@ -12,7 +12,8 @@ editor_options:
 # --> use package to calc #s & %s instead of by hand? 
 
 #sensitivity analyses
-##when using ONSET AGE, need to drop last year of exposure estimates (associated w/ year of last visit)? filter(age_at_end_exposure_year <= age_act) & dementia_now = ifelse(age_at_end_exposure_year < age_act, 0, anydementia),
+##when using ONSET AGE (age_act), need to drop exposure predictions after age_act. filter(age_at_exposure <= age_act) & dementia_now = ifelse(age_at_exposure < age_act, 0, anydementia),
+
 
 ```
 
@@ -33,9 +34,9 @@ pacman::p_load(survival, haven, tidyverse, knitr)   #dplyr, flexsurv, survMisc, 
 min.pct <- 0.95
 
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
-dem0.0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
-dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001_2.sas7bdat"), NULL)
- 
+
+ dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001_2.sas7bdat"), NULL)
+
 
 #select relevant columns, e.g. 10-yr estimates
 dem <- dem0 %>%
@@ -77,32 +78,32 @@ dem <- dem0 %>%
     age_intake = floor(as.numeric(intakedt - birthdt)/365),
     # ?? recalculate? Think "age" is rounded  #? is last_predx_visit actually the 2nd to last visit?
     age_last_visit = floor(as.numeric(last_visit - birthdt)/365),
-    #traditional definition used by ACT
+    #traditional definition used by ACT for follow-up time for cases and controls
     age_act = ifelse(!is.na(onsetage), onsetage, age_last_visit),
     
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
     #dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
+    nindx = ifelse(is.na(nindx), 0, nindx),
     ## create AD variable
     #ad_dsmivdx = ifelse(dsmivdx == 1, dsmivdx, NA),
      #Time-varying covariates
-      #recalculate age_at_exposure to be age at ppl's birthdays. this prevents age_at_exposure_year from being smaller than age_intake at times
-      age_at_end_exposure_year = floor(as.numeric(as.Date(paste0(exposure_year, "-", format(birthdt, "%m-%d"))) - birthdt)/365), 
+    # ?? is this one wrong?? this is 1 yr older than when I calculate it (below)
+    age_end_exposure = age_at_exposure,
+    #recalculate age_end_exposure to be age at ppl's birthdays. this prevents age_at_exposure_year from being smaller than ?age_intake/starting age at times
+    #earlier issue b/c expo predictions were only given through onset age, so we had "few" incident cases by year
+    #  age_end_exposure = floor(as.numeric(as.Date(paste0(exposure_year, "-", format(birthdt, "%m-%d"))) - birthdt)/365), 
     #"start" of the exposure period should be < "end" of exposure period for time-varying analysis
-    age_at_start_exposure_year = age_at_end_exposure_year-1,
+    age_start_exposure = age_end_exposure - 1,
     
     ### ? need to change age_last_visit to age_act for sensitivity analyses ?
-    ## --> EDIT 
-    dementia_now = ifelse(age_at_end_exposure_year < age_last_visit, 0, anydementia),
+    dementia_now = ifelse(age_end_exposure < age_last_visit, 0, anydementia),
     #clean up variables
     ## filter out invalid casi_sc scores (e.g., 666.6 - 999.9)
     casi = ifelse(casi_valid ==1, CASI_SC, NA)
-    
-    
-  ) %>%
+    ) %>%
   #drop relabeled/edited variables
   select(
-    #-age, 
     -age_at_exposure,
     -casi_valid, -CASI_SC,
     #-dsmivdx
@@ -116,32 +117,152 @@ dem <- dem %>%
     #drop PM10 predictions
     pollutant %in% c("no2", "pm25"),
     #only keep observations with predictions at at least 95% of the months in the 10-year period
-    exp_mos_coverage10_yr > 0.95
+    exp_mos_coverage10_yr >= 0.95
   ) %>%
   select(
-    study_id,
-    birthdt,
-    intakedt,
-    last_predx_visit,
-    
+    study_id:last_visit,
     age_intake,
     age_last_visit,
-    onsetage, #delete
     age_act,
+    onsetage, #delete, using age_act instead
     
     anydementia, #not using this for TVC?
-    dsmivdx,
+    #dsmivdx,
+    nindx,
     #ad_dsmivdx,
     dementia_now,
     
-    age_at_start_exposure_year,
-    age_at_end_exposure_year,
+    age_start_exposure,
+    age_end_exposure,
+    #age_end_exposure2,  #delete
     exposure_year:bmi, 
     casi
-    
   )
+ 
+dem <- dem %>% 
+  filter(
+    ## ??--> drop individuals w/ only baseline obsevations? B/c cases captured at baseline would not have been enrolled? 
+    age_intake != age_last_visit,
+    #drop exposure predictions after the last visit when individuals are no longer followed. Also, could make TVC analysis problematic (e.g., dementia_now variable may be 1)
+    ## --> note: when using act_age, have to change age_last_visit to age_act
+    age_end_exposure <= age_last_visit
+  )
+ 
+#make wide format
+no2 <- dem %>% 
+  filter(pollutant == "no2") %>%
+  select(-pollutant) %>%
+  rename(
+    no2_1yr = exp_avg01_yr,
+    no2_5yr = exp_avg05_yr,
+    no2_10yr = exp_avg10_yr,
+    no2_20yr = exp_avg20_yr,
+    no2_10yr10yrlag = exp_avg10_yr10yrlag,
+    no2_10yr20yrlag = exp_avg10_yr20yrlag,
+    no2_coverage_1yr = exp_mos_coverage01_yr,
+    no2_coverage_5yr = exp_mos_coverage05_yr,
+    no2_coverage_10yr = exp_mos_coverage10_yr,
+    no2_coverage_20yr = exp_mos_coverage20_yr,
+    no2_coverage_10yr10yrlag = exp_mos_coverage10_yr10yrlag,
+    no2_coverage_10yr20yrlag = exp_mos_coverage10_yr20yrlag
+    ) 
+
+pm25 <- dem %>% 
+  filter(pollutant == "pm25") %>%
+  select(-pollutant) %>%
+  rename(
+    pm25_1yr = exp_avg01_yr,
+    pm25_5yr = exp_avg05_yr,
+    pm25_10yr = exp_avg10_yr,
+    pm25_20yr = exp_avg20_yr,
+    pm25_10yr10yrlag = exp_avg10_yr10yrlag,
+    pm25_10yr20yrlag = exp_avg10_yr20yrlag,
+    pm25_coverage_1yr = exp_mos_coverage01_yr,
+    pm25_coverage_5yr = exp_mos_coverage05_yr,
+    pm25_coverage_10yr = exp_mos_coverage10_yr,
+    pm25_coverage_20yr = exp_mos_coverage20_yr,
+    pm25_coverage_10yr10yrlag = exp_mos_coverage10_yr10yrlag,
+    pm25_coverage_10yr20yrlag = exp_mos_coverage10_yr20yrlag
+    )   
+dem.w <- full_join(no2, pm25)
 
 ```
+
+# Quality Control
+
+Make sure age variables make sense 
+
+```{r, echo=T}
+#age at: intake, onset (age_act), last visit
+# age_start_exposure, age_end_exposure
+
+table(dem$age_intake <= dem$age_act) #table(dem$age_intake <= dem$onsetage)
+table(dem$age_intake <= dem$age_last_visit)
+table(dem$age_act <= dem$age_last_visit)
+
+ 
+# dem %>%
+#     mutate(
+#       dementia_now = factor(dementia_now),
+#       id_group = ifelse(study_id < 2000, "A",
+#                         ifelse(study_id >=2000 & study_id < 3000, "B",
+#                         ifelse(study_id >=3000 & study_id < 4000, "C",
+#                         ifelse(study_id >=4000 & study_id < 5000, "D",
+#                         ifelse(study_id >=5000 & study_id < 6000, "E", "F"
+#                         )))))
+#       ) %>%
+#   filter(
+#     id_group == "A",
+#          pollutant=="no2") %>%
+#   ggplot(aes(x=exposure_year, y=study_id, group= study_id, colour=dementia_now)) +
+#   geom_point() +
+#   geom_line()  +
+#    facet_wrap(~id_group, scales = "free")
+  
+
+#check taht there is only one time period when dementia_now = 1 for each participant #looks good
+t <- dem.w %>% 
+  filter(
+    #pollutant== "no2",
+        # age_end_exposure <= age_last_visit
+         ) %>%
+  group_by(study_id) %>%
+  summarize(
+    #number of times each patient has dementia_now==1 (should be max 1)
+    dem_now_n = sum(dementia_now==1)
+  ) 
+
+t %>%
+  with(., table(dem_now_n <= 1))
+
+#number of individuals w/ dementia incidence: ~1269/3472
+dem.w %>% group_by(study_id) %>%
+  summarize(
+  dem = mean(anydementia)
+) %>% 
+  with(., table(dem))
+
+#person-years over time
+dem.w %>%
+  mutate(dementia_now = factor(dementia_now, levels = c(1,0))) %>%
+  ggplot(aes(x= exposure_year, 
+             #y=study_id, 
+             fill= dementia_now
+             )) + 
+  geom_bar() + 
+  labs(title= "person-years",
+       fill = "dementia incidence")
+
+#number of dementia cases per year
+dem.w %>%
+  filter(dementia_now==1) %>%
+  ggplot(aes(x= exposure_year)) + 
+  geom_bar() + 
+  labs(title= "number of dementia incident cases over time")
+
+
+```
+
 
 #Descriptive Statistics 
 
@@ -155,10 +276,11 @@ dem.bsl <- dem %>%
   #filter(age_at_exposure_year <= age_intake)
   group_by(study_id, pollutant) %>%
   filter(
-    #age_at_exposure may be the same or 1 yr younger than age_intake at baseline
-    age_at_exposure_year <= age_intake,  
+    #exposure range at baseline is year at age_intake going back to age_intake-1
+    age_start_exposure <= age_intake,   # or <= ?? #age_at_exposure may be the same or 1 yr younger than age_intake at baseline
     #take first reading (baseline reading)
-    age_at_exposure_year == min(age_at_exposure_year)) %>%
+    #age_start_exposure == min(age_start_exposure)
+    ) %>%
     
     #alredy did this above. #only look at baseline predictions where >= 95% of the month data exists 
     #exp_mos_coverage10_yr >= min.pct) %>%
@@ -168,7 +290,7 @@ dem.bsl <- dem %>%
 #calculate median baseline pollutant levels
 bsl.expo.distrib <- dem.bsl %>% 
   group_by(pollutant) %>%
-  drop_na(exp_avg10_yr) %>%
+  #drop_na(exp_avg10_yr) %>%
   summarize(
     N = n(),
     median = median(exp_avg10_yr),
@@ -396,7 +518,7 @@ dem.no2 <- dem %>%
 s.dem.no2 <- with(dem.no2, Surv(
   # --> update so that time < time2
   time = age_at_start_exposure_year,  
-  time2 =age_at_end_exposure_year,  
+  time2 =age_at_exposure,  
   event = dementia_now
                          )
              )

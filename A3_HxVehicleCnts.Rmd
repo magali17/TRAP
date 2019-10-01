@@ -15,6 +15,13 @@ editor_options:
   chunk_output_type: console
 ---
 
+```{r, echo=F}
+#Notes 
+
+# --> error making long format??
+
+```
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
 

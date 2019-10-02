@@ -8,6 +8,14 @@ editor_options:
 ---
 ```{r, echo=F}
 #NOTES
+##4. merge with github. always do these 4 steps all together. enter the following into the Terminal (does not work any other way for some reason)
+###a. git pull origin master #do this before start editing & before you're read to upload changes again
+###b. git add mb_functions.R 
+###c. git commit -m "my commit message in parentheses" 
+###d. git push origin master
+
+
+
 # see BIOST 537 Ch 5 Lecture, slide 33/57  
 # --> use package to calc #s & %s instead of by hand? 
 
@@ -28,15 +36,16 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(survival, haven, tidyverse, knitr)   #dplyr, flexsurv, survMisc, msm
+pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats)  #Himsc: describe(); EnvStats: summaryFull()
 
 #minimum percent of months required for us to consider a prediction "valid"
 min.pct <- 0.95
 
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
 
- dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001_2.sas7bdat"), NULL)
+# dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001_2.sas7bdat"), NULL)
 
+dem0 <- read_sas(file.path("Data", "Aim 1", "issue_001_3.sas7bdat"), NULL)
 
 #select relevant columns, e.g. 10-yr estimates
 dem <- dem0 %>%
@@ -47,7 +56,7 @@ dem <- dem0 %>%
     last_visit,
     onsetage,
     anydementia,  
-    #dsmivdx,
+    dsmivdx,
     nindx,
     
     #M1, 6, sensitivity analyses
@@ -83,30 +92,35 @@ dem <- dem0 %>%
     
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
-    #dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
+    dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
     nindx = ifelse(is.na(nindx), 0, nindx),
     ## create AD variable
     #ad_dsmivdx = ifelse(dsmivdx == 1, dsmivdx, NA),
      #Time-varying covariates
-    # ?? is this one wrong?? this is 1 yr older than when I calculate it (below)
     age_end_exposure = age_at_exposure,
     #recalculate age_end_exposure to be age at ppl's birthdays. this prevents age_at_exposure_year from being smaller than ?age_intake/starting age at times
     #earlier issue b/c expo predictions were only given through onset age, so we had "few" incident cases by year
-    #  age_end_exposure = floor(as.numeric(as.Date(paste0(exposure_year, "-", format(birthdt, "%m-%d"))) - birthdt)/365), 
+    #age_end_exposure2 = floor(as.numeric(as.Date(paste0(exposure_year, "-", format(birthdt, "%m-%d"))) - birthdt)/365), 
     #"start" of the exposure period should be < "end" of exposure period for time-varying analysis
     age_start_exposure = age_end_exposure - 1,
-    
     ### ? need to change age_last_visit to age_act for sensitivity analyses ?
     dementia_now = ifelse(age_end_exposure < age_last_visit, 0, anydementia),
     #clean up variables
     ## filter out invalid casi_sc scores (e.g., 666.6 - 999.9)
-    casi = ifelse(casi_valid ==1, CASI_SC, NA)
+    casi = ifelse(casi_valid ==1, CASI_SC, NA),
+    income_cat = ifelse(tr_med_inc_hshld < 20000, 1,
+                               ifelse(tr_med_inc_hshld >= 20000 & tr_med_inc_hshld < 35000, 2,
+                                      ifelse(tr_med_inc_hshld >= 35000 & tr_med_inc_hshld < 50000, 3,
+                                             ifelse(tr_med_inc_hshld >= 50000 & tr_med_inc_hshld < 75000, 4, 5)
+                                             )
+                                      )
+                               )
     ) %>%
   #drop relabeled/edited variables
   select(
     -age_at_exposure,
     -casi_valid, -CASI_SC,
-    #-dsmivdx
+    #-tr_med_inc_hshld
   ) 
 
 # #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
@@ -117,7 +131,7 @@ dem <- dem %>%
     #drop PM10 predictions
     pollutant %in% c("no2", "pm25"),
     #only keep observations with predictions at at least 95% of the months in the 10-year period
-    exp_mos_coverage10_yr >= 0.95
+    exp_mos_coverage10_yr >= min.pct
   ) %>%
   select(
     study_id:last_visit,
@@ -127,7 +141,7 @@ dem <- dem %>%
     onsetage, #delete, using age_act instead
     
     anydementia, #not using this for TVC?
-    #dsmivdx,
+    dsmivdx,
     nindx,
     #ad_dsmivdx,
     dementia_now,
@@ -135,7 +149,10 @@ dem <- dem %>%
     age_start_exposure,
     age_end_exposure,
     #age_end_exposure2,  #delete
-    exposure_year:bmi, 
+    exposure_year:degree,
+    tr_med_inc_hshld,
+    income_cat,
+    race:bmi, 
     casi
   )
  
@@ -200,44 +217,21 @@ table(dem$age_intake <= dem$age_act) #table(dem$age_intake <= dem$onsetage)
 table(dem$age_intake <= dem$age_last_visit)
 table(dem$age_act <= dem$age_last_visit)
 
- 
-# dem %>%
-#     mutate(
-#       dementia_now = factor(dementia_now),
-#       id_group = ifelse(study_id < 2000, "A",
-#                         ifelse(study_id >=2000 & study_id < 3000, "B",
-#                         ifelse(study_id >=3000 & study_id < 4000, "C",
-#                         ifelse(study_id >=4000 & study_id < 5000, "D",
-#                         ifelse(study_id >=5000 & study_id < 6000, "E", "F"
-#                         )))))
-#       ) %>%
-#   filter(
-#     id_group == "A",
-#          pollutant=="no2") %>%
-#   ggplot(aes(x=exposure_year, y=study_id, group= study_id, colour=dementia_now)) +
-#   geom_point() +
-#   geom_line()  +
-#    facet_wrap(~id_group, scales = "free")
-  
-
 #check taht there is only one time period when dementia_now = 1 for each participant #looks good
-t <- dem.w %>% 
+dem.w %>% 
   filter(
-    #pollutant== "no2",
         # age_end_exposure <= age_last_visit
          ) %>%
   group_by(study_id) %>%
-  summarize(
+  dplyr::summarize(
     #number of times each patient has dementia_now==1 (should be max 1)
     dem_now_n = sum(dementia_now==1)
-  ) 
-
-t %>%
+  ) %>%
   with(., table(dem_now_n <= 1))
 
-#number of individuals w/ dementia incidence: ~1269/3472
+#number of individuals w/ dementia incidence: ~1270 
 dem.w %>% group_by(study_id) %>%
-  summarize(
+  dplyr::summarize(
   dem = mean(anydementia)
 ) %>% 
   with(., table(dem))
@@ -260,11 +254,72 @@ dem.w %>%
   geom_bar() + 
   labs(title= "number of dementia incident cases over time")
 
+#follow-up time
+##new id by intake date  
+new_id <- dem.w %>%
+  arrange(intakedt) %>%
+  select(study_id) %>%
+  unique() %>%
+  mutate(id = row_number())
+
+dem.w %>% 
+  #filter(study_id < 1100) %>%
+  left_join(new_id) %>%
+  mutate(dementia_now = factor(dementia_now)) %>%
+  ggplot(aes(x=exposure_year, y=id, group=id, colour=dementia_now)) + 
+  geom_line() +
+  geom_point(aes(size=dementia_now))
 
 ```
 
 
 #Descriptive Statistics 
+
+Distribution of key covariates.
+
+```{r}
+dem.w %>%
+  select(
+    study_id,
+    age_intake:age_act,
+    apoe:casi) %>% 
+  #one row per individual
+  unique() %>% 
+  gather(key = "variable",  value = "value", -study_id) %>%  
+  ggplot(aes(x=value)) + 
+  geom_histogram() +
+    facet_wrap(~variable, scales = "free")
+
+#there are few non-white individuals, thus use race=1 (white) in models
+table(dem.w$race)
+
+```
+
+
+Missingness of key covariates. 
+
+Data is for all individuals with NO2 and/or PM2.5 predictions. #   
+-lot of individuals with missing apoe readings    
+-lot of missing median household income values   
+
+
+```{r}
+dem.w %>%
+  select(
+    study_id,
+    age_intake:age_act,
+    apoe:casi) %>%
+  #only one row per individuals
+  unique() %>%
+  #describe()  #Info: how continuous the variable is, Gmd: Gini's mean difference - measure of dispersion
+  summaryFull()  
+
+ 
+
+
+```
+
+
 
 Statistics calculated for individuals with at least `r min.pct*100`% of the months requied to estimate predictions (114/120 months for 10-year avg).
 
@@ -326,6 +381,8 @@ dem.bsl <- dem.bsl %>%
 ```
 
 Participant characteristics based on 10-year average pollutant exposure at baseline. Percents are calculated based on the number of individuals with available data (missing values removed).
+
+### --> compare #s to when use summaryAll()? 
 
 ```{r}
 #All
@@ -473,52 +530,18 @@ t1 %>% kable(caption = "")
 
 ```
 
-Cases over time. Defining incidence based on date (age) at last study visit. Numbers slightly vary depending on how incidence age is defined. 
-
-```{r}
-# events over time
-cases_over_time <- dem %>%
-  filter(pollutant=="no2",
-         dementia_now==1) %>%
-  group_by(study_id) %>%
-  #some cases have multiple dementia_now==1 for years After age_last_visit (since this was created wrong & less than age_onset sometimes?)
-  filter(exposure_year == min(exposure_year)) %>% 
-
-#check that only 1 study_id per "case" # looks good
-#dim(cases_over_time)[1] == length(unique(cases_over_time$study_id))
-
-  group_by(exposure_year) %>%
-  summarize(
-    cases = sum(dementia_now, na.rm = T)
-  ) 
-
-#total number of cases w/ valid No2 exposure 
-#sum(cases_over_time$cases)
-
-cases_over_time %>%
-  ggplot(aes(x=exposure_year, y=cases)) + 
-  geom_point()
-
-```
-
-
 # Inferential Statistics
 
-### --> ? filter pollutant??
-
 ```{r}
-#1. need to calculate age_at_exposure_year at DOB, not Jan 1st
-#2. then, cacluate age_prior_to_exposure_year as: age_at_exposure_year - 1. Stop time must be > start time, NA created.
-
-#3. create survival object w/ TVC dataset, accounting for "delayed entry"
+#3. create survival object w/ TVC dataset (accounts for "delayed entry")
 # exp: s.stanford.tvc = with(stanford.tvc, Surv(tstart,tstop,death))
-dem.no2 <- dem %>%
-  filter(pollutant== "no2")
+# dem.no2 <- dem %>%
+#   filter(pollutant== "no2")
 
-s.dem.no2 <- with(dem.no2, Surv(
+s.dem <- with(dem.w, Surv(
   # --> update so that time < time2
-  time = age_at_start_exposure_year,  
-  time2 =age_at_exposure,  
+  time = age_start_exposure,  
+  time2 =age_end_exposure,  
   event = dementia_now
                          )
              )
@@ -528,13 +551,12 @@ s.dem.no2 <- with(dem.no2, Surv(
 Model 1 (Reduced): Age (time axis), NO2 (time-varying) 
 
 ### --> ? Use cluster(study_id) or robust=T in coxph()? 
-### --> check that results are the same
 
 ```{r  }
 
 # summary(coxph(s.stanford.tvc~trt, data=stanford.tvc))
-dem.no2 %>%
-  coxph(s.dem.no2 ~ exp_avg10_yr,# +  cluster(study_id),  #or robust=T ?
+dem.w %>%
+  coxph(s.dem ~ no2_10yr,# +  cluster(study_id),  #or robust=T ?
         data=., 
         robust = T,
         #ties = "exact" #takes Very long time; instead using default Efron approximation
@@ -548,14 +570,12 @@ dem.no2 %>%
 
 M2 (a priori): M1 + gender, education, median household income, race, calendar year 2 ; APOE stratification  
 
-### --> add median household income
-
 ```{r}
-dem.no2 %>%
-  coxph(s.dem.no2 ~ exp_avg10_yr + male + education + factor(race) + exposure_year + strata(apoe), 
+dem.w %>%
+  coxph(s.dem ~ no2_10yr + 
+          male + education + factor(race==1) + tr_med_inc_hshld + exposure_year + strata(apoe), 
         data=., 
         robust = T,
-        #ties = "exact"
         ) %>%
   summary()
 
@@ -566,11 +586,12 @@ M3 (extended): M2 + smoking + physical activity
 
 ```{r}
 
-dem.no2 %>%
-  coxph(s.dem.no2 ~ exp_avg10_yr + male + education + factor(race) + exposure_year + strata(apoe) + factor(smoke) + exercise, 
+dem.w %>%
+  coxph(s.dem ~ no2_10yr + 
+          male + education + factor(race==1) + tr_med_inc_hshld + exposure_year + strata(apoe) + 
+          factor(smoke) + exercise, 
         data=., 
         robust = T,
-        #ties = "exact"
         ) %>%
   summary()
 
@@ -579,18 +600,43 @@ dem.no2 %>%
 Model 4 (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
 
 ```{r}
- 
+ dem.w %>%
+  coxph(s.dem ~ no2_10yr + 
+          male + education + factor(race==1) + tr_med_inc_hshld + exposure_year + strata(apoe) + 
+          factor(smoke) + exercise +
+          Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi, 
+        data=., 
+        robust = T,
+        ) %>%
+  summary()
+
 ```
 
 Model 5 (APOE interaction): M2 + NO2*APOE
 
 ```{r}
+dem.w %>%
+  coxph(s.dem ~ no2_10yr + 
+          male + education + factor(race==1) + tr_med_inc_hshld + exposure_year + strata(apoe) +
+          no2_10yr*apoe , 
+        data=., 
+        robust = T,
+        ) %>%
+  summary()
 
 ```
 
 Model 6 (copollutant): M2 + PM2.5 (time-varying)
 
 ```{r}
+dem.w %>%
+  coxph(s.dem ~ no2_10yr + 
+          male + education + factor(race==1) + tr_med_inc_hshld + exposure_year + strata(apoe) + 
+          pm25_10yr, 
+        data=., 
+        robust = T,
+        ) %>%
+  summary()
 
 ```
 

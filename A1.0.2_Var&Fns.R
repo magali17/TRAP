@@ -5,8 +5,10 @@
 #minimum percent of months required for us to consider a prediction "valid"
 min.pct <- 0.95
 
+no2.units <- 10  #ppb
+pm25.units <- 5 #ug/m3
 
-
+model.digits <- 2
 
 ###################################################################################
 ################################ FUNCTIONS ######################################## 
@@ -104,6 +106,156 @@ t1.fn <- function(data=dem.bsl,
 #   filter(pollutant == "no2",
 #          no2_median == "below") %>%
 #   t1.fn(data = ., column.name = "no2 below")
+
+####################################################################################
+
+#function returns model output: HR, 95% CI, p-value
+hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
+  #model.s = m5.s
+  hr <- model.s$conf.int[no2.coef, "exp(coef)"] %>% round(model.digits) %>% format(nsmall=model.digits) 
+  l95 <- model.s$conf.int[no2.coef, "lower .95"] %>% round(model.digits) %>% format(nsmall=model.digits)  
+  u95 <- model.s$conf.int[no2.coef, "upper .95"] %>% round(model.digits) %>% format(nsmall=model.digits)  
+  p <- model.s$coefficients[no2.coef, "Pr(>|z|)"] %>% round(model.digits) %>% format(nsmall=model.digits) 
+  
+  result <- paste0(hr, 
+                   #" (95% CI: ", 
+                   " (",
+                   l95, ", ", u95, 
+                   #"; p-val: ", 
+                   "; p: ", 
+                   p, ")")
+  
+  return(result)
+}
+
+#hr.output.fn(model.s = m2.s)
+
+####################################################################################
+# function returns raw model output & table of NO2 HRs
+
+models.fn <- function(surv.data = dem.w, 
+                      surv.time2 = "age_end_exposure", 
+                      surv.event = "dementia_now", 
+                      outcome.text = "All-cause Dementia",
+                      model.vars.data = model.vars) {
+  
+  #create a survival object
+  s.dem <- Surv(
+    time = as.numeric(unlist(surv.data["age_start_exposure"])),  
+    time2 = as.numeric(unlist(surv.data[surv.time2])) ,  
+    event = as.numeric(unlist(surv.data[surv.event]))
+  )
+  
+  
+  #Model 1 (Reduced): Age (time axis), NO2 (time-varying) 
+  m1 <- model.vars.data %>%
+    coxph(s.dem ~ no2, 
+          data=., 
+          robust = F,
+    ) 
+  
+  m1.s <- m1 %>% summary()
+  
+  #Model 2 (a priori): M1 + gender, education, median household income, race, birth cohort; APOE stratification.
+  #-assuming missing values (e.g., APOE) are MCAR and doing a complete case analysis. This method can be bias if values are not MCAR.
+  
+  ##### --> categorize birth cohort into larger categories - 20 yrs? 
+  
+  m2 <- model.vars.data %>%
+    coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
+            #factor(degree) + factor(birth_cohort), 
+            edu +  birth_cohort, 
+          #don't use edu & birth year categories b/c too few ppl w/ low degrees and early birth years, thus reference category is small/unstable? 
+          #education + as.numeric(format(birthdt, "%Y")),
+          data=., 
+          robust = T,
+          #ties = "exact" #output is weird if use this
+    ) 
+  m2.s <- m2 %>% summary()
+  
+  #t <- m2 %>% summary()
+  #t$coefficients["no2", "exp(coef)"]
+  
+  
+  #M3 (extended): M2 + smoking + physical activity 
+  m3 <- model.vars.data %>%
+    coxph(s.dem ~ no2 + 
+            male + edu + race_white + income + birth_cohort + strata(apoe) + 
+            smoke + exercise_reg, 
+          data=., 
+          robust = T,
+    ) 
+  m3.s <- m3 %>% summary()
+  
+  
+  #Model 4 (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
+  m4 <- model.vars.data %>%
+    coxph(s.dem ~ no2 + 
+            male + edu + race_white + income + birth_cohort + strata(apoe) + 
+            smoke + exercise_reg +
+            Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi, 
+          data=., 
+          robust = T,
+    ) 
+  m4.s <- m4 %>% summary()
+  
+  #Model 5 (APOE interaction): M2 + NO2*APOE
+  m5 <- model.vars.data %>%
+    coxph(s.dem ~ no2 + 
+            male + edu + race_white + income + birth_cohort + strata(apoe) +
+            no2*apoe , 
+          data=., 
+          robust = T,
+    ) 
+  m5.s <- m5 %>% summary()
+  
+  
+  #Model 6 (copollutant): M2 + PM2.5 (time-varying)
+  m6 <- model.vars.data %>%
+    coxph(s.dem ~ no2 +
+            male + race_white + income + edu + birth_cohort + strata(apoe) +
+            pm25,  
+          data=.,
+          robust = T,
+    )
+  m6.s <- m6 %>% summary()
+  
+  #raw model output
+  model.ouputs <- list(model1=m1.s, 
+                       model2= m2.s, 
+                       model3 = m3.s, 
+                       model4 = m4.s, 
+                       model5 = m5.s, 
+                       model6 = m6.s)
+  
+  #dataframe w/ HR output from models
+  no2.hrs <- data.frame(
+    Model = c(c(1:4), "5_nonapoe_carriers", "5_apoe_carriers", 6),
+    hr_ci_pval = c(
+      hr.output.fn(m1.s),
+      hr.output.fn(m2.s),
+      hr.output.fn(m3.s),
+      hr.output.fn(m4.s),
+      hr.output.fn(m5.s),
+      hr.output.fn(m5.s, no2.coef = "no2:apoe"),
+      hr.output.fn(m6.s)
+    )  #%>%
+      #  rename(
+      #    outcome.text = hr_ci_pval
+      # )
+    )
+    
+  names(no2.hrs)[names(no2.hrs) %in% "hr_ci_pval"] <- outcome.text
+  
+  return(list(
+              table_of_no2_HRs= no2.hrs,
+              raw_model_output = model.ouputs
+              )
+         )
+  #return(no2.hrs)
+}
+
+#models.fn()[[2]]
 
 ####################################################################################
 

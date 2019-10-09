@@ -85,7 +85,7 @@ t1.fn <- function(data=dem.bsl,
     ) #%>%
   #place NO2 and PM25 next to eachother 
   #arrange(group)
-  
+   
   
   # transpose
   t1 <- t(t1) %>% 

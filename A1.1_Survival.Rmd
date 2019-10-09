@@ -44,7 +44,9 @@ pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats)  #Himsc: desc
 
 source("A1.0.2_Var&Fns.R")
 
-dem0.0 <- read_sas(file.path("Data", "Aim 1", "issue_001_3.sas7bdat"), NULL)
+#dem0.0 <- read_sas(file.path("Data", "Aim 1", "issue_001_3.sas7bdat"), NULL)
+dem0.0 <- read_sas(file.path("Data", "Aim 1", "issue_001_4.sas7bdat"), NULL)
+
 #remove SAS labels
 labelled::var_label(dem0.0) <- NULL
 
@@ -60,11 +62,12 @@ dem0.1 <- dem0.0 %>%
     intakedt,
     last_visit,
     birth_cohort,
-    onsetdate,
+    corrected_onsetdate,
     onsetage,
-    anydementia,  
-    dsmivdx,
-    nindx,
+    #"corrected_" = final decision on outcome
+    corrected_anydementia,  
+    corrected_dsmivdx,
+    final_nindx,
     
     #M1, 6, sensitivity analyses
     exposure_year:exp_mos_coverage20_yr, 
@@ -92,12 +95,27 @@ dem0.1 <- dem0.0 %>%
   
   #create/clean up variables
   mutate(
+    #rename updated variables for correct outcomes
+    nindx = final_nindx,
+    dsmivdx = corrected_dsmivdx,
+    anydementia = corrected_anydementia,
+    onsetdate = corrected_onsetdate,
+    
     age_intake = round(as.numeric(intakedt - birthdt)/365, 3),  
     age_last_visit = round(as.numeric(last_visit - birthdt)/365, 3),  
     #traditional definition used by ACT for follow-up time for cases and controls
     age_onset = round(as.numeric(onsetdate - birthdt)/365, 3),
     age_act = round(ifelse(!is.na(age_onset), age_onset, age_last_visit), 3),
-    
+    #calculate birth cohort every 10 yrs since only 1 person born btwn 1890-1894 & this causes a model error
+    birth_cohort = round(as.numeric(format(birthdt, "%Y")), -1),
+    birth_cohort = ifelse(birth_cohort >= min(birth_cohort) & 
+                            birth_cohort < min(birth_cohort) + 20, min(birth_cohort),
+                          ifelse(
+                            birth_cohort >= min(birth_cohort) + 20 & 
+                            birth_cohort < min(birth_cohort) + 20*2, min(birth_cohort) + 20,
+                            min(birth_cohort) + 20*2
+                            )
+                          ),
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
     dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
@@ -290,13 +308,14 @@ fixed.covariates <- dem.w %>%
 # Quality Control
 
 Make sure age variables make sense.
+### --> check any_dementia now. some ppl have > 1
 
 ```{r, echo=T}
 
 table(round(dem.w$age_intake, 1) <= round(dem.w$age_act, 1))  
 #View(dem.w[which(dem.w$age_intake > dem.w$age_act),]) 
 table(dem.w$age_intake <= dem.w$age_last_visit)
-#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) #study_id: 4647 has wrong last_visit/intakedt?
+#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) #study_id: 4647 has wrong last_visit/intakedt? last_visit is correct. "Will be updated in next freeze"
 table(dem.w$age_act <= dem.w$age_last_visit)
 
 #dementia 
@@ -309,7 +328,7 @@ dementia_counts <- dem.w %>%
     dem_now_n = sum(dementia_now==1)
   ) 
 
-##check that individuals who have anydementia=1 also have dementia_now=1 & those who don't don't #looks good
+##check that individuals who have anydementia=1 also have dementia_now=1 & those who don't don't  
 dementia_counts %>%
   with(., table(anydementia, dem_now_n))
 
@@ -390,7 +409,7 @@ dem.w %>%
 
 # Descriptive Statistics 
 
-##Distribution of key covariates.
+## Distribution of key covariates.
 
 ```{r}
 
@@ -403,8 +422,26 @@ fixed.covariates %>%
 
 ```
 
+Individuals in each birth Cohort and birth year. Some 5-year cohorts have few only 1 individual
 
-##Missingness of key covariates. 
+```{r}
+#birth cohort/year
+fixed.covariates %>%
+  gather(key = "variable",  value = "value", -study_id) %>%  
+  filter(variable %in% c("birth_yr", "birth_cohort")) %>%
+  #ggplot(aes(x=birth_cohort, group=birth_cohort)) + 
+  #geom_histogram()
+  ggplot(aes(x=value)) + 
+  geom_histogram() +
+    facet_wrap(~variable, scales = "free")
+
+#table(fixed.covariates$birth_yr)
+table(fixed.covariates$birth_cohort)
+
+```
+
+
+## Missingness of key covariates. 
 
 Data is for all individuals with NO2 and/or PM2.5 predictions.    
 -lot of individuals with missing apoe readings    
@@ -491,9 +528,14 @@ Participant baseline characteristics. Percents are calculated based on the numbe
 
 ```
 
+ 
 ```{r}
 #characteristics for entire cohort 
-t1.all <- t1.fn()
+t1.all <- dem.bsl %>% 
+#1 row per participant
+  filter(pollutant == "no2") %>%
+  unique() %>%
+  t1.fn()
 
 kable(t1.all, caption = "Cohort Baseline Characteristics")
 
@@ -501,6 +543,8 @@ kable(t1.all, caption = "Cohort Baseline Characteristics")
 ## no2
 t1.no2.all <- dem.bsl %>%
   filter(pollutant == "no2") %>%
+  #drop ppl w/o  exposure estimates @ their baseline
+  drop_na(exp_avg10_yr) %>%
   t1.fn(data = ., column.name = "no2 all")
 
 t1.no2.below <- dem.bsl %>%
@@ -526,6 +570,7 @@ t1.no2 <- cbind(t1.no2.all,
 ## pm2.5
 t1.pm25.all <- dem.bsl %>%
   filter(pollutant == "pm25") %>%
+  drop_na(exp_avg10_yr) %>%
   t1.fn(data = ., column.name = "pm25 all")
 
 t1.pm25.below <- dem.bsl %>%
@@ -550,14 +595,18 @@ t1.pm25 <- cbind(t1.pm25.all,
 
 t1.by.pollutant <- cbind(t1.no2, t1.pm25)
 
-kable(t1.by.pollutant, caption = "Cohort Characteristics by Baseline 10 yr avg Air Pollution Exposure")
+kable(t1.by.pollutant, caption = "Cohort Characteristics by 10 yr avg Air Pollution Exposure Estimates Upon Enrollment")
 
 #characteristics by dementia status
 t1.dem.case <- dem.bsl %>%
+  #1 row per participant
+  filter(pollutant == "no2") %>%
   filter(anydementia == 1) %>%
   t1.fn(data = ., column.name = "Dementia")
 
 t1.dem.noncase <- dem.bsl %>%
+  #1 row per participant
+  filter(pollutant == "no2") %>%
   filter(anydementia == 0) %>%
   t1.fn(data = ., column.name = "No Dementia")
 
@@ -566,168 +615,6 @@ t1.by.anydementia <- cbind(t1.dem.case, t1.dem.noncase)
 kable(t1.by.anydementia, caption = "Cohort Characteristics by Dementia Outcome")
 
 ```
-
-
-
-
-
-
-```{r}
-# ?? why are #s slightly different than Missingness table? 
-#check tables created manually against summaryFull()
-# dem.bsl %>%
-#   select(
-#     study_id, age_intake, male, race, degree, apoe, smoke, exercise, exercise_reg, bmi, Hypertension, Diabetes, CV_DIS, Heart_Dis
-#   ) %>%
-#   unique() %>%
-#   summaryFull()
-
-
-# #by pollutant, using all obsevations (above/below median concentrations)
-# t1a <- dem.bsl %>%
-#   #drop_na(exp_avg10_yr) %>%
-#   group_by(pollutant) %>%
-#   dplyr::summarize(
-#     no2_median = "all",
-#     pm25_median = "all",
-#     N = n(),
-#     age_entry_median = median(age_intake),
-#     age_entry_iqr = round(IQR(age_intake), 1),
-#     male_n = sum(male),
-#     male_pct = round(male_n/N*100, 1),
-#     race_known_n = sum(!is.na(race)),
-#     race_nonwhite_n = sum(race !=1, na.rm = T),
-#     race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
-#     edu_known_n = sum(!is.na(degree)),
-#     edu_beyond_hs_n = sum(degree >2, na.rm = T),
-#     edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
-#     income_median = median(tr_med_inc_hshld, na.rm = T),
-#     income_iqr = round(IQR(tr_med_inc_hshld, na.rm = T), 1),
-#     apoe_known_n = sum(!is.na(apoe)),
-#     apoe_carrier_n = sum(apoe, na.rm=T),
-#     apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n, 1),
-#     smoke_known_n = sum(!is.na(smoke)),
-#     smoke_never_n = sum(smoke==0, na.rm = T),
-#     smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
-#     smoke_former_n = sum(smoke==1, na.rm = T),
-#     smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
-#     smoke_current_n = sum(smoke==2, na.rm = T),
-#     smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
-#     exercise_median = median(exercise, na.rm = T),
-#     exercise_iqr = round(IQR(exercise, na.rm = T), 1),
-#     exercise_regular_known_n = sum(!is.na(exercise_reg)),
-#     exercise_regular_n = sum(exercise_reg==1, na.rm = T),
-#     exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1),
-#     bmi_median = median(bmi, na.rm = T),
-#     bmi_iqr = round(IQR(bmi, na.rm = T), 1),
-#     hypertension_known_n = sum(!is.na(Hypertension)),
-#     hypertension_n = sum(Hypertension == 1, na.rm=T),
-#     hypertension_pct = round(hypertension_n/hypertension_known_n*100, 1),
-#     diabetes_known_n = sum(!is.na(Diabetes)),
-#     diabetes_n = sum(Diabetes == 1, na.rm=T),
-#     diabetes_pct = round(diabetes_n/diabetes_known_n*100, 1),
-#     cv_dis_known_n = sum(!is.na(CV_DIS)),
-#     cv_dis_n = sum(CV_DIS == 1, na.rm=T),
-#     cv_dis_pct = round(cv_dis_n/cv_dis_known_n*100, 1),
-#     heart_dis_known_n = sum(!is.na(Heart_Dis)),
-#     heart_dis_n = sum(Heart_Dis == 1, na.rm=T),
-#     heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, 1)
-#   ) %>%
-#   as.data.frame()
-# 
-# #by pollutant and Above/Below median AP level
-# t1b <- dem.bsl %>%
-#   group_by(pollutant, no2_median, pm25_median) %>%
-#   dplyr::summarize(
-#     N = n(),
-#     age_entry_median = median(age_intake),
-#     age_entry_iqr = round(IQR(age_intake), 1),
-#     male_n = sum(male),
-#     male_pct = round(male_n/N*100, 1),
-#     race_known_n = sum(!is.na(race)),
-#     race_nonwhite_n = sum(race !=1, na.rm = T),
-#     race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
-#     edu_known_n = sum(!is.na(degree)),
-#     edu_beyond_hs_n = sum(degree >2, na.rm = T),
-#     edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
-#     income_median = median(tr_med_inc_hshld, na.rm = T),
-#     income_iqr = round(IQR(tr_med_inc_hshld, na.rm = T), 1),
-#     apoe_known_n = sum(!is.na(apoe)),
-#     apoe_carrier_n = sum(apoe, na.rm=T),
-#     apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n, 1),
-#     smoke_known_n = sum(!is.na(smoke)),
-#     smoke_never_n = sum(smoke==0, na.rm = T),
-#     smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
-#     smoke_former_n = sum(smoke==1, na.rm = T),
-#     smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
-#     smoke_current_n = sum(smoke==2, na.rm = T),
-#     smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
-#     exercise_median = median(exercise, na.rm = T),
-#     exercise_iqr = round(IQR(exercise, na.rm = T), 1),
-#     exercise_regular_known_n = sum(!is.na(exercise_reg)),
-#     exercise_regular_n = sum(exercise_reg==1, na.rm = T),
-#     exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1),
-#     bmi_median = median(bmi, na.rm = T),
-#     bmi_iqr = round(IQR(bmi, na.rm = T), 1),
-#     hypertension_known_n = sum(!is.na(Hypertension)),
-#     hypertension_n = sum(Hypertension == 1, na.rm=T),
-#     hypertension_pct = round(hypertension_n/hypertension_known_n*100, 1),
-#     diabetes_known_n = sum(!is.na(Diabetes)),
-#     diabetes_n = sum(Diabetes == 1, na.rm=T),
-#     diabetes_pct = round(diabetes_n/diabetes_known_n*100, 1),
-#     cv_dis_known_n = sum(!is.na(CV_DIS)),
-#     cv_dis_n = sum(CV_DIS == 1, na.rm=T),
-#     cv_dis_pct = round(cv_dis_n/cv_dis_known_n*100, 1),
-#     heart_dis_known_n = sum(!is.na(Heart_Dis)),
-#     heart_dis_n = sum(Heart_Dis == 1, na.rm=T),
-#     heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, 1)
-#   ) %>%
-#   as.data.frame()
-# 
-# #combine tables
-# t1 <- rbind(t1a, t1b) %>% 
-#   as.data.frame() %>%
-#     #paste N & pcts together
-#   mutate(
-#     median = ifelse(!is.na(no2_median), no2_median, pm25_median),
-#     
-#     age_entry_median_iqr = paste0(age_entry_median, " (", age_entry_iqr, ")"),
-#     male_n_pct = paste0(male_n, " (", male_pct, "%)"),
-#     race_nonwhite_n_pct = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
-#     edu_beyond_hs_n_pct = paste0(edu_beyond_hs_n, " (", edu_beyond_hs_pct, "%)"),
-#     apoe_carrier_n_pct = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
-#     smoke_never_n_pct = paste0(smoke_never_n, " (", smoke_never_pct, "%)"),
-#     smoke_former_n_pct = paste0(smoke_former_n, " (", smoke_former_pct, "%)"),
-#     smoke_current_n_pct = paste0(smoke_current_n, " (", smoke_current_pct, "%)"),
-#     exercise_median_iqr = paste0(exercise_median, " (", exercise_iqr, ")"),
-#     exercise_regular_n_pct = paste0(exercise_regular_n, " (", exercise_regular_pct, "%)"),
-#     bmi_median_iqr = paste0(bmi_median, " (", bmi_iqr, ")"),
-#     hypertension_n_pct = paste0(hypertension_n, " (", hypertension_pct, "%)"),
-#     diabetes_n_pct = paste0(diabetes_n, " (", diabetes_pct, "%)"),
-#     cv_dis_n_pct = paste0(cv_dis_n, " (", cv_dis_pct, "%)"),
-#     heart_dis_n_pct = paste0(heart_dis_n, " (", heart_dis_pct, "%)")
-#   ) %>%
-#   #get rid of repeat columns
-#   select(
-#     pollutant, 
-#     median, 
-#     N,
-#     age_entry_median_iqr:heart_dis_n_pct
-#   ) %>%
-#   #place NO2 and PM25 next to eachother 
-#   arrange(pollutant)
-# 
-# 
-# # transpose
-# t1 <- t(t1) %>% 
-#   as.data.frame() 
-# 
-# t1 %>% kable(caption = "Demographic and health information by pollutant concentration level (above/below median concentration at study entry)")
-  
-```
-
-
-
 
 # Inferential Statistics
 
@@ -750,6 +637,9 @@ s.dem <- with(dem.w, Surv(
 Model 2 (a priori): M1 + gender, education, median household income, race, calendar year 2 ; APOE stratification.
 
 -assuming missing values (e.g., APOE) are MCAR and doing a complete case analysis. This method can be bias if values are not MCAR.
+
+##### --> categorize birth cohort into larger categories - 20 yrs? 
+##### --> create table w/ HR results (see analysis plan)
 
 ```{r}
 m2 <- dem.w %>%
@@ -826,20 +716,23 @@ m5 %>% summary()
 
 Model 6 (copollutant): M2 + PM2.5 (time-varying)
 
-#### [error b/c so much missing ?income_cat data]
+#### [error b/c so much missing ?income_cat data; & few ppl in each birth category]
+#### only "1 event"
 
 ```{r}
 
-# m6 <- dem.w %>%
-#   coxph(s.dem ~ no2_10yr + 
-#           male + factor(degree) + race_white + factor(income_cat) + factor(birth_cohort) + strata(apoe) + 
-#           pm25_10yr, 
-#         data=., 
-#         robust = T,
-#         ) 
-# m6 %>% summary() 
+m6 <- dem.w %>%
+  coxph(s.dem ~ no2_10yr +
+          male + factor(degree) + race_white  + factor(birth_cohort) + strata(apoe) +
+          pm25_10yr, #+ factor(income_cat)
+        data=.,
+        robust = T,
+        )
+m6 %>% summary()
 
-# get error above b/c income_cat has so much missing data
+
+
+# get error above b/c income_cat has so much missing data/ birth cohort categories are small?
 # dem.w %>%
 #   filter(
 #     !is.na(no2_10yr),
@@ -938,9 +831,6 @@ dfbetas %>%
   #get rows used in model
   rownames_to_column(var = "ind") %>%
   mutate(ind = as.numeric(ind)) %>%
-  #rename race
-  rename(race_white = 'factor(race == 1)TRUE'
-           ) %>%
   #make long format
   gather(covariate, value, -ind) %>%
   as.data.frame() %>%

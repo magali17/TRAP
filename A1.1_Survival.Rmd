@@ -35,9 +35,6 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 
 pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats)  #Himsc: describe(); EnvStats: summaryFull() #coxphw: coxphw() for non-prop hazards
 
-# #minimum percent of months required for us to consider a prediction "valid"
-# min.pct <- 0.95
-
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
 
 # dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001_3.sas7bdat"), NULL)
@@ -170,6 +167,9 @@ dem0.1 <- dem0.0 %>%
     apoe:degree, tr_med_inc_hshld, income_cat,race, race_white, smoke:bmi4, casi_irt, 
   ) 
  
+#remove to speed up coding?
+rm(dem0.0)
+
 #how long have participants been followed? 
 yr <- dem0.1 %>%
   group_by(study_id) %>%
@@ -193,7 +193,7 @@ enrollment_yrs <-rep(yr$study_id, yr$fu_yrs) %>%
     #use min() b/c need 1 value and all vector values are same
     enrollment_yr = seq(1:min(fu_yrs)),
     exposure_year = seq(from=min(intake_yr), to=min(last_visit_yr))) %>%
-  select(study_id, enrollment_yr, exposure_year) %>%
+  select(study_id, fu_yrs, enrollment_yr, exposure_year) %>%
   as.data.frame()
 
 #data that can be used for all analyses 
@@ -202,6 +202,7 @@ dem0.1 <-  dem0.1 %>%
   right_join(enrollment_yrs) %>%
   select(
     study_id:age_end_exposure,
+    fu_yrs,
     enrollment_yr,
     exposure_year:casi_irt
   )
@@ -450,7 +451,9 @@ dem.w %>%
 
 Statistics calculated for individuals for whom we know at least `r min.pct*100`% of their past residential address (e.g., 114/120 months for 10-year avg).
 
-Median NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline.
+Using NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline.
+
+### --> ? create dem.bsl in T1 fn instead so can calculate person-years using nrow(dem1)?
 
 ```{r exposure}
 #participants in M2 at any time point
@@ -490,9 +493,29 @@ bsl.expo.distrib <- dem.bsl %>%
     max = max(exp_avg10_yr)
   )
 
-kable(bsl.expo.distrib, digits = 0, caption = "")
+kable(bsl.expo.distrib, digits = 0, caption = "Air Pollution Levels During Enrollment")
 
 ```
+
+Correlation between NO2 and PM2.5     
+-using 10 yr avgs
+
+```{r}
+# # 1 yr correlations
+# (no2_pm25_1yr_r2 <- with(dem.w, 
+#                          cor(no2_1yr, pm25_1yr, 
+#     method = "pearson", 
+#     use = "complete.obs")^2))
+
+# 10 yr correlations
+(no2_pm25_10yr_r2 <- with(dem.w, 
+                         cor(no2_10yr, pm25_10yr, 
+    method = "pearson", 
+    use = "complete.obs")^2))
+
+
+```
+
 
 ```{r}
 #new variable for being above/below median AP exposure 
@@ -549,6 +572,27 @@ table(fixed.covariates$birth_cohort)
 
 ```
 
+### --> distribution of degree (collapse categories? )
+
+```{r}
+fixed.covariates %>%
+  gather(key = "variable",  value = "value", -study_id) %>%  
+  filter(variable %in% c("degree", "education")) %>%
+  #ggplot(aes(x=birth_cohort, group=birth_cohort)) + 
+  #geom_histogram()
+  ggplot(aes(x=value)) + 
+  geom_histogram() +
+    facet_wrap(~variable, scales = "free")
+
+# issue: what is degree 9? has 2/few individuals 
+table(fixed.covariates$degree)
+table(fixed.covariates$education)
+
+
+# how is degree categorized???
+table(degree = dem.bsl$degree, edu = dem.bsl$education)
+
+```
 
 ### Missingness  
 
@@ -562,9 +606,17 @@ fixed.covariates %>% summaryFull(digit.type = "round")
 
 ```
 
-
 ## Table 1
 Participant baseline characteristics. Percents are calculated based on the number of individuals with available data (missing values removed). Some participants did not have baseline exposure estimates and are thus excluded from above/below median columns. 
+ 
+How others have stratified:
+-most proivde a table for the entire cohort (? & don't state which went into models?)
+- entire cohort vs dementia cases (chen 2017)
+- by exposure quartiles at baseline (baseline was during same time period, e.g., 1993-1995) (Oudin 2016; Chang 2014) ["baseline" was same time period for cohort]
+
+- mean personal AP  
+ 
+### --> add person-years to T1? straighforward for whole cohort (sum(fu_yrs)); but need nrow() for dataset used in strata? 
  
 ```{r}
 #characteristics for entire cohort 
@@ -651,6 +703,23 @@ t1.by.anydementia <- cbind(t1.dem.case, t1.dem.noncase)
 
 kable(t1.by.anydementia, caption = "Cohort Characteristics by Dementia Outcome")
 
+#characteristics by AD status
+t1.ad.case <- dem.bsl %>%
+  #1 row per participant
+  filter(pollutant == "no2") %>%
+  filter(ad_nincds == 1) %>%
+  t1.fn(data = ., column.name = "AD")
+
+t1.ad.noncase <- dem.bsl %>%
+  #1 row per participant
+  filter(pollutant == "no2") %>%
+  filter(ad_nincds == 0) %>%
+  t1.fn(data = ., column.name = "No AD")
+
+t1.by.ad <- cbind(t1.ad.case, t1.ad.noncase)
+
+kable(t1.by.ad, caption = "Cohort Characteristics by AD Outcome")
+
 ```
 
 # Inferential Statistics
@@ -718,8 +787,62 @@ model.vars <- dem.w %>%
 
 ```
 
+### Correlations of variables in models     
+See high correlatin (R^2) between NO2 and PM2.5
+
+```{r}
+#plots
+model.vars %>% 
+  mutate(
+    #make numeric for cor() fn
+    income = as.numeric(income),
+    edu = as.numeric(edu),
+    birth_cohort = as.numeric(birth_cohort),
+    smoke = as.numeric(smoke)
+    ) %>%
+  #select(apoe:bmi) %>%
+  cor(method = "pearson",
+      use ="complete.obs") %>%
+  corrplot::corrplot(method="color")
+ 
+
+# #more descriptive correlation plots but take too long to load
+# model.vars %>% 
+#   mutate(
+#     #make numeric for cor() fn
+#     income = as.numeric(income),
+#     edu = as.numeric(edu),
+#     birth_cohort = as.numeric(birth_cohort),
+#     smoke = as.numeric(smoke)
+#     ) %>%
+#   select(-c(no2_10ppb_1yr:pm25_5ugm3_10yr20yrlag)) %>%
+#   #select(apoe, bmi) %>%
+#   PerformanceAnalytics::chart.Correlation(histogram = T, pch=19)
+
+```
+
+R2 for highly corelated variables (NO2 and PM2.5)
+
+```{r}
+r <- model.vars %>% 
+  mutate(
+    #make numeric for cor() fn
+    income = as.numeric(income),
+    edu = as.numeric(edu),
+    birth_cohort = as.numeric(birth_cohort),
+    smoke = as.numeric(smoke)
+    ) %>%
+    select(no2_10ppb_1yr:pm25_5ugm3_10yr20yrlag) %>%
+  cor(method = "pearson",
+      use ="complete.obs")  
+
+(r2 <- r^2)
+
+```
 
 10 ppb NO2, 10-year avg 
+## --> FIX models.fn(): M6 hr for apoe carriers is wrong. should be exp(no2 + no2:apoe); manually calculate CI & ?pval; create new variable to get HR out?
+## --> ? add to fn: plots of HR w/ CIs vs model # (Tzivian 2016)
 
 ```{r  }
 model.vars %>%
@@ -873,7 +996,7 @@ m2 <- model.vars %>%
           #ties = "exact" #output is weird if use this
     ) 
   
-#m2.s <- m2 %>% summary()
+m2.s <- m2 %>% summary()
   
 ```
 

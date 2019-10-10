@@ -21,6 +21,7 @@ t1.fn <- function(data=dem.bsl,
   t1 <- data %>%
     dplyr::summarize(
       N = n(),
+      #person_years = nrow(),
       age_entry_median = round(median(age_intake), 1),
       age_entry_iqr = round(IQR(age_intake), 1),
       male_n = sum(male),
@@ -82,7 +83,8 @@ t1.fn <- function(data=dem.bsl,
     ) %>%
     #get rid of repeat columns
     select(
-      N,
+      N, 
+      #person_years,
       "Entry age, years (median, IQR)":"Heart Dz (n, %)"
     ) #%>%
   #place NO2 and PM25 next to eachother 
@@ -117,13 +119,16 @@ hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
   u95 <- model.s$conf.int[no2.coef, "upper .95"] %>% round(model.digits) %>% format(nsmall=model.digits)  
   p <- model.s$coefficients[no2.coef, "Pr(>|z|)"] %>% round(model.digits) %>% format(nsmall=model.digits) 
   
-  result <- paste0(hr, 
-                   #" (95% CI: ", 
-                   " (",
-                   l95, ", ", u95, 
-                   #"; p-val: ", 
-                   "; p: ", 
-                   p, ")")
+  #person-years used in model
+  person_years <- model.s$n
+  number_events <- model.s$nevent
+  
+  result <- data.frame(hr = hr,
+                       ci = paste0(l95, "-", u95),
+                       p = p,
+                       person_years = person_years,
+                       number_events = number_events)
+  
   
   return(result)
 }
@@ -132,6 +137,8 @@ hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
 
 ####################################################################################
 # function returns raw model output & table of NO2 HRs
+
+## --> FIX: M6 hr for apoe carriers is wrong.
 
 models.fn <- function(surv.data = dem.w, 
                       surv.time2 = "age_end_exposure", 
@@ -229,23 +236,21 @@ models.fn <- function(surv.data = dem.w,
                        model6 = m6.s)
   
   #dataframe w/ HR output from models
-  no2.hrs <- data.frame(
-    Model = c(c(1:4), "5_nonapoe_carriers", "5_apoe_carriers", 6),
-    hr_ci_pval = c(
-      hr.output.fn(m1.s),
-      hr.output.fn(m2.s),
-      hr.output.fn(m3.s),
-      hr.output.fn(m4.s),
-      hr.output.fn(m5.s),
-      hr.output.fn(m5.s, no2.coef = "no2:apoe"),
-      hr.output.fn(m6.s)
-    )  #%>%
-      #  rename(
-      #    outcome.text = hr_ci_pval
-      # )
-    )
-    
-  names(no2.hrs)[names(no2.hrs) %in% "hr_ci_pval"] <- outcome.text
+  hrs <- rbind(
+    hr.output.fn(m1.s),
+    hr.output.fn(m2.s),
+    hr.output.fn(m3.s),
+    hr.output.fn(m4.s),
+    hr.output.fn(m5.s),
+    # wrong, have to exponentiate(no2 + no2:apoe)
+    hr.output.fn(m5.s, no2.coef = "no2:apoe"),
+    hr.output.fn(m6.s)
+  )
+  
+  
+  no2.hrs <- cbind(
+    Model = c(c(1:4), "5_nonapoe_carriers", "5_apoe_carriers_WRONG", 6),
+    hrs)
   
   return(list(
               table_of_no2_HRs= no2.hrs,
@@ -255,7 +260,7 @@ models.fn <- function(surv.data = dem.w,
   #return(no2.hrs)
 }
 
-#models.fn()[[2]]
+# models.fn() #[[1]]
 
 ####################################################################################
 

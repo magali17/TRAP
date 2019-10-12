@@ -40,7 +40,7 @@ pacman::p_load(dplyr, tidyverse, knitr)
 Clean up count data for use in GIS. 
 
 ```{r}
-traffic <- read.csv(file.path("Data", "Aim 3", "historic-traffic-volumes.csv")) %>%
+traffic <- read.csv(file.path("Data", "Aim 3", "Hx Traffic Counts", "historic-traffic-volumes.csv")) %>%
   filter(Year >= 1990) %>%
   select(Year, AADT, Latitude, Longitude, Location) %>% 
   #group into 5-yr intervals since there is a lot of missing data
@@ -93,6 +93,10 @@ traffic.in.region %>%
 ```
 
 
+#Estimating road segment counts prior to 2005
+
+#### --> ?redo using data from points selected using a road network
+
 Calculate weighted avg of vehicle counts on road segments based on distance of each highway traffic counter (2 traffic counters used per segment).
 
 ```{r}
@@ -127,7 +131,8 @@ myjoin <- myjoin0 %>%
 
 ```
 
-AADT estiamtes in our study region.
+AADT estiamtes in our study region (from points).
+Uses 2005 WADOT road segments as the reference shapefile. 
 
 ```{r}
 HxWtAADT0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/HxWtAvgAADTInStudyArea.csv")
@@ -139,14 +144,14 @@ HxWtAADT <- HxWtAADT0 %>%
     X1990:X2015
   ) %>%
   rename(
-    "1990" = X1990,
-    "1995" = X1995,
-    "2000" = X2000,
-    "2005" = X2005,
-    "2010" = X2010,
-    "2015" = X2015
-    ) %>%
-  gather(Year = "1990":"2015", "Year", "AADT")
+    "AADT_points_1990_94" = X1990,
+    "AADT_points_1995_99" = X1995,
+    "AADT_points_2000_04" = X2000,
+    "AADT_points_2005_09" = X2005,
+    "AADT_points_2010_14" = X2010,
+    "AADT_points_2015_18" = X2015
+    ) #%>%
+  #gather(Year = "1990":"2015", "Year", "AADT")
 
 # traffic %>%
 #   ggplot(aes(x=AADT, fill=Ramp)) + 
@@ -154,4 +159,151 @@ HxWtAADT <- HxWtAADT0 %>%
 #   facet_wrap(~Yr_grp)
 
 ```
+
+## Validation 
+WADOT Road section estimates from 2005-2018, calculate 5-year averages & later compare to weighted avgs. 2005 used as the reference shapefile. 
+
+```{r}
+sections0 <- read.csv("~/Everything/School/PhD_UW/Dissertation/Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/2005_2018_InStudy.csv")
+
+sections <- sections0 %>%
+  select(
+    OBJECTID,
+    AADT_sections_2005 = Year_2005,
+    AADT_sections_2006 = X2006_Year_,
+    AADT_sections_2007 = X2007_Year_,
+    AADT_sections_2008 = X2008_Year_,
+    AADT_sections_2009 = X2009_Year_,
+    AADT_sections_2010 = X2010_Year_,
+    AADT_sections_2011 = X2011_Year_,
+    AADT_sections_2012 = X2012_ESTAA,
+    AADT_sections_2013 = X2013_Year_, 
+    AADT_sections_2014 = X2014_Year_,
+    AADT_sections_2015 = X2015_Year_,
+    AADT_sections_2016 = X2016_AADT,
+    AADT_sections_2017 = X2017_AADT,
+    AADT_sections_2018 = X2018_AADT,
+    
+    #distnace beween 2005 road segment and nearest road segment joined for each year
+    dist_ft_06 = distance06,
+    dist_ft_07 = distance07,
+    dist_ft_08 = distance08,
+    dist_ft_09 = distance09,
+    dist_ft_10 = distance10,
+    dist_ft_11 = distance11,
+    dist_ft_12 = distance12,
+    dist_ft_13 = distance13,
+    dist_ft_14 = distance14,
+    dist_ft_15 = distance15,
+    dist_ft_16 = distance16,
+    dist_ft_17 = distance17,
+    dist_ft_18 = distance18,
+   )  
+
+#calculate 5-year averages AADT estimates from road sections
+sections$AADT_sections_2005_09 <- sections %>% 
+  select(AADT_sections_2005:AADT_sections_2009) %>%
+  rowMeans()
+
+sections$AADT_sections_2010_14 <- sections %>% 
+  select(AADT_sections_2010:AADT_sections_2014) %>%
+  rowMeans()
+
+sections$AADT_sections_2015_18 <- sections %>% 
+  select(AADT_sections_2015:AADT_sections_2018) %>%
+  rowMeans()
+
+#rearrange columns
+sections <- sections %>%
+  select(OBJECTID,
+         AADT_sections_2005_09:AADT_sections_2015_18,
+         AADT_sections_2005:dist_ft_18)
+
+```
+
+```{r}
+#check that files are the same before merging #looks good 
+# nrow(HxWtAADT0) == nrow(sections)
+# table(HxWtAADT0$OBJECTID == sections$OBJECTID)
+# table(HxWtAADT0$Year_2005 == sections$AADT2005)
+
+#merge
+compare <- sections %>%
+  select(
+    OBJECTID,
+    AADT_sections_2005_09: AADT_sections_2015_18
+  ) %>%
+  left_join(HxWtAADT[c("OBJECTID", 
+                       "AADT_points_2005_09",
+                       "AADT_points_2010_14",
+                       "AADT_points_2015_18"
+                       )]
+            )
+
+```
+
+```{r comparison plot fn}
+#plots
+# returns plots w/ linear fit, R2 and RMSE
+compare.fn <- function(mydata = compare, x, y) {
+
+  # x = "AADT_sections_2005_09"
+  # y = "AADT_points_2005_09"
+  mydata <- mydata %>%
+    rename(x = x,
+           y = y)
+  
+  lm1 <- lm(y~x, data=mydata) 
+  lm1.s <- lm1 %>% 
+    summary()
+  
+  eqt <- paste0("y = ", 
+                round(lm1.s$coefficients["(Intercept)", "Estimate"]),
+                " + ",
+                round(lm1.s$coefficients["x", "Estimate"], 1),
+                "x"
+                )
+  r2 <- paste0(
+    "R2 = ",
+    round(lm1.s$r.squared, 2)
+  )
+  
+  rmse <- paste0("RMSE = ", sqrt(mean((predict(lm1) - mydata$y)^2)) %>% round()
+                  )
+  
+  myresult <- mydata %>%
+    ggplot(aes(x=x, y= y)) + 
+    geom_point() + 
+    geom_smooth() + 
+    #1-1 line
+    geom_abline(intercept = 0, slope = 1) + 
+    labs(x = x, y=y,
+        subtitle = paste(eqt, "\n",
+                         r2, "\n",
+                         rmse)
+         )
+  
+  return(myresult)
+  
+}
  
+```
+
+Estimates from lines (not using road network) are not great. 
+
+```{r}
+## 2005-2009
+compare.fn(x= "AADT_sections_2005_09",
+           y = "AADT_points_2005_09")
+
+## 2010 - 2014
+compare.fn(x= "AADT_sections_2010_14",
+           y = "AADT_points_2010_14")
+
+## 2015 - 2018
+compare.fn(x= "AADT_sections_2015_18",
+           y = "AADT_points_2015_18")
+
+```
+
+

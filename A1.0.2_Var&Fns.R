@@ -5,8 +5,8 @@
 #minimum percent of months required for us to consider a prediction "valid"
 min.pct <- 0.95
 
-no2.units <- 10  #ppb
-pm25.units <- 5 #ug/m3
+my.no2.units <- 10  #ppb
+my.pm25.units <- 5 #ug/m3
 
 model.digits <- 2
 
@@ -14,14 +14,16 @@ model.digits <- 2
 ################################ FUNCTIONS ######################################## 
 ###################################################################################
 #function renturns Table 1 summary statistics for a given dataset, with a column name describing group 
-t1.fn <- function(data=dem.bsl, 
+t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",], 
                   #description variables
                   column.name = "entire cohort") {  
   
   t1 <- data %>%
     dplyr::summarize(
       N = n(),
-      #person_years = nrow(),
+      #person_years = nrow(data),
+      follow_up_yrs_mean = round(mean(fu_yrs), 1), 
+      follow_up_yrs_sd = round(sd(fu_yrs), 1),
       age_entry_median = round(median(age_intake), 1),
       age_entry_iqr = round(IQR(age_intake), 1),
       male_n = sum(male),
@@ -30,8 +32,24 @@ t1.fn <- function(data=dem.bsl,
       race_nonwhite_n = sum(race !=1, na.rm = T),
       race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
       edu_known_n = sum(!is.na(degree)),
-      edu_beyond_hs_n = sum(degree >2, na.rm = T),
-      edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
+      degree_known_n = sum(!is.na(degree)),
+      degree0_n = sum(degree ==0, na.rm = T),
+      degree0_pct = round(degree0_n/degree_known_n*100, 1),
+      degree1_n = sum(degree ==1, na.rm = T),
+      degree1_pct = round(degree1_n/degree_known_n*100, 1),
+      degree2_n = sum(degree ==2, na.rm = T),
+      degree2_pct = round(degree2_n/degree_known_n*100, 1),
+      degree3_n = sum(degree ==3, na.rm = T),
+      degree3_pct = round(degree3_n/degree_known_n*100, 1),
+      degree4_n = sum(degree ==4, na.rm = T),
+      degree4_pct = round(degree4_n/degree_known_n*100, 1),
+      degree5_n = sum(degree ==5, na.rm = T),
+      degree5_pct = round(degree5_n/degree_known_n*100, 1),
+      degree6_n = sum(degree ==6, na.rm = T),
+      degree6_pct = round(degree6_n/degree_known_n*100, 1),
+      # edu_known_n = sum(!is.na(degree)),
+      # edu_beyond_hs_n = sum(degree >2, na.rm = T),
+      # edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
       income_median = median(tr_med_inc_hshld, na.rm = T),
       income_iqr = round(IQR(tr_med_inc_hshld, na.rm = T), 1),
       apoe_known_n = sum(!is.na(apoe)),
@@ -44,13 +62,23 @@ t1.fn <- function(data=dem.bsl,
       smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
       smoke_current_n = sum(smoke==2, na.rm = T),
       smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
-      exercise_median = median(exercise, na.rm = T),
-      exercise_iqr = round(IQR(exercise, na.rm = T), 1),
+      # exercise_median = median(exercise, na.rm = T),
+      # exercise_iqr = round(IQR(exercise, na.rm = T), 1),
       exercise_regular_known_n = sum(!is.na(exercise_reg)),
       exercise_regular_n = sum(exercise_reg==1, na.rm = T),
       exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1),
-      bmi_median = median(bmi, na.rm = T),
-      bmi_iqr = round(IQR(bmi, na.rm = T), 1),
+      # bmi_median = median(bmi, na.rm = T),
+      # bmi_iqr = round(IQR(bmi, na.rm = T), 1),
+      #add categorical BMI
+      bmi_known_n = sum(!is.na(bmi4)),
+      bmi_under_n = sum(bmi4==0, na.rm = T),
+      bmi_under_pct = round(bmi_under_n/bmi_known_n*100, 1),
+      bmi_normal_n = sum(bmi4==1, na.rm = T),
+      bmi_normal_pct = round(bmi_normal_n/bmi_known_n*100, 1),
+      bmi_over_n = sum(bmi4==2, na.rm = T),
+      bmi_over_pct = round(bmi_over_n/bmi_known_n*100, 1),
+      bmi_obese_n = sum(bmi4==3, na.rm = T),
+      bmi_obese_pct = round(bmi_obese_n/bmi_known_n*100, 1),
       hypertension_known_n = sum(!is.na(Hypertension)),
       hypertension_n = sum(Hypertension == 1, na.rm=T),
       hypertension_pct = round(hypertension_n/hypertension_known_n*100, 1),
@@ -65,17 +93,29 @@ t1.fn <- function(data=dem.bsl,
       heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, 1)
     ) %>%
     mutate(
+      "Follow-up years (mean, SD)" = paste0(follow_up_yrs_mean, " (", follow_up_yrs_sd, ")"),
       "Entry age, years (median, IQR)" = paste0(age_entry_median, " (", age_entry_iqr, ")"),
       "Male (n, %)" = paste0(male_n, " (", male_pct, "%)"),
       "Race, nonwhite (n, %)" = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
-      "Beyond HS Education (n, %)" = paste0(edu_beyond_hs_n, " (", edu_beyond_hs_pct, "%)"),
+      "Degree, None (n, %)" = paste0(degree0_n, " (", degree0_pct, "%)"),
+      "Degree, GED (n, %)" = paste0(degree1_n, " (", degree1_pct, "%)"),
+      "Degree, HS (n, %)" = paste0(degree2_n, " (", degree2_pct, "%)"),
+      "Degree, Bachelor's (n, %)" = paste0(degree3_n, " (", degree3_pct, "%)"),
+      "Degree, Master's (n, %)" = paste0(degree4_n, " (", degree4_pct, "%)"),
+      "Degree, Doctorate (n, %)" = paste0(degree5_n, " (", degree5_pct, "%)"),
+      "Degree, Other (n, %)" = paste0(degree6_n, " (", degree6_pct, "%)"),
+      #"Beyond HS Education (n, %)" = paste0(edu_beyond_hs_n, " (", edu_beyond_hs_pct, "%)"),
       "APOE carrier (n, %)" = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
       "Smoke, never (n, %)" = paste0(smoke_never_n, " (", smoke_never_pct, "%)"),
       "Smoke, former (n, %)" = paste0(smoke_former_n, " (", smoke_former_pct, "%)"),
       "Smoke, current (n, %)" = paste0(smoke_current_n, " (", smoke_current_pct, "%)"),
-      "Exercise (median, IQR)" = paste0(exercise_median, " (", exercise_iqr, ")"),
+      #"Exercise (median, IQR)" = paste0(exercise_median, " (", exercise_iqr, ")"),
       "Regular exercise (n, %)" = paste0(exercise_regular_n, " (", exercise_regular_pct, "%)"),
-      "BMI (median, IQR)" = paste0(bmi_median, " (", bmi_iqr, ")"),
+      #"BMI (median, IQR)" = paste0(bmi_median, " (", bmi_iqr, ")"),
+      "BMI, Underweight (n, %)" = paste0(bmi_under_n, " (", bmi_under_pct, "%)"),
+      "BMI, Normal (n, %)" = paste0(bmi_normal_n, " (", bmi_normal_pct, "%)"),
+      "BMI, Overweight (n, %)" = paste0(bmi_over_n, " (", bmi_over_pct, "%)"),
+      "BMI, Obese (n, %)" = paste0(bmi_obese_n, " (", bmi_obese_pct, "%)"),
       "Hypertension (n, %)" = paste0(hypertension_n, " (", hypertension_pct, "%)"),
       "Diabetes (n, %)" = paste0(diabetes_n, " (", diabetes_pct, "%)"),
       "Cardiovascular Dz (n, %)" = paste0(cv_dis_n, " (", cv_dis_pct, "%)"),
@@ -85,11 +125,8 @@ t1.fn <- function(data=dem.bsl,
     select(
       N, 
       #person_years,
-      "Entry age, years (median, IQR)":"Heart Dz (n, %)"
+      "Follow-up years (mean, SD)":"Heart Dz (n, %)"
     ) #%>%
-  #place NO2 and PM25 next to eachother 
-  #arrange(group)
-   
   
   # transpose
   t1 <- t(t1) %>% 
@@ -99,8 +136,7 @@ t1.fn <- function(data=dem.bsl,
   names(t1) <- column.name
   
   return(t1) 
-}
-
+  }
 
 # View(t1.fn())
 #  
@@ -114,20 +150,22 @@ t1.fn <- function(data=dem.bsl,
 #function returns model output: HR, 95% CI, p-value
 hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
   #model.s = m5.s
-  hr <- model.s$conf.int[no2.coef, "exp(coef)"] %>% round(model.digits) %>% format(nsmall=model.digits) 
-  l95 <- model.s$conf.int[no2.coef, "lower .95"] %>% round(model.digits) %>% format(nsmall=model.digits)  
-  u95 <- model.s$conf.int[no2.coef, "upper .95"] %>% round(model.digits) %>% format(nsmall=model.digits)  
-  p <- model.s$coefficients[no2.coef, "Pr(>|z|)"] %>% round(model.digits) %>% format(nsmall=model.digits) 
+  hr <- model.s$conf.int[no2.coef, "exp(coef)"] %>% round(model.digits) #%>% format(nsmall=model.digits) 
+  l95 <- model.s$conf.int[no2.coef, "lower .95"] %>% round(model.digits) #%>% format(nsmall=model.digits)  
+  u95 <- model.s$conf.int[no2.coef, "upper .95"] %>% round(model.digits) #%>% format(nsmall=model.digits)  
+  p <- model.s$coefficients[no2.coef, "Pr(>|z|)"] %>% round(model.digits) #%>% format(nsmall=model.digits) 
   
   #person-years used in model
   person_years <- model.s$n
   number_events <- model.s$nevent
   
   result <- data.frame(hr = hr,
-                       ci = paste0(l95, "-", u95),
+                       lower_limit = l95,
+                       upper_limit = u95,
+                       #ci = paste0(l95, "-", u95),
                        p = p,
                        person_years = person_years,
-                       number_events = number_events)
+                       number_events = number_events)  
   
   
   return(result)
@@ -136,26 +174,55 @@ hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
 #hr.output.fn(model.s = m2.s)
 
 ####################################################################################
-# function returns raw model output & table of NO2 HRs
+# returns raw model output & table of NO2 HRs
 
-## --> FIX: M6 hr for apoe carriers is wrong.
-
-models.fn <- function(surv.data = dem.w, 
+models.fn <- function(mydata = dem.w, 
                       surv.time2 = "age_end_exposure", 
                       surv.event = "dementia_now", 
                       outcome.text = "All-cause Dementia",
-                      model.vars.data = model.vars) {
+                      no2.var = "no2_10yr",
+                      pm25.var = "pm25_10yr",
+                      no2.units = my.no2.units,
+                      pm25.units = my.pm25.units) {
+  
+  #rename variables for fns
+  mydata <- mydata %>%
+    #want to rename categorical bmi4 as bmi later
+    select(-bmi) %>%
+    rename(
+      #m1 
+      no2 = no2.var,
+      #m2
+      income = income_cat,
+      edu = degree,
+      #m3
+      bmi = bmi4,
+      #m6
+      pm25 = pm25.var
+    ) %>%
+    mutate(
+      #make factors
+      income = factor(income),
+      edu = factor(edu),
+      birth_cohort = factor(birth_cohort),
+      smoke = factor(smoke),
+      bmi = factor(bmi),
+      
+      #adjust AP units
+      no2 = no2/no2.units,
+      pm25 = pm25/pm25.units,
+    )  
   
   #create a survival object
   s.dem <- Surv(
-    time = as.numeric(unlist(surv.data["age_start_exposure"])),  
-    time2 = as.numeric(unlist(surv.data[surv.time2])) ,  
-    event = as.numeric(unlist(surv.data[surv.event]))
+    time = as.numeric(unlist(mydata["age_start_exposure"])),  
+    time2 = as.numeric(unlist(mydata[surv.time2])) ,  
+    event = as.numeric(unlist(mydata[surv.event]))
   )
   
-  
+
   #Model 1 (Reduced): Age (time axis), NO2 (time-varying) 
-  m1 <- model.vars.data %>%
+  m1 <- mydata %>%
     coxph(s.dem ~ no2, 
           data=., 
           robust = F,
@@ -168,7 +235,7 @@ models.fn <- function(surv.data = dem.w,
   
   ##### --> categorize birth cohort into larger categories - 20 yrs? 
   
-  m2 <- model.vars.data %>%
+  m2 <- mydata %>%
     coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
             #factor(degree) + factor(birth_cohort), 
             edu +  birth_cohort, 
@@ -185,7 +252,7 @@ models.fn <- function(surv.data = dem.w,
   
   
   #M3 (extended): M2 + smoking + physical activity 
-  m3 <- model.vars.data %>%
+  m3 <- mydata %>%
     coxph(s.dem ~ no2 + 
             male + edu + race_white + income + birth_cohort + strata(apoe) + 
             smoke + exercise_reg, 
@@ -196,7 +263,7 @@ models.fn <- function(surv.data = dem.w,
   
   
   #Model 4 (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
-  m4 <- model.vars.data %>%
+  m4 <- mydata %>%
     coxph(s.dem ~ no2 + 
             male + edu + race_white + income + birth_cohort + strata(apoe) + 
             smoke + exercise_reg +
@@ -207,18 +274,23 @@ models.fn <- function(surv.data = dem.w,
   m4.s <- m4 %>% summary()
   
   #Model 5 (APOE interaction): M2 + NO2*APOE
-  m5 <- model.vars.data %>%
-    coxph(s.dem ~ no2 + 
-            male + edu + race_white + income + birth_cohort + strata(apoe) +
-            no2*apoe , 
+  ## create single variable for interaction term so that interaction HRs is directly interpretable #see B537 L3 # 56
+  mydata <- mydata %>%
+    mutate(
+      no2_noapoe = (1-apoe)*no2,
+      no2_apoe = apoe*no2
+    )
+ 
+  m5 <- mydata %>%
+    coxph(s.dem ~ no2_noapoe + no2_apoe + apoe +
+            male + edu + race_white + income + birth_cohort + strata(apoe),
           data=., 
           robust = T,
     ) 
   m5.s <- m5 %>% summary()
   
-  
   #Model 6 (copollutant): M2 + PM2.5 (time-varying)
-  m6 <- model.vars.data %>%
+  m6 <- mydata %>%
     coxph(s.dem ~ no2 +
             male + race_white + income + edu + birth_cohort + strata(apoe) +
             pm25,  
@@ -241,26 +313,69 @@ models.fn <- function(surv.data = dem.w,
     hr.output.fn(m2.s),
     hr.output.fn(m3.s),
     hr.output.fn(m4.s),
-    hr.output.fn(m5.s),
-    # wrong, have to exponentiate(no2 + no2:apoe)
-    hr.output.fn(m5.s, no2.coef = "no2:apoe"),
+    hr.output.fn(m5.s, no2.coef = "no2_noapoe"),
+    hr.output.fn(m5.s, no2.coef = "no2_apoe"),
     hr.output.fn(m6.s)
   )
   
   
   no2.hrs <- cbind(
-    Model = c(c(1:4), "5_nonapoe_carriers", "5_apoe_carriers_WRONG", 6),
-    hrs)
+    Model = factor(c("1. Reduced", "2. Primary", "3. Extended", "4. Extended & Mediation", "5. Interaction (no APOE)", "5. Interaction (APOE)", "6. PM2.5 Adjusted"), 
+                   levels = c("1. Reduced", "2. Primary", "3. Extended", "4. Extended & Mediation", "5. Interaction (no APOE)", "5. Interaction (APOE)", "6. PM2.5 Adjusted")),
+    exposure = substr(no2.var, 5, nchar(no2.var)),
+    hrs
+    )  
   
   return(list(
               table_of_no2_HRs= no2.hrs,
               raw_model_output = model.ouputs
               )
          )
+  
   #return(no2.hrs)
 }
 
-# models.fn() #[[1]]
+#models.fn() #[[1]]
 
-####################################################################################
+###############################################################################
+#returns HR plot for models.fn()$table_of_no2_HRs  
+
+# example code: https://datascienceplus.com/lattice-like-forest-plot-using-ggplot2-in-r/ 
+
+hr.plot <- function(mydata) {
+  p <- mydata %>%
+    ggplot(aes(x=exposure, 
+               y=hr, ymin=lower_limit, ymax=upper_limit,
+               col=exposure)) + 
+    geom_pointrange() + 
+    geom_errorbar() +
+    geom_hline(yintercept = 1, linetype=2) + 
+    labs(y= "Hazard Ratio (95% CI)",
+         x = "NO2 Exposure Period",
+         title = "NO2 (10 ppb) hazard ratios for models, using different exposure time periods"
+         ) + 
+    facet_wrap(~Model, 
+               labeller = "label_both",
+               #strip.position="left",
+               nrow=7) +
+    theme(
+      legend.position = "none",
+      #axis.text.y=element_blank(),
+      axis.ticks.y=element_blank(),
+      # strip.text.y = element_text(hjust=0,vjust = 1,angle=180
+      ) +  
+  coord_flip() 
+
+  return(p)
+}
+
+
+# rbind(no2_1yr_models[[1]],
+#       no2_5yr_models[[1]],
+#       no2_10yr_models[[1]],
+#       #no2_20yr_models[[1]], #error, very large CI
+#       no2_10yr10yrlag_models[[1]],
+#       no2_10yr20yrlag_models[[1]]
+#       )%>%
+#   hr.plot(.)
 

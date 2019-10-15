@@ -20,6 +20,9 @@ editor_options:
 
 # see BIOST 537 Ch 5 Lecture, slide 33/57 
 
+#plot multiple saved plots 
+#grid.arrange(plot.interact, plot.complex, ncol = 2)
+
 ```
 
 ```{r setup, include=FALSE}
@@ -41,7 +44,6 @@ pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats)  #Himsc: desc
 
 source("A1.0.2_Var&Fns.R")
 
-#dem0.0 <- read_sas(file.path("Data", "Aim 1", "issue_001_3.sas7bdat"), NULL)
 dem0.0 <- read_sas(file.path("Data", "Aim 1", "issue_001_4.sas7bdat"), NULL)
 
 #remove SAS labels
@@ -105,14 +107,14 @@ dem0.1 <- dem0.0 %>%
     age_act = round(ifelse(!is.na(age_onset), age_onset, age_last_visit), 3),
     #calculate birth cohort every 10 yrs since only 1 person born btwn 1890-1894 & this causes a model error
     birth_cohort = round(as.numeric(format(birthdt, "%Y")), -1),
-    birth_cohort = ifelse(birth_cohort >= min(birth_cohort) & 
-                            birth_cohort < min(birth_cohort) + 20, min(birth_cohort),
-                          ifelse(
-                            birth_cohort >= min(birth_cohort) + 20 & 
-                            birth_cohort < min(birth_cohort) + 20*2, min(birth_cohort) + 20,
-                            min(birth_cohort) + 20*2
-                            )
-                          ),
+    # birth_cohort = ifelse(birth_cohort >= min(birth_cohort) & 
+    #                         birth_cohort < min(birth_cohort) + 20, min(birth_cohort),
+    #                       ifelse(
+    #                         birth_cohort >= min(birth_cohort) + 20 & 
+    #                         birth_cohort < min(birth_cohort) + 20*2, min(birth_cohort) + 20,
+    #                         min(birth_cohort) + 20*2
+    #                         )
+    #                       ),
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
     dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
@@ -140,18 +142,17 @@ dem0.1 <- dem0.0 %>%
     #bmi4 = factor(bmi4, levels = c(0:3), labels = c("underweight", "normal", "overweight", "obese")),
     ## filter out invalid casi scores 
     casi_irt = ifelse(casi_valid ==1, casi_irt, NA),
-    income_cat = ifelse(tr_med_inc_hshld < 20000, 1,
-                               ifelse(tr_med_inc_hshld >= 20000 & tr_med_inc_hshld < 35000, 2,
-                                      ifelse(tr_med_inc_hshld >= 35000 & tr_med_inc_hshld < 50000, 3,
-                                             ifelse(tr_med_inc_hshld >= 50000 & tr_med_inc_hshld < 75000, 4, 5)
-                                             ))),
-    race_white = ifelse(race==1, 1, 0)
+    #original income catgory 1 only  had 7 individuals (too small)
+    income_cat = #ifelse(tr_med_inc_hshld < 20000, 1,
+                               ifelse(tr_med_inc_hshld < 35000, 1, #tr_med_inc_hshld >= 20000 & 
+                                      ifelse(tr_med_inc_hshld >= 35000 & tr_med_inc_hshld < 50000, 2,
+                                             ifelse(tr_med_inc_hshld >= 50000 & tr_med_inc_hshld < 75000, 3, 4)
+                                             )), #),
+    race_white = ifelse(race == 1, 1, 0),
+    # --> ?replace degree=9 w/ NA? no definition for degree=9 in data dictionary
+    degree = ifelse(degree != 9, degree, NA)
+    
     ) %>%
-  # group_by(study_id, pollutant) %>%
-  # mutate(
-  #   #calculate how long someone has been followed for
-  #   enrollment_yr = seq(1:n())
-  #   ) %>%
   select(
     study_id,
     birthdt, birth_cohort, intakedt, onsetdate, last_visit, 
@@ -453,8 +454,6 @@ Statistics calculated for individuals for whom we know at least `r min.pct*100`%
 
 Using NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline.
 
-### --> ? create dem.bsl in T1 fn instead so can calculate person-years using nrow(dem1)?
-
 ```{r exposure}
 #participants in M2 at any time point
 m2.participants <- dem1 %>%
@@ -497,22 +496,16 @@ kable(bsl.expo.distrib, digits = 0, caption = "Air Pollution Levels During Enrol
 
 ```
 
-Correlation between NO2 and PM2.5     
+Correlation between NO2 and PM2.5 seem high.    
+-confounding may be an issue
 -using 10 yr avgs
 
 ```{r}
-# # 1 yr correlations
-# (no2_pm25_1yr_r2 <- with(dem.w, 
-#                          cor(no2_1yr, pm25_1yr, 
-#     method = "pearson", 
-#     use = "complete.obs")^2))
-
 # 10 yr correlations
 (no2_pm25_10yr_r2 <- with(dem.w, 
-                         cor(no2_10yr, pm25_10yr, 
-    method = "pearson", 
-    use = "complete.obs")^2))
-
+                         cor(no2_10yr, pm25_10yr,
+                             method = "pearson",
+                             use = "complete.obs")^2))
 
 ```
 
@@ -572,7 +565,7 @@ table(fixed.covariates$birth_cohort)
 
 ```
 
-### --> distribution of degree (collapse categories? )
+Degree.
 
 ```{r}
 fixed.covariates %>%
@@ -585,14 +578,32 @@ fixed.covariates %>%
     facet_wrap(~variable, scales = "free")
 
 # issue: what is degree 9? has 2/few individuals 
-table(fixed.covariates$degree)
-table(fixed.covariates$education)
+table(degree = fixed.covariates$degree)
+table(edu = fixed.covariates$education)
 
 
 # how is degree categorized???
-table(degree = dem.bsl$degree, edu = dem.bsl$education)
+table(degree = fixed.covariates$degree, edu = fixed.covariates$education)
 
 ```
+
+Income. Only 7 individuals in income category 1. Combine categories 1 and 2?
+
+```{r}
+fixed.covariates %>%
+  gather(key = "variable",  value = "value", -study_id) %>%  
+  filter(variable %in% c("income_cat", "tr_med_inc_hshld")) %>%
+  #ggplot(aes(x=birth_cohort, group=birth_cohort)) + 
+  #geom_histogram()
+  ggplot(aes(x=value)) + 
+  geom_histogram() +
+    facet_wrap(~variable, scales = "free")
+
+table(income_cat = fixed.covariates$income_cat)
+
+```
+
+
 
 ### Missingness  
 
@@ -616,15 +627,13 @@ How others have stratified:
 
 - mean personal AP  
  
-### --> add person-years to T1? straighforward for whole cohort (sum(fu_yrs)); but need nrow() for dataset used in strata? 
- 
 ```{r}
 #characteristics for entire cohort 
 t1.all <- dem.bsl %>% 
 #1 row per participant
   filter(pollutant == "no2") %>%
   unique() %>%
-  t1.fn()
+  t1.fn(data=.)
 
 kable(t1.all, caption = "Cohort Baseline Characteristics")
 
@@ -727,8 +736,10 @@ kable(t1.by.ad, caption = "Cohort Characteristics by AD Outcome")
  
 ## Primary Analysis, Redued & Extended Models
 
+"Hazard of dementia incidence is __% higher for every additional 10 ppb of NO2 exposure in the past 10 years.
+
 ```{r}
-#dataset with variables of interest for use in model function.  
+#dataset with model variables of interest for descriptive purposes (similar dataset generated in models.fn())
 model.vars <- dem.w %>%
   select(
     #m1 & sensitivity
@@ -752,7 +763,6 @@ model.vars <- dem.w %>%
     #m6
     pm25_1yr:pm25_20yr,
     #pm25_10yr
-    
     ) %>%
   mutate(
   #make factors
@@ -762,25 +772,21 @@ model.vars <- dem.w %>%
     smoke = factor(smoke),
     
     #make 10 ppb units
-    no2_10ppb_1yr = no2_1yr/no2.units,
-    no2_10ppb_5yr = no2_5yr/no2.units,
-    no2_10ppb_10yr = no2_10yr/no2.units,
-    no2_10ppb_20yr = no2_20yr/no2.units,
-    no2_10ppb_10yr10yrlag = no2_10yr10yrlag/no2.units,
-    no2_10ppb_10yr20yrlag = no2_10yr20yrlag/no2.units,
+    no2_10ppb_1yr = no2_1yr/my.no2.units,
+    no2_10ppb_5yr = no2_5yr/my.no2.units,
+    no2_10ppb_10yr = no2_10yr/my.no2.units,
+    no2_10ppb_20yr = no2_20yr/my.no2.units,
+    no2_10ppb_10yr10yrlag = no2_10yr10yrlag/my.no2.units,
+    no2_10ppb_10yr20yrlag = no2_10yr20yrlag/my.no2.units,
     
     #make 5 mg/m3
-    pm25_5ugm3_1yr = pm25_1yr/pm25.units,
-    pm25_5ugm3_5yr = pm25_5yr/pm25.units,
-    pm25_5ugm3_10yr = pm25_10yr/pm25.units,
-    pm25_5ugm3_20yr = pm25_20yr/pm25.units,
-    pm25_5ugm3_10yr10yrlag = pm25_10yr10yrlag/pm25.units,
-    pm25_5ugm3_10yr20yrlag = pm25_10yr20yrlag/pm25.units,
-    
-    #pm25_5ugm3_10yr = pm25_10yr/pm25.units
-    
-    
-  ) %>%
+    pm25_5ugm3_1yr = pm25_1yr/my.pm25.units,
+    pm25_5ugm3_5yr = pm25_5yr/my.pm25.units,
+    pm25_5ugm3_10yr = pm25_10yr/my.pm25.units,
+    pm25_5ugm3_20yr = pm25_20yr/my.pm25.units,
+    pm25_5ugm3_10yr10yrlag = pm25_10yr10yrlag/my.pm25.units,
+    pm25_5ugm3_10yr20yrlag = pm25_10yr20yrlag/my.pm25.units,
+   ) %>%
   #drop these columns to avoid confusion, since using 10 ppb for NO2 and 5 ug/m3 for pm2.5
   select(-c(no2_1yr:no2_20yr, 
             pm25_1yr:pm25_20yr)) 
@@ -788,7 +794,8 @@ model.vars <- dem.w %>%
 ```
 
 ### Correlations of variables in models     
-See high correlatin (R^2) between NO2 and PM2.5
+
+See high correlatin (R^2) between NO2 and PM2.5. Results may be confounded by PM2.5.
 
 ```{r}
 #plots
@@ -807,7 +814,7 @@ model.vars %>%
  
 
 # #more descriptive correlation plots but take too long to load
-# model.vars %>% 
+# model.vars %>%
 #   mutate(
 #     #make numeric for cor() fn
 #     income = as.numeric(income),
@@ -819,11 +826,6 @@ model.vars %>%
 #   #select(apoe, bmi) %>%
 #   PerformanceAnalytics::chart.Correlation(histogram = T, pch=19)
 
-```
-
-R2 for highly corelated variables (NO2 and PM2.5)
-
-```{r}
 r <- model.vars %>% 
   mutate(
     #make numeric for cor() fn
@@ -836,87 +838,77 @@ r <- model.vars %>%
   cor(method = "pearson",
       use ="complete.obs")  
 
-(r2 <- r^2)
+r2 <- r^2
+
+kable(r2, caption = "R2", digits = 3)
 
 ```
 
 10 ppb NO2, 10-year avg 
-## --> FIX models.fn(): M6 hr for apoe carriers is wrong. should be exp(no2 + no2:apoe); manually calculate CI & ?pval; create new variable to get HR out?
+
 ## --> ? add to fn: plots of HR w/ CIs vs model # (Tzivian 2016)
 
 ```{r  }
-model.vars %>%
-  #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
-  rename(
-    no2 = no2_10ppb_10yr,
-    pm25 = pm25_5ugm3_10yr
-    ) %>%
-  models.fn(model.vars.data = .) 
- 
-  
+#use default settings
+(no2_10yr_models <- models.fn() #[[1]]
+ ) 
+
+# t <- models.fn()
+# t <- t$table_of_no2_HRs  
+
+```
+
+## --> fix birth_cohort30 has NAs
+-birth_cohort30 is associated with: only 1 person w/ 11 fu yrs, never gets dementia 
+
+```{r}
+#only 1 person (11 entries) in ref category for birth_cohort1930
+model.vars %>% #mydata
+  filter(male==0,
+         race_white==0,
+         income == 1,
+         edu == 0,
+         birth_cohort==1930,
+         !is.na(apoe)
+         ) %>%
+  kable()
+
 ```
 
 
 ## Other Sensitivity Analyses    
-### AD outcome 
-
-#### --> double check that these #s are correct
-
-```{r}
-#need new Surv() object
-model.vars %>%
-  #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
-  rename(
-    no2 = no2_10ppb_10yr,
-    pm25 = pm25_5ugm3_10yr
-    ) %>%
-  models.fn(model.vars.data = ., 
-            surv.event = "ad_now",
-            outcome.text = "AD",) 
-
-
-```
-
 ### Different Exposure Windows   
 
 Using past 1-year average exposure for NO2 and PM2.5 
 
 ```{r}
-model.vars %>%
-  #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
-  rename(
-    no2 = no2_10ppb_1yr,
-    pm25 = pm25_5ugm3_1yr
-    ) %>%
-  models.fn(model.vars.data = .) 
+
+(no2_1yr_models <- models.fn(no2.var = "no2_1yr", 
+          pm25.var = "pm25_1yr"
+          ) #[[1]]
+)
 
 ```
 
 Using past 5-year average exposure for NO2 and PM2.5 
 
 ```{r}
-model.vars %>%
-  #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
-  rename(
-    no2 = no2_10ppb_5yr,
-    pm25 = pm25_5ugm3_5yr
-    ) %>%
-  models.fn(model.vars.data = .) 
+(no2_5yr_models <- models.fn(no2.var = "no2_5yr", 
+          pm25.var = "pm25_5yr"
+          ) #[[1]]
+)
 
 ```
 
 Using past 20-year average exposure for NO2 and PM2.5 
 
-#### --> error in M6 output
+-few ppl
 
 ```{r}
-model.vars %>%
-  #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
-  rename(
-    no2 = no2_10ppb_20yr,
-    pm25 = pm25_5ugm3_20yr
-    ) %>%
-  models.fn(model.vars.data = .) 
+(no2_20yr_models <- models.fn(no2.var = "no2_20yr", 
+          pm25.var = "pm25_20yr"
+          ) #[[1]]
+)
 
 ```
 
@@ -925,13 +917,10 @@ Using past 10-year w/ 10 yr lag average exposure for NO2 and PM2.5
 #### --> error. infinite values created. too few ppl? 
 
 ```{r}
-# model.vars %>%
-#   #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
-#   rename(
-#     no2 = no2_10ppb_10yr10yrlag ,
-#     pm25 = pm25_5ugm3_10yr10yrlag
-#     ) %>%
-#   models.fn(model.vars.data = .) 
+(no2_10yr10yrlag_models <- models.fn(no2.var = "no2_10yr10yrlag", 
+          pm25.var = "pm25_10yr10yrlag"
+          ) #[[1]]
+)
 
 ```
 
@@ -940,13 +929,51 @@ Using past 10-year w/ 20 yr lag average exposure for NO2 and PM2.5
 #### --> error. infinite values created. too few ppl? 
 
 ```{r}
-# model.vars %>%
-#   #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
-#   rename(
-#     no2 = no2_10ppb_10yr20yrlag ,
-#     pm25 = pm25_5ugm3_10yr20yrlag
-#     ) %>%
-#   models.fn(model.vars.data = .) 
+ 
+(no2_10yr20yrlag_models <-models.fn(no2.var = "no2_10yr20yrlag", 
+          pm25.var = "pm25_10yr20yrlag"
+          ) #[[1]]
+)
+
+```
+
+#### HR Plots
+
+#### --> large CI for 20 yr model
+
+```{r}
+rbind(no2_1yr_models[[1]],
+      no2_5yr_models[[1]],
+      no2_10yr_models[[1]],
+      #no2_20yr_models[[1]], #error, very large CI
+      no2_10yr10yrlag_models[[1]],
+      no2_10yr20yrlag_models[[1]]
+      ) %>%
+  hr.plot(.)
+
+
+```
+
+
+### AD outcome 
+
+```{r}
+
+(ad_models <- models.fn(surv.event = "ad_now",
+            outcome.text = "AD"
+          ) #[[1]] 
+)
+
+
+```
+
+#### --> ? add other exposure time periods
+
+```{r}
+rbind(ad_models[[1]]
+      
+      ) %>%
+  hr.plot(.)
 
 ```
 
@@ -957,6 +984,8 @@ Using past 10-year w/ 20 yr lag average exposure for NO2 and PM2.5
 ##when using ONSET AGE (age_act), need to drop exposure predictions after age_act. filter(age_at_exposure <= age_act) & dementia_now = ifelse(age_at_exposure < age_act, 0, anydementia),
 
 ```
+
+
 
 ### Cox model assumptions and inference validity    
 1. Proportional hazards Assumption    

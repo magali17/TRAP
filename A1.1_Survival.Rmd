@@ -620,11 +620,10 @@ fixed.covariates %>% summaryFull(digit.type = "round")
 ## Table 1
 Participant baseline characteristics. Percents are calculated based on the number of individuals with available data (missing values removed). Some participants did not have baseline exposure estimates and are thus excluded from above/below median columns. 
  
-How others have stratified:
--most proivde a table for the entire cohort (? & don't state which went into models?)
-- entire cohort vs dementia cases (chen 2017)
-- by exposure quartiles at baseline (baseline was during same time period, e.g., 1993-1995) (Oudin 2016; Chang 2014) ["baseline" was same time period for cohort]
-
+How others have stratified:   
+-most proivde a table for the entire cohort (? & don't state which went into models?)   
+- entire cohort vs dementia cases (chen 2017)   
+- by exposure quartiles at baseline (baseline was during same time period, e.g., 1993-1995) (Oudin 2016; Chang 2014) ["baseline" was same time period for cohort]   
 - mean personal AP  
  
 ```{r}
@@ -1029,6 +1028,29 @@ m2.s <- m2 %>% summary()
   
 ```
 
+```{r}
+# # TEST
+# (t <- model.vars %>%
+#   #prep the dataset for use in the function, set correct no2 estimate you want to use in the model
+#   rename(
+#     no2 = no2_10ppb_10yr,
+#     #pm25 = pm25_5ugm3_10yr
+#     ) %>%
+#     coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
+#             #factor(degree) + factor(birth_cohort), 
+#             edu +  birth_cohort, 
+#           #don't use edu & birth year categories b/c too few ppl w/ low degrees and early birth years, thus reference category is small/unstable? 
+#           #education + as.numeric(format(birthdt, "%Y")),
+#           data=., 
+#           robust = T,
+#           ties = "exact" #output is weird if use this
+#     )
+# )
+#   
+# (t.s <- t %>% summary())
+
+```
+
 
 ```{r}
 ## ?? what are the values in each vector/model variable? 
@@ -1130,6 +1152,8 @@ dfbetas %>%
 --predictor variables: ppl born later in time, later intake year, have CV_dis, diabetes, ??low/high education, less exercise, non-whites, ?current smoker   
 --outcomes: AD, demenentia, younger during last visit or onset date, later onset year
 
+Rachel: "...if there are missing values in the predictor variables for the IPW selection modeling, it won't work, so Lianne had me create different versions of those variables without any missingness (ie: re-classifying them to the most logical alternative) before doing the IPW in my other analysis."
+ 
 ```{r}
 # see B540 L7-8
 

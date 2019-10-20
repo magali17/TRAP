@@ -18,7 +18,8 @@ editor_options:
 ```{r, echo=F}
 #Notes 
 
-# --> error making long format??
+# ggarrange() 
+##http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/81-ggplot2-easy-way-to-mix-multiple-graphs-on-the-same-page/
 
 ```
 
@@ -33,10 +34,14 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(dplyr, tidyverse, knitr)  
+pacman::p_load(dplyr, tidyverse, ggpubr, knitr)  #ggpubr::ggarrange()
+
+#eliminates plot background lines, makes axis text little bigger 
+theme_set(theme_pubr())
 
 ```
 
+# Point File of Hx Traffic Counts
 Clean up count data for use in GIS. 
 
 ```{r}
@@ -93,7 +98,7 @@ traffic.in.region %>%
 ```
 
 
-#Estimating road segment counts prior to 2005
+# Estimating road segment counts prior to 2005
 
 #### --> ?redo using data from points selected using a road network
 
@@ -245,7 +250,10 @@ compare <- sections %>%
 ```{r comparison plot fn}
 #plots
 # returns plots w/ linear fit, R2 and RMSE
-compare.fn <- function(mydata = compare, x, y) {
+compare.fn <- function(mydata = compare, x, y,
+                       x.label = "road section counts",
+                       y.label = "estimates using point counts",
+                       plot.title = "") {
 
   # x = "AADT_sections_2005_09"
   # y = "AADT_points_2005_09"
@@ -277,7 +285,9 @@ compare.fn <- function(mydata = compare, x, y) {
     geom_smooth() + 
     #1-1 line
     geom_abline(intercept = 0, slope = 1) + 
-    labs(x = x, y=y,
+    labs(x = x.label, 
+         y=y.label,
+        title = plot.title,
         subtitle = paste(eqt, "\n",
                          r2, "\n",
                          rmse)
@@ -293,16 +303,29 @@ Estimates from lines (not using road network) are not great.
 
 ```{r}
 ## 2005-2009
-compare.fn(x= "AADT_sections_2005_09",
-           y = "AADT_points_2005_09")
+p2005 <- compare.fn(x= "AADT_sections_2005_09",
+           y = "AADT_points_2005_09", plot.title = "")
 
 ## 2010 - 2014
-compare.fn(x= "AADT_sections_2010_14",
+p2010 <- compare.fn(x= "AADT_sections_2010_14",
            y = "AADT_points_2010_14")
 
 ## 2015 - 2018
-compare.fn(x= "AADT_sections_2015_18",
+p2015 <- compare.fn(x= "AADT_sections_2015_18",
            y = "AADT_points_2015_18")
+
+
+(myplots <- ggarrange(p2005, p2010, p2015,
+          labels = c("2005-2009", "2010-2014", "2015-2018"), 
+          label.x = F
+          
+          )
+)
+
+# ggsave(plot=myplots, filename="road_count_comparisons.png",
+#       units = "in",
+#       width = 8
+#        )
 
 ```
 

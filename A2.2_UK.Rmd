@@ -41,6 +41,9 @@ theme_set(theme_linedraw() + theme(legend.position="bottom"))
 mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190806.rda"))
 mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190806.rda"))
 
+#fake, temp data from Amanda
+temp <- read.csv(file.path( "Data", "Aim 2", "Temp Data", "dr0311_mobile_locations.txt"))
+  
 ```
 
 ```{r simple avg}
@@ -68,8 +71,10 @@ mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190806.rda"))
 ```
 
 # --> trim data 
+LS: "I think we trim before weighting and then do the weighting based on the data we have."
+
 # --> Calculate Weighted Means 
- 
+LS: "Ultimately we want each DOW to have a weight of 1/7, each quarter to have a weight of ¼, and each time of day to have the weight according to how we ultimately bin or otherwise model time of day"
 
 ```{r}
 #season-weekend-day-time_of_day

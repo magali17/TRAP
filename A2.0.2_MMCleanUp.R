@@ -13,10 +13,10 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 }
 
 # load packages 
-pacman::p_load(dplyr, tidyverse, chron, knitr)   
+pacman::p_load(dplyr, tidyverse, chron, lubridate, knitr)   
 
 # source global variables & functions
-source("A2-3_Var&Fns.R")
+source("A2.0.1_Var&Fns.R")
 
 ##########################################################################################
 ############################# 1. mobile monitoring #######################################
@@ -110,26 +110,12 @@ mm <- mm %>%
   mutate(aqs_site = ifelse(is.na(aqs_id), 0, 1))
 
 #add temporal variables
-mm <- mm %>% mutate(
-  #arrival_time = as.POSIXct(arrival_time),
-  date = as.Date(substr(arrival_time, 1,10)),
-  hour = as.numeric(format(arrival_time, "%H")),
-  time_of_day = factor(ifelse(hour %in% early_am, "early_am",
-                              ifelse(hour %in% am, "am",
-                                     ifelse(hour %in% noon, "noon",
-                                            ifelse(hour %in% evening, "evening", "night")))),
-                       levels= c("early_am", "am", "noon", "evening", "night")
-  ),
-  day = factor(format(arrival_time, "%a"), levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-  time_of_week = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
-  month = factor(format(arrival_time, "%b"), levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
-  season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
-                         ifelse(date >= spring & date < summer, "spring",
-                                ifelse(date >= summer & date < fall, "summer", "fall"))),
-                  levels = c("spring", "summer", "fall", "winter"))
-)
-
-
+mm <- mm %>% 
+  mutate(
+   date = as.Date(substr(arrival_time, 1,10))) %>%
+  add.temporal.variables(data = .,
+                         date.var = "arrival_time")
+  
 
 ############################ make wide format ############################################
 
@@ -157,14 +143,20 @@ mm.wide <- mm %>%
 ##########################################################################################
 
 #################################### read in data ####################################  
-#attributes()
-#R recognizes that they are in both PST and PDT
-Ptrak.10W <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak 10W.csv") %>% 
-  mutate(Location = as.factor("10W"))  
 
-Ptrak.BH <- read.csv("Data/MobileMonitoring/Overnight Collocations/Ptrak BH.csv") %>% 
-  mutate(Location = as.factor("BH"))  
+# folders with files to be uploaded. folder should only include ptraks w/o screens 
+path_10w <- file.path("Data", "Aim 2", "Overnight Collocations", "10W_raw", "ptrak_noscreen")
+path_bh <- file.path("Data", "Aim 2", "Overnight Collocations", "BH_raw", "ptrak_noscreen")
 
+  
+ptrak_10w <- ptrak.bind.fn(folder_path = path_10w)
+
+ptrak_bh <- ptrak.bind.fn(folder_path = path_bh)
+
+ 
+
+
+ 
 #################################### clean up ####################################  
 
 ptrak <- rbind(Ptrak.10W, Ptrak.BH) %>% 

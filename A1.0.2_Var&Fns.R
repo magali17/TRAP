@@ -52,9 +52,20 @@ t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",],
       # edu_beyond_hs_pct = round(edu_beyond_hs_n/N*100, 1),
       income_median = median(tr_med_inc_hshld, na.rm = T),
       income_iqr = round(IQR(tr_med_inc_hshld, na.rm = T), 1),
+      income_cat_known_n = sum(!is.na(income_cat)),
+      income1_n = sum(income_cat==1, na.rm=T),
+      income1_pct = round(income1_n/income_cat_known_n*100, 1),
+      income2_n = sum(income_cat==2, na.rm=T),
+      income2_pct = round(income2_n/income_cat_known_n*100, 1),
+      income3_n = sum(income_cat==3, na.rm=T),
+      income3_pct = round(income3_n/income_cat_known_n*100, 1),
+      income4_n = sum(income_cat==4, na.rm=T),
+      income4_pct = round(income4_n/income_cat_known_n*100, 1),
+      #income5_n = sum(income_cat==5, na.rm=T),
+      #income5_pct = round(income5_n/income_cat_known_n*100, 1),
       apoe_known_n = sum(!is.na(apoe)),
       apoe_carrier_n = sum(apoe, na.rm=T),
-      apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n, 1),
+      apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n*100, 1),
       smoke_known_n = sum(!is.na(smoke)),
       smoke_never_n = sum(smoke==0, na.rm = T),
       smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
@@ -97,6 +108,7 @@ t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",],
       "Entry age, years (median, IQR)" = paste0(age_entry_median, " (", age_entry_iqr, ")"),
       "Male (n, %)" = paste0(male_n, " (", male_pct, "%)"),
       "Race, nonwhite (n, %)" = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
+      #"Beyond HS Education (n, %)" = paste0(edu_beyond_hs_n, " (", edu_beyond_hs_pct, "%)"),
       "Degree, None (n, %)" = paste0(degree0_n, " (", degree0_pct, "%)"),
       "Degree, GED (n, %)" = paste0(degree1_n, " (", degree1_pct, "%)"),
       "Degree, HS (n, %)" = paste0(degree2_n, " (", degree2_pct, "%)"),
@@ -104,7 +116,12 @@ t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",],
       "Degree, Master's (n, %)" = paste0(degree4_n, " (", degree4_pct, "%)"),
       "Degree, Doctorate (n, %)" = paste0(degree5_n, " (", degree5_pct, "%)"),
       "Degree, Other (n, %)" = paste0(degree6_n, " (", degree6_pct, "%)"),
-      #"Beyond HS Education (n, %)" = paste0(edu_beyond_hs_n, " (", edu_beyond_hs_pct, "%)"),
+      "Census Tract Income, $ (median, IQR)" = paste0(income_median, " (", income_iqr, ")"),
+      "Census Tract Income, $ [Category 1] (n, %)" = paste0(income1_n, " (", income1_pct, "%)"),
+      "Census Tract Income, $ [Category 2] (n, %)" = paste0(income2_n, " (", income2_pct, "%)"),
+      "Census Tract Income, $ [Category 3] (n, %)" = paste0(income3_n, " (", income3_pct, "%)"),
+      "Census Tract Income, $ [Category 4] (n, %)" = paste0(income4_n, " (", income4_pct, "%)"),
+      #"Census Tract Income [Category 5] (n, %)" = paste0(income5_n, " (", income5_pct, "%)"),
       "APOE carrier (n, %)" = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
       "Smoke, never (n, %)" = paste0(smoke_never_n, " (", smoke_never_pct, "%)"),
       "Smoke, former (n, %)" = paste0(smoke_former_n, " (", smoke_former_pct, "%)"),
@@ -225,32 +242,25 @@ models.fn <- function(mydata = dem.w,
   m1 <- mydata %>%
     coxph(s.dem ~ no2, 
           data=., 
-          robust = F,
+          robust = T,
     ) 
   
   m1.s <- m1 %>% summary()
   
   #Model 2 (a priori): M1 + gender, education, median household income, race, birth cohort; APOE stratification.
   #-assuming missing values (e.g., APOE) are MCAR and doing a complete case analysis. This method can be bias if values are not MCAR.
-  
-  ##### --> categorize birth cohort into larger categories - 20 yrs? 
-  
+
   m2 <- mydata %>%
     coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
-            #factor(degree) + factor(birth_cohort), 
             edu +  birth_cohort, 
           #don't use edu & birth year categories b/c too few ppl w/ low degrees and early birth years, thus reference category is small/unstable? 
-          #education + as.numeric(format(birthdt, "%Y")),
           data=., 
           robust = T,
           #ties = "exact" #output is weird if use this
     ) 
+  
   m2.s <- m2 %>% summary()
-  
-  #t <- m2 %>% summary()
-  #t$coefficients["no2", "exp(coef)"]
-  
-  
+   
   #M3 (extended): M2 + smoking + physical activity 
   m3 <- mydata %>%
     coxph(s.dem ~ no2 + 
@@ -259,6 +269,7 @@ models.fn <- function(mydata = dem.w,
           data=., 
           robust = T,
     ) 
+  
   m3.s <- m3 %>% summary()
   
   
@@ -271,6 +282,7 @@ models.fn <- function(mydata = dem.w,
           data=., 
           robust = T,
     ) 
+  
   m4.s <- m4 %>% summary()
   
   #Model 5 (APOE interaction): M2 + NO2*APOE
@@ -297,6 +309,7 @@ models.fn <- function(mydata = dem.w,
           data=.,
           robust = T,
     )
+  
   m6.s <- m6 %>% summary()
   
   #raw model output
@@ -326,13 +339,11 @@ models.fn <- function(mydata = dem.w,
     hrs
     )  
   
-  return(list(
-              table_of_no2_HRs= no2.hrs,
+  return(list(table_of_no2_HRs= no2.hrs,
               raw_model_output = model.ouputs
               )
          )
   
-  #return(no2.hrs)
 }
 
 #models.fn() #[[1]]

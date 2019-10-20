@@ -19,6 +19,7 @@ editor_options:
 
 ```
 
+# Beacon Hill 2001 Data 
 
 ```{r, echo=F}
 # #Notes
@@ -55,7 +56,7 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(readxl, dplyr, tidyverse, knitr, nlme, lme4, VCA)   
+pacman::p_load(readxl, dplyr, tidyverse, lubridate, knitr, nlme, lme4, VCA)   
 
 #set plot theme
 theme_set(theme_linedraw() + theme(legend.position="bottom")) 
@@ -70,36 +71,20 @@ source("A2-3_Var&Fns.R")
 myquantile_lower <- 0.00
 myquantile_upper <- 1.00
 
-#2001 seasons 
-winter1 <- as.Date("2000-12-20")
-winter2 <- as.Date("2001-12-21")
-spring <- as.Date("2001-03-20")
-summer <- as.Date("2001-06-21")
-fall <- as.Date("2001-09-22")
- 
-
 bh <- read_excel("~/Everything/School/PhD_UW/Dissertation/Write Up/1. Proposal/Aim 3. Hx UFP/Hx Data/Tim Larson/Beacon Hill size data.xls") 
-
+ 
 bh <- bh %>%
   #only keep 2001 data; too little 2000 and 2002 data to calculate annual avg
-  filter(format(date, "%Y") == "2001") %>%
-  mutate(#month = as.numeric(format(date, "%m"))
+  filter(year(date) == "2001") %>%
+  #format date for use in function
+  mutate(
+    date = ymd_h(paste(date, hour))
+    ) %>%
+  add.temporal.variables(data = ., 
+                         date.var = "date") %>%
+  mutate(
     #group night hours together (for plotting)
     hour_night = ifelse(hour < min(early_am), hour + 24, hour),     
-    time_of_day = factor(ifelse(hour %in% early_am, "early_am",
-                 ifelse(hour %in% am, "am",
-                        ifelse(hour %in% noon, "noon",
-                               ifelse(hour %in% evening, "evening", "night")))),
-                 levels= c("early_am", "am", "noon", "evening", "night")),
-    day = factor(format(date, "%a"), 
-                 levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-    time_of_week = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
-    month = factor(format(date, "%b"), 
-                    levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
-     season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
-                    ifelse(date >= spring & date < summer, "spring",
-                           ifelse(date >= summer & date < fall, "summer", "fall"))),
-                    levels = c("spring", "summer", "fall", "winter")),
     
     # assign temporal weights
     # #upweigh surrounding months of missing times (no Jul or Dec data)
@@ -116,7 +101,6 @@ bh <- bh %>%
     season_week_hour.wt = season.wt*day_of_week.wt*time_of_day.wt
     
     ) 
-
 
 ```
 
@@ -144,7 +128,7 @@ bh <- bh %>%
 
 ```
 
-# Available Data
+## Available Data
 
 ```{r}
 bh %>%
@@ -197,7 +181,7 @@ bh.long <- bh.long %>%
   filter(diam_um_lower < 1.03680) %>%
   #calculate avg total PNC for each hour
   group_by(date, hour, hour_night, time_of_day, day, time_of_week, month,  season, season_week_hour.wt) %>%
-  summarize(
+ dplyr::summarize(
             #total particle count for each day and hour
             pnc_particles_cm3 = sum(num_conc_particles_cm3, na.rm = T)) %>%
   ungroup()
@@ -223,7 +207,7 @@ bh.long %>%
 ```
 
 
-# Weighted Annual Average UFP (#/cm3)   
+## Weighted Annual Average UFP (#/cm3)   
  
 ```{r}
 #take season-week-hour avg's 
@@ -239,7 +223,7 @@ bh.long %>%
   pnc <- bh.long %>% 
   #group by hour, day & month first since some of these times are sampled more than others; later, take group averages (e.g., season, time_of_week, time_of_day)
   group_by(hour, time_of_day, day, time_of_week, month, season, season_week_hour.wt) %>%
-    summarize(
+    dplyr::summarize(
       # number of observations used to calculate each month-hour combination (all use 1-2 obs)
       unique_hour_samples = n(),
       # use na.rm=T b/c some values are missing when exclude extremely high values
@@ -247,7 +231,7 @@ bh.long %>%
       ) %>%
   #now take avg of larger temporal groups
   group_by(time_of_day, time_of_week, season, season_week_hour.wt) %>%
-    summarize(
+    dplyr::summarize(
       # number of observations per month-hour combination 
       N = n(),
       # use na.rm=T b/c some values are missing when exclude extremely high values
@@ -273,8 +257,8 @@ bh.long %>%
 
 ```
 
-# Temporal UFP patterns   
-## Plots    
+## Temporal UFP patterns   
+### Plots    
 
 ### -->  add adjusted means from LS fits to boxplots? 
 
@@ -319,11 +303,11 @@ bh.long %>%
   
 ```
 
-## Models by time of day, time of week and season
+### Models by time of day, time of week and season
 
 Similar to mobile monitoring approach.
 
-### LS linear Fit
+#### LS linear Fit
 
 Only spring is significant. 
 
@@ -334,11 +318,11 @@ lm(avg_pnc_particles_cm3 ~ time_of_day + time_of_week + season, data=pnc) %>%
 
 ```
 
-### ANOVA Variance Component Analyses for random models
+#### ANOVA Variance Component Analyses for random models
 
 Most of the variation is random; 1/3 is from season; practically none from time of day or time of week (?)
 
-## --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week)
+#### --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week)
 
 ```{r}
 # ? fits random intercepts for all covariates? 
@@ -348,9 +332,9 @@ anovaVCA(avg_pnc_particles_cm3 ~ time_of_day + time_of_week + season,
 
 ```
 
-## Models by hour, day and month
+### Models by hour, day and month
 
-### LS linear fit 
+#### LS linear fit 
 
 Tue, Sat and Sun are lower than Monday; June is lower than January.
 
@@ -361,7 +345,7 @@ lm(pnc_particles_cm3 ~ factor(hour_night) + day + month, data=bh.long) %>%
 
 ```
 
-### ANOVA Variance Component Analyses for random models
+#### ANOVA Variance Component Analyses for random models
 
 Most of the variation is random, a small amount from month and day.
 
@@ -374,7 +358,7 @@ anovaVCA(pnc_particles_cm3 ~ hour + day + month,
 ```
 
 
-# Mobile Monitoring observations at Beacon Hill  
+## Mobile Monitoring observations at Beacon Hill  
 
 Mean UFP (#/cm3) from 2/22 - 8/06.
 
@@ -398,6 +382,109 @@ UFP observations
 bh.mm %>%
   ggplot(aes(x=ufp_pt_noscreen_ct_cm3)) + 
   geom_histogram() 
+
+```
+
+# 5 Homes UFP Data
+UFP data collected during the winters of 2000 2001 at 5 homes in the Seattle are (data unpublished).
+
+```{r}
+#particle column counts are in µm
+# count concentration is for: #/cm3
+
+```
+
+
+```{r}
+homes0 <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "Hx Data", "Tim Larson", "Five Homes Study","five home combined_out_no.csv"))
+
+homes <- homes0 %>%
+  mutate(
+    #format time
+    time = ymd_hms(time, tz = "America/Los_Angeles"),
+    #recalculate this. it's wrong/off in original dataset for some reason
+    DOY = format(time, "%j"),
+    #order locations by when sampling occurred 
+    location = factor(location, levels = c("m14", "h05", "m37", "v05", "p63")),
+    ) %>%
+  #add temporal variables
+  add.temporal.variables(data = .,
+                         date.var = "time")
+
+#calculate total UFP particles uner 1 µm
+homes$ufp_67_950_nm_pct_cm3 <- homes %>% 
+  select(X0.06745: X0.94868) %>%
+  rowSums()
+
+#how long were locations sampled? 
+sampling_times <- homes %>%
+  group_by(location) %>%
+  dplyr::summarize(
+    #mean_ufp = mean(ufp_67_0.95_nm),
+    start_doy = as.numeric(min(DOY)),
+    end_doy = as.numeric(max(DOY)),
+    days_sampled = end_doy - start_doy,
+    start_date = min(time),
+    end_date = max(time)
+    )  
+
+#All but location v05 are sampled for full days 24
+kable(sampling_times, caption = "Locations Sampled by Days of the Year. All but location v05 are sampled for full days 24", )
+
+# drop times sampled at loc v05 after 9:55:04 AM on last sampling day to ensure all mean estimates are for full days
+#v05.start.date <- format(sampling_times[sampling_times$location=="v05",]$start_date, "%Y-%m-%d" )
+v05.start.time <- format(sampling_times[sampling_times$location=="v05",]$start_date, "%H:%M:%S" )
+v05.end.date <- format(sampling_times[sampling_times$location=="v05",]$end_date, "%Y-%m-%d" )
+v05.new.end <- as.POSIXct(paste(v05.end.date, v05.start.time))
+                             
+homes <- homes %>%
+  mutate(
+  time = as.POSIXct(ifelse(location %in% c("m14", "h05", "m37", "p63") | 
+                      (location == "v05" & time < v05.new.end), 
+                    time, NA),
+                      origin = "1970-01-01"
+                    )) %>%
+  drop_na(time)
+
+#calculate avg (total) UFP reading at each site 
+ufp_mean <- homes %>%
+  group_by(location) %>%
+  dplyr::summarize(
+    ufp_site_mean = round(mean(ufp_67_950_nm_pct_cm3))
+  ) 
+
+homes <- homes %>% 
+  left_join(ufp_mean)
+
+site_means <- ufp_mean %>%
+  left_join(sampling_times[c("location", "start_date", "end_date", "days_sampled")])
+
+kable(site_means, caption = "UFP PNC (#/cm3) by loation and date sampled")
+
+kable(cbind(min_conc_pct_cm3=range(site_means$ufp_site_mean)[1],
+            max_conc_pct_cm3=range(site_means$ufp_site_mean)[2]), 
+      caption = "range of UFP PNCs (#/cm3) observed")
+
+```
+
+Plot excludes data from a few hours at loation v05 that went past the 24 hr mark (i.e., the data shown was used to calculate averages). 
+
+```{r}
+#plot data
+homes %>%
+  ggplot(aes(x=time, y=ufp_67_950_nm_pct_cm3)) + 
+  geom_point() + 
+  geom_smooth(formula = y ~ splines::bs(x, 15), method = lm) +
+  geom_hline(aes(yintercept = ufp_site_mean)) +
+  facet_wrap(~location, 
+             scales="free_x"
+             )
+
+```
+
+#### --> make plots by hour, day of week, location
+
+```{r}
 
 ```
 

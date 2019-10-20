@@ -88,53 +88,116 @@ colo.plot <- function(mydata=mm, primary.instrument, secondary.instrument, int.d
 }
 
 
-#################################### ERROR: temporal variables ####################################
+#################################### temporal variables ####################################
+
 # function to add temporal variables to any dataset: time of day, day, time of week, month, season
 
-### ERROR. from A3BH2001.Rmd
-#### ---> Make temporal function
-# add.temporal.variables <- function(data=mydata,
-#                                    hour.var="hour",
-#                                    date.var = "date",
-#                                    early_am. = early_am, am.=am, noon.=noon, evening.=evening, night.=night
-# ){
-#   
-#   data=bh
-#   hour.var="hour"
-#   hour.var <- data %>% select(hour.var) #%>% as.vector()
-#   
-#   date.var = "date"
-#   date.var <- data %>% select(date.var) #%>% as.character() %>% as.Date() #%>% as.vector() # %>% as.Date() #%>% format("%Y-%m-%d")
-#   
-#   
-#   early_am. = early_am
-#   am.=am
-#   noon.=noon
-#   evening.=evening
-#   night.=night
-#   
-#   # hour.var <- as.name(hour.var)
-#   # date.var <- as.name(date.var)
-#   
-#   mydata <- data %>% mutate( 
-#     time_of_day = factor(ifelse(hour.var %in% early_am., "early_am",
-#                                 ifelse(hour.var %in% am., "am",
-#                                        ifelse(hour.var %in% noon., "noon",
-#                                               ifelse(hour.var %in% evening., "evening", "night")))),
-#                          levels= c("early_am", "am", "noon", "evening", "night")),
-#     day = factor(format(date.var, "%a"), 
-#                  levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-#     time_of_week = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
-#     month = factor(format(date.var, "%b"), 
-#                    levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
-#     season = factor(ifelse((date.var >= winter1 & date.var < spring) | date.var >= winter2, "winter",
-#                            ifelse(date.var >= spring & date.var < summer, "spring",
-#                                   ifelse(date.var >= summer & date.var < fall, "summer", "fall"))),
-#                     levels = c("spring", "summer", "fall", "winter"))
-#   )
-#   
-#   return(mydata)
-#   
-# }
-# 
-# test <- add.temporal.variables(data=bh)
+##date.var should be in posixct() format
+add.temporal.variables <- function(data,
+                                   date.var = "time",
+                                   early_am. = early_am, am.=am, noon.=noon, evening.=evening, night.=night
+){
+  library(lubridate)
+  
+  #month and day when seasons typically start. will be used later to paste onto the current year 
+  ##http://www.glib.com/season_dates.html 
+  winter <- "-12-21" #usually winter starts on 21st, sometimes on 22nd 
+  spring <- "-03-20"
+  summer <- "-06-21" #usually summer starts on 21st, sometimes on 22nd 
+  fall <- "-09-22" #usually fall starts on 22nd, sometimes on 23nd 
+ 
+  mydata <- data %>% 
+    rename(
+      mydate = date.var
+    ) %>%
+    mutate(
+      hour = hour(mydate),
+      time_of_day = factor(ifelse(hour %in% early_am., "early_am",
+                                ifelse(hour %in% am., "am",
+                                       ifelse(hour %in% noon., "noon",
+                                              ifelse(hour %in% evening., "evening", "night")))),
+                         levels= c("early_am", "am", "noon", "evening", "night")),
+    day = wday(mydate, label = T, abbr = T),
+    time_of_week = factor(ifelse(wday(mydate) %in% c(1, 7), "weekend", "weekday")),
+    month = month(mydate, label = T, abbr = T),
+    season = ifelse((mydate >= ymd(paste0((year(mydate)-1), winter)) & mydate < ymd(paste0(year(mydate), spring))) |
+                       mydate >= ymd(paste0(year(mydate), winter)), "winter",
+                     ifelse(mydate >= ymd(paste0(year(mydate), spring)) &
+                              mydate < ymd(paste0(year(mydate), summer)), "spring",
+                            ifelse(mydate >= ymd(paste0(year(mydate), summer)) &
+                                     mydate < ymd(paste0(year(mydate), fall)), "summer", 
+                                   ifelse( mydate >= ymd(paste0(year(mydate), fall)) &
+                                             mydate < ymd(paste0(year(mydate), winter)), "fall", 
+                                           NA))))
+    )  
+  
+  #change time variable back to what it was originally
+  names(mydata)[names(mydata) %in% "mydate"] <- date.var
+
+  return(mydata)
+
+}
+
+#test <- add.temporal.variables()
+
+
+################################ reads raw ptrak files ################################
+#returns clean ptrak files from raw files 
+
+#data.table allows us to look for text in a line, otherwise use a row #
+read.ptrak <- function(myfilepath) {
+  
+  library(stringi)
+  
+  dt <- data.table::fread(myfilepath,
+                           #skip lines until see this text & make it column headers
+                           skip = "MM/dd/yyyy", 
+                           #keeps reading after blank row
+                           fill=T) %>%
+  rename(
+    date = "MM/dd/yyyy", 
+    time = "hh:mm:ss", 
+    pt_cc = "pt/cc"
+  ) %>%
+  #only keep rows that start with numbers (the data)
+  filter(substr(date, 1,1) %in% c(0:9)) %>%
+  mutate(
+    datetime = mdy_hms(paste(date, time), tz = "America/Los_Angeles")
+  ) %>%
+  select(
+    datetime,
+    pt_cc
+  ) %>% 
+    mutate(#look at file path to ID AQS location
+           location = ifelse(stri_detect_fixed(myfilepath, "10W"), "10W", "BH"
+                             )
+           )
+  
+  return(dt)
+  
+  }
+
+############################## combines multiple ptrak files ##############################
+
+ 
+
+ptrak.bind.fn <- function(folder_path) {
+  
+  #names of files in folder
+  files_list <- list.files(folder_path)
+  
+  #create empty df
+  df <- as.data.frame(matrix(,ncol=3,nrow=0))
+  
+  #rbind files
+  for (i in 1:length(files_list)) {
+    df1 <- read.ptrak(myfilepath = file.path(folder_path, files_list[i]))
+    
+    df <- rbind(df, df1)
+  } 
+  
+  return(df)
+  
+  }
+
+#t <- ptrak.bind.fn(folder_path = file.path("Data", "Aim 2", "Overnight Collocations", "BH_raw", "ptrak_noscreen"))

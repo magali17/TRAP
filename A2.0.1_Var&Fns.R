@@ -157,16 +157,17 @@ read.ptrak <- function(myfilepath) {
   rename(
     date = "MM/dd/yyyy", 
     time = "hh:mm:ss", 
-    pt_cc = "pt/cc"
+    Conc_pt_cm3 = "pt/cc"
   ) %>%
   #only keep rows that start with numbers (the data)
   filter(substr(date, 1,1) %in% c(0:9)) %>%
   mutate(
+    Conc_pt_cm3 = as.numeric(Conc_pt_cm3),
     datetime = mdy_hms(paste(date, time), tz = "America/Los_Angeles")
   ) %>%
   select(
     datetime,
-    pt_cc
+    Conc_pt_cm3
   ) %>% 
     mutate(#look at file path to ID AQS location
            location = ifelse(stri_detect_fixed(myfilepath, "10W"), "10W", "BH"
@@ -179,8 +180,7 @@ read.ptrak <- function(myfilepath) {
 
 ############################## combines multiple ptrak files ##############################
 
- 
-
+#returns single file of ptrak data
 ptrak.bind.fn <- function(folder_path) {
   
   #names of files in folder
@@ -201,3 +201,8 @@ ptrak.bind.fn <- function(folder_path) {
   }
 
 #t <- ptrak.bind.fn(folder_path = file.path("Data", "Aim 2", "Overnight Collocations", "BH_raw", "ptrak_noscreen"))
+
+
+#############################################################################################
+
+

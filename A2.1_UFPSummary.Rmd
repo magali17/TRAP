@@ -32,10 +32,10 @@ theme_set(theme_linedraw() + theme(legend.position="bottom"))
 
 
 ```{r average stop data}
-source("A2-3_Var&Fns.R")
+source("A2.0.1_Var&Fns.R")
 
 #load stop average data 
-mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190917.rda")) %>% 
+mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_190917.rda")) %>% 
   #only keep relevant particle values
   filter(variable %in% c("ufp_pt_noscreen_ct_cm3",
                          "ufp_disc_ct_cm3",
@@ -46,10 +46,10 @@ mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190917.rda")) %>%
          )
 
 
-mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190917.rda"))  
+mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_190917.rda"))  
 
 #load overnight AQS site data 
-ptrak <- readRDS(file.path("Data", "MobileMonitoring", "ptrak_190628.rda"))
+ptrak <- readRDS(file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda"))
 
 #start/end dates
 #start.date = min(mm$date) #in A2-3 variables.R sourcing
@@ -295,24 +295,26 @@ Using PST.
 
 Plotting mean hourly concentrations (all data included) at Beacon hill (BH) and 10th & Weller (10W).
 
+#### --> ? color by date (have to create date varaible)? 
+
 ```{r}
 ptrak %>%
   ggplot(aes(x=hour, y=Conc_pt_cm3)) + 
   geom_boxplot(aes(group=hour, fill=time_of_day)) +
   geom_smooth(se=F, method = "loess") + 
-  facet_wrap(~Location) #+DaylightSavings
+  facet_wrap(~location) #+DaylightSavings
 
 ptrak %>%
   ggplot(aes(x=day, y=Conc_pt_cm3)) + 
   geom_boxplot() + 
   geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") + 
-  facet_wrap(~Location)
+  facet_wrap(~location)
 
 ptrak %>%
   ggplot(aes(x=month, y=Conc_pt_cm3)) + 
   geom_boxplot() + 
   #geom_smooth(aes(x=as.numeric(month)), se=F, method = "loess") + 
-  facet_wrap(~Location)
+  facet_wrap(~location)
 
 
 ```

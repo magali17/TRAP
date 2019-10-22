@@ -313,7 +313,7 @@ models.fn <- function(mydata = dem.w,
   m6.s <- m6 %>% summary()
   
   #raw model output
-  model.ouputs <- list(model1=m1.s, 
+  model.ouputs <- list(model1 = m1.s, 
                        model2= m2.s, 
                        model3 = m3.s, 
                        model4 = m4.s, 
@@ -348,12 +348,59 @@ models.fn <- function(mydata = dem.w,
 
 #models.fn() #[[1]]
 
+###############################################################################################
+
+# returns HRs for diff exposure time windows 
+diff.exposures.fn <- function(mydata.2 = dem.w, 
+                              surv.time2.2 = "age_end_exposure", 
+                              surv.event.2 = "dementia_now", 
+                              outcome.text.2 = "All-cause Dementia") {
+  
+  exposure = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr20yrlag")
+  
+  #df for HRs
+  hr.output.df = as.data.frame(matrix(nrow=0, ncol = 8))
+  names(hr.output.df) = c("Model", "exposure", "hr", "lower_limit", "upper_limit", "p", "person_years", "number_events")
+  
+  #list for all model output
+  model.output.list <- vector(mode="list", length = 6)
+  names(model.output.list) <- exposure
+    
+  for (i in seq_along(exposure)) {
+    
+    #run model, only save HR table otuput
+    model_results <- models.fn(mydata = mydata.2,
+                                   surv.time2 = surv.time2.2,
+                                   surv.event = surv.event.2,
+                                   outcome.text = outcome.text.2,
+                                   no2.var = paste0("no2_", exposure[i]),
+                                   pm25.var = paste0("pm25_", exposure[i])) 
+    
+    #save HRs
+    hr.output.df <- rbind(hr.output.df, model_results[[1]])
+    #save raw model output
+    model.output.list[[i]] <- model_results[[2]]
+    
+  }
+  
+  myresult <- list(HRs = hr.output.df,
+                   model.output = model.output.list)
+  
+  return(myresult) 
+  
+}
+
+
+
+
+
 ###############################################################################
 #returns HR plot for models.fn()$table_of_no2_HRs  
 
 # example code: https://datascienceplus.com/lattice-like-forest-plot-using-ggplot2-in-r/ 
 
-hr.plot <- function(mydata) {
+hr.plot <- function(mydata,
+                    outcome.var) {
   p <- mydata %>%
     ggplot(aes(x=exposure, 
                y=hr, ymin=lower_limit, ymax=upper_limit,
@@ -363,7 +410,7 @@ hr.plot <- function(mydata) {
     geom_hline(yintercept = 1, linetype=2) + 
     labs(y= "Hazard Ratio (95% CI)",
          x = "NO2 Exposure Period",
-         title = "NO2 (10 ppb) hazard ratios for models, using different exposure time periods"
+         title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " models, using different exposure time periods")
          ) + 
     facet_wrap(~Model, 
                labeller = "label_both",

@@ -36,7 +36,7 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats)  #Himsc: describe(); EnvStats: summaryFull() #coxphw: coxphw() for non-prop hazards
+pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats, lubridate)  #Himsc: describe(); EnvStats: summaryFull() #coxphw: coxphw() for non-prop hazards
 
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
 
@@ -105,16 +105,9 @@ dem0.1 <- dem0.0 %>%
     #traditional definition used by ACT for follow-up time for cases and controls
     age_onset = round(as.numeric(onsetdate - birthdt)/365, 3),
     age_act = round(ifelse(!is.na(age_onset), age_onset, age_last_visit), 3),
-    #calculate birth cohort every 10 yrs since only 1 person born btwn 1890-1894 & this causes a model error
-    birth_cohort = round(as.numeric(format(birthdt, "%Y")), -1),
-    # birth_cohort = ifelse(birth_cohort >= min(birth_cohort) & 
-    #                         birth_cohort < min(birth_cohort) + 20, min(birth_cohort),
-    #                       ifelse(
-    #                         birth_cohort >= min(birth_cohort) + 20 & 
-    #                         birth_cohort < min(birth_cohort) + 20*2, min(birth_cohort) + 20,
-    #                         min(birth_cohort) + 20*2
-    #                         )
-    #                       ),
+    #collapse earliest & latest cohorts since there are few ppl here 
+    # birth_cohort = factor(ifelse(birth_cohort <= 1915, "1919 or earlier", 
+    #                        ifelse(birth_cohort >= 1925, "1925 or later", birth_cohort))),  
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
     dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
@@ -142,15 +135,15 @@ dem0.1 <- dem0.0 %>%
     #bmi4 = factor(bmi4, levels = c(0:3), labels = c("underweight", "normal", "overweight", "obese")),
     ## filter out invalid casi scores 
     casi_irt = ifelse(casi_valid ==1, casi_irt, NA),
-    #original income catgory 1 only  had 7 individuals (too small)
+    # recategorize?
     income_cat = #ifelse(tr_med_inc_hshld < 20000, 1,
                                ifelse(tr_med_inc_hshld < 35000, 1, #tr_med_inc_hshld >= 20000 & 
                                       ifelse(tr_med_inc_hshld >= 35000 & tr_med_inc_hshld < 50000, 2,
                                              ifelse(tr_med_inc_hshld >= 50000 & tr_med_inc_hshld < 75000, 3, 4)
                                              )), #),
     race_white = ifelse(race == 1, 1, 0),
-    # --> ?replace degree=9 w/ NA? no definition for degree=9 in data dictionary
-    degree = ifelse(degree != 9, degree, NA)
+    # ? make unknown degree=9 6 instead of creating more NAs?
+    degree = ifelse(degree != 9, degree, 6)
     
     ) %>%
   select(
@@ -169,7 +162,7 @@ dem0.1 <- dem0.0 %>%
   ) 
  
 #remove to speed up coding?
-rm(dem0.0)
+#rm(dem0.0)
 
 #how long have participants been followed? 
 yr <- dem0.1 %>%
@@ -361,6 +354,8 @@ ad_counts %>%
 
 ```
 
+
+
 # Descriptive Statistics 
 
 ## Sample size
@@ -547,6 +542,50 @@ fixed.covariates %>%
 
 ```
 
+Distribution of variables used in models. Do any have less than ~~ 50 individuals?
+
+```{r}
+fixed.covariates %>%
+  select(
+    birth_cohort,
+    apoe,
+    male,
+    degree,
+    income_cat,
+    race_white,
+    smoke,
+    exercise_reg,
+    Hypertension,
+    Diabetes,
+    CV_DIS,
+    Heart_Dis,
+    bmi4,
+    #casi_irt
+  ) %>%
+  mutate(
+    apoe = factor(apoe),
+    male = factor(male),
+    race_white = factor(race_white),
+    exercise_reg = factor(exercise_reg),
+    Hypertension = factor(Hypertension),
+    Diabetes = factor(Diabetes),
+    CV_DIS = factor(CV_DIS),
+    Heart_Dis = factor(Heart_Dis),
+    bmi4 = factor(bmi4)
+    ) %>%
+  describe()
+  
+
+
+```
+
+```{r}
+ 
+
+
+```
+
+
 Individuals in each birth Cohort and birth year. Some 5-year cohorts have few only 1 individual
 
 ```{r}
@@ -602,6 +641,11 @@ fixed.covariates %>%
 table(income_cat = fixed.covariates$income_cat)
 
 ```
+
+
+
+
+
 
 
 
@@ -843,136 +887,54 @@ kable(r2, caption = "R2", digits = 3)
 
 ```
 
-10 ppb NO2, 10-year avg 
+### Dementia Incidence, Different Exposure Windows   
 
-## --> ? add to fn: plots of HR w/ CIs vs model # (Tzivian 2016)
+```{r }
+#run all models, all exposure windows
+dem.results <- diff.exposures.fn(mydata.2 = dem.w,
+                   surv.time2.2 = "age_end_exposure", 
+                   surv.event.2 = "dementia_now", 
+                   outcome.text.2 = "Dementia")
 
-```{r  }
-#use default settings
-(no2_10yr_models <- models.fn() #[[1]]
- ) 
+#table of all HRs for all times & models
+kable(dem.results$HRs, caption = "Dementia HRs")
 
-# t <- models.fn()
-# t <- t$table_of_no2_HRs  
+#plot of all HRs for all times & models
+#### --> large CI for 20 yr copollutant model
+dem.results$HRs %>%
+  filter(hr <11) %>%
+  hr.plot(., outcome.var = "Dementia")   
 
-```
+# example of raw model output
+print("10 yr exposure model")
+dem.results$model.output$`10yr` #$model2
 
-## --> fix birth_cohort30 has NAs
--birth_cohort30 is associated with: only 1 person w/ 11 fu yrs, never gets dementia 
-
-```{r}
-#only 1 person (11 entries) in ref category for birth_cohort1930
-model.vars %>% #mydata
-  filter(male==0,
-         race_white==0,
-         income == 1,
-         edu == 0,
-         birth_cohort==1930,
-         !is.na(apoe)
-         ) %>%
-  kable()
 
 ```
 
 
 ## Other Sensitivity Analyses    
-### Different Exposure Windows   
-
-Using past 1-year average exposure for NO2 and PM2.5 
+### AD outcome    
 
 ```{r}
+#run all models, all exposure windows
+ad.results <- diff.exposures.fn(mydata.2 = dem.w,
+                   surv.time2.2 = "age_end_exposure", 
+                   surv.event.2 = "ad_now", 
+                   outcome.text.2 = "AD")
 
-(no2_1yr_models <- models.fn(no2.var = "no2_1yr", 
-          pm25.var = "pm25_1yr"
-          ) #[[1]]
-)
+#table of all HRs for all times & models
+kable(ad.results$HRs, caption = "AD HRs")
 
-```
+#plot of all HRs for all times & models
+#### --> large CI for 20 yr copollutant model
+ad.results$HRs %>%
+  filter(hr <11) %>%
+  hr.plot(., outcome.var = "AD")   
 
-Using past 5-year average exposure for NO2 and PM2.5 
-
-```{r}
-(no2_5yr_models <- models.fn(no2.var = "no2_5yr", 
-          pm25.var = "pm25_5yr"
-          ) #[[1]]
-)
-
-```
-
-Using past 20-year average exposure for NO2 and PM2.5 
-
--few ppl
-
-```{r}
-(no2_20yr_models <- models.fn(no2.var = "no2_20yr", 
-          pm25.var = "pm25_20yr"
-          ) #[[1]]
-)
-
-```
-
-Using past 10-year w/ 10 yr lag average exposure for NO2 and PM2.5 
-
-#### --> error. infinite values created. too few ppl? 
-
-```{r}
-(no2_10yr10yrlag_models <- models.fn(no2.var = "no2_10yr10yrlag", 
-          pm25.var = "pm25_10yr10yrlag"
-          ) #[[1]]
-)
-
-```
-
-Using past 10-year w/ 20 yr lag average exposure for NO2 and PM2.5 
-
-#### --> error. infinite values created. too few ppl? 
-
-```{r}
- 
-(no2_10yr20yrlag_models <-models.fn(no2.var = "no2_10yr20yrlag", 
-          pm25.var = "pm25_10yr20yrlag"
-          ) #[[1]]
-)
-
-```
-
-#### HR Plots
-
-#### --> large CI for 20 yr model
-
-```{r}
-rbind(no2_1yr_models[[1]],
-      no2_5yr_models[[1]],
-      no2_10yr_models[[1]],
-      #no2_20yr_models[[1]], #error, very large CI
-      no2_10yr10yrlag_models[[1]],
-      no2_10yr20yrlag_models[[1]]
-      ) %>%
-  hr.plot(.)
-
-
-```
-
-
-### AD outcome 
-
-```{r}
-
-(ad_models <- models.fn(surv.event = "ad_now",
-            outcome.text = "AD"
-          ) #[[1]] 
-)
-
-
-```
-
-#### --> ? add other exposure time periods
-
-```{r}
-rbind(ad_models[[1]]
-      
-      ) %>%
-  hr.plot(.)
+# example of raw model output
+print("10 yr exposure model")
+ad.results$model.output$`10yr`
 
 ```
 

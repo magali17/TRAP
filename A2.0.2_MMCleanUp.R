@@ -25,7 +25,8 @@ source("A2.0.1_Var&Fns.R")
 ############################ read in data ################################################
 
 #mobile monitoring 
-mm_full <- readRDS("Data/MobileMonitoring/all_data_190917.rda") %>%
+
+mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_190917.rda")) %>%
   #drop unwanted variable values to reduce data size
   filter(!variable %in% c("gps_lat",
                           "gps_long",
@@ -135,70 +136,49 @@ mm.wide <- mm %>%
 
 ############################ save data for quicker access ################################
 
-# saveRDS(mm, file.path("Data", "MobileMonitoring", "mm_190917.rda"))
-# saveRDS(mm.wide, file.path("Data", "MobileMonitoring", "mm.wide_190917.rda"))
+# saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_190917.rda"))
+# saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_190917.rda"))
 
 ##########################################################################################
 ########################### 2. overnight collocations ####################################
 ##########################################################################################
 
-#################################### read in data ####################################  
-
-# folders with files to be uploaded. folder should only include ptraks w/o screens 
+# folders with files to be uploaded. folder should only include ptraks w/o screens. new files added to folder will automatically be uploaded
 path_10w <- file.path("Data", "Aim 2", "Overnight Collocations", "10W_raw", "ptrak_noscreen")
 path_bh <- file.path("Data", "Aim 2", "Overnight Collocations", "BH_raw", "ptrak_noscreen")
 
-  
+#all files for each AQS site in the ptrak folder are uploaded and combined   
 ptrak_10w <- ptrak.bind.fn(folder_path = path_10w)
-
 ptrak_bh <- ptrak.bind.fn(folder_path = path_bh)
+ptrak <- rbind(ptrak_10w, ptrak_bh)
 
- 
-
-
- 
-#################################### clean up ####################################  
-
-ptrak <- rbind(Ptrak.10W, Ptrak.BH) %>% 
-  mutate(
-    date_time_local = as.POSIXct(paste(Date, Time), format="%m/%d/%y %H:%M:%S", tz = "America/Los_Angeles"),
-    #convert to PST (this creates a character vector), convert back to date-time format
-    #date_time_pst =as.POSIXct(format(date_time_local, tz="Etc/GMT+8")), 
-    date = as.Date(date_time_local),
-    hour = as.numeric(format(date_time_local, format="%H")),
-    #hour_local = as.numeric(format(date_time_local, format="%H")),
-    time_of_day = factor(ifelse(hour %in% early_am, "early_am",
-                                ifelse(hour %in% am, "am",
-                                       ifelse(hour %in% noon, "noon",
-                                              ifelse(hour %in% evening, "evening", "night")))),
-                         levels= c("early_am", "am", "noon", "evening", "night")),
-    day = factor(format(date_time_local, "%a"), 
-                 levels= c("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")),
-    time_of_week = factor(ifelse(day =="Sat" | day == "Sun", "weekend", "weekday")),
-    #month = as.numeric(format(date_time_local, format="%m")),
-    month = factor(format(date_time_local, "%b"), 
-                   levels= c("Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec")),
-    season = factor(ifelse((date >= winter1 & date < spring) | date >= winter2, "winter",
-                           ifelse(date >= spring & date < summer, "spring",
-                                  ifelse(date >= summer & date < fall, "summer", "fall"))),
-                    levels = c("spring", "summer", "fall", "winter"))
-  ) %>%
-  # take out extreme low and high values
-  filter(Conc_pt_cm3 > as.numeric(quantile(Conc_pt_cm3, myquantile_lower, na.rm = T)) &
-           Conc_pt_cm3 < as.numeric(quantile(Conc_pt_cm3, myquantile_upper, na.rm = T))) %>%
-  select(date_time_local, date, hour, time_of_day, day, time_of_week, month, season, Conc_pt_cm3, Location) #hour_local
-
-
-# take median (since not excluding extreme values) concentration of 10-sec day-hour values
 ptrak <- ptrak %>%
-  group_by(date, hour, time_of_day, day, time_of_week, month, season, Location) %>% #hour_local
-  summarize(Conc_pt_cm3 = round(median(Conc_pt_cm3)))
-
+  mutate(
+    #get rid of minutes & seconds
+    datetime = format(ptrak$datetime, "%Y-%m-%d %H:%M")
+  ) %>%
+  group_by(datetime,location) %>%
+  summarize(
+    #estimate hourly medians
+    Conc_pt_cm3 = round(median(Conc_pt_cm3))
+  ) %>%
+  ungroup() %>%
+  mutate(
+    #make datetime into POSIXct() format
+    datetime = ymd_hm(datetime)
+  ) %>%
+  #add temporal variables
+  add.temporal.variables(data = ., date.var = "datetime") #%>%
+  # # take out extreme low and high values
+  # filter(Conc_pt_cm3 > as.numeric(quantile(Conc_pt_cm3, myquantile_lower, na.rm = T)) &
+  #        Conc_pt_cm3 < as.numeric(quantile(Conc_pt_cm3, myquantile_upper, na.rm = T))) %>%
+  
+  
 # #before/after daylight savings? 
 # ptrak <- ptrak %>%
 #   mutate(DaylightSavings = date > "2019-03-10" & date < "2019-11-03")
 
 ############################ save data for quicker access ################################
-#saveRDS(ptrak, file.path("Data", "MobileMonitoring", "ptrak_190628.rda"))
+#saveRDS(ptrak, file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda"))
 
  

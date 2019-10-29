@@ -35,18 +35,19 @@ theme_set(theme_linedraw() + theme(legend.position="bottom"))
 source("A2.0.1_Var&Fns.R")
 
 #load stop average data 
-mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_190917.rda")) %>% 
+mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191021.rda")) %>% 
   #only keep relevant particle values
   filter(variable %in% c("ufp_pt_noscreen_ct_cm3",
                          "ufp_disc_ct_cm3",
-                          "ufp_scan_ct_cm3",
+                          "ufp_scan_10_421_nm_ct_cm3",
+                         "ufp_scan_20_421_nm_ct_cm3",
                           "bc_ir880nm_ng_m3",
                           "neph_bscat_per_m"
                          )
          )
 
 
-mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_190917.rda"))  
+mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191021.rda"))  
 
 #load overnight AQS site data 
 ptrak <- readRDS(file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda"))
@@ -66,7 +67,8 @@ Using untrimmed, median instrument values for each stop (there are many stops pe
 Data used in this report are those greater than the `r myquantile_lower` quantile and less than the `r myquantile_upper` quantile.
 
 
-# Data Completeness 
+# Data Completeness     
+##### --> numbers seem high?
 
 ```{r}
 total_site_visits <- nrow(mm.wide)
@@ -74,7 +76,8 @@ total_site_visits <- nrow(mm.wide)
 instrument_readings <- mm.wide %>%
   select(ufp_disc_ct_cm3, 
          ufp_pt_noscreen_ct_cm3, 
-         ufp_scan_ct_cm3, 
+         ufp_scan_10_421_nm_ct_cm3,
+         #ufp_scan_20_421_nm_ct_cm3,
          bc_ir880nm_ng_m3, 
          neph_bscat_per_m)  
 
@@ -116,6 +119,7 @@ kable(data_completeness, digits = 1, caption = "Data Completeness")
 ```{r}
 #instrument used each day
 mm %>%
+  filter(variable != "ufp_scan_20_421_nm_ct_cm3") %>%
   #1 record per variable combination - to reduce file size
   select(date, instrument_id, variable) %>% 
   unique() %>%
@@ -199,7 +203,6 @@ mm %>%
 ```{r}
 #need to compare PMPT_1 to PMPT_93 and PMPT_94, and PMPT_93 to PMPT_94
 
-
 #the colocations we actually have
 colo.plot(primary.instrument = "PMPT_93", 
           secondary.instrument = "PMPT_4",
@@ -212,12 +215,14 @@ colo.plot(primary.instrument = "PMPT_94",
 
 ```
 
-### --> ? 
-Compare nanoscan (20 nm +) to ptrak () since nanoscan is tends to be more steady.
-Note that bin counts are for mid points of the bin, so these concentrations
+Compare NanoScan (20-421 nm +) to ptrak (20- 1000 nm) since NanoScan tends to be more steady. Assuming few particles > 421 nm, such that the NanoScan and PTRAK are comparable.
+
+### --> take out outlier, which makes R2 look very high
 
 ```{r}
-
+mm.wide %>%
+  colo.plot.wide.data(data.wide = ., x.variable = "ufp_scan_20_421_nm_ct_cm3",
+                      y.variable = "ufp_pt_noscreen_ct_cm3")
 
 ```
 
@@ -261,7 +266,7 @@ colo.plot(primary.instrument = "PM25_176",
 
 ## Lab/Garage Collocations
 
-### --> to do
+### --> see Lab collocations in database: Imports table/ lab0, lab C, or Rm 114 
 
 ### PTRAKs   
 
@@ -322,8 +327,6 @@ ptrak %>%
 #### Models by time of day, time of week and season   
 ##### LS linear Fit
 
-Weekend is lower than weekday; winter is higher than spring
-
 ```{r}
 #only spring (vs winter) is significant
 lm(Conc_pt_cm3 ~ time_of_day + time_of_week + season, data=ptrak) %>%
@@ -351,8 +354,6 @@ anovaVCA(Conc_pt_cm3 ~ time_of_day + time_of_week + season,
 #### Models by hour, day and month   
 ##### LS linear fit   
 
-noon is higher than midnight; Sat & Sun are lower than Monday; April and June are lower than January 
-
 ```{r}
 #sign: hour, Sat, Sun, Apr, Jun, Nov
                       #factor(hour_night)
@@ -370,7 +371,6 @@ lm(Conc_pt_cm3 ~ factor(hour) + day + month, data=ptrak) %>%
 
 ##### ANOVA Variance Component Analyses for random models
 
-Most of the variation is within groups, some from month, and a minor amount from hour and day.
 
 ```{r}
 anovaVCA(Conc_pt_cm3 ~ hour + day + month, 
@@ -384,24 +384,21 @@ anovaVCA(Conc_pt_cm3 ~ hour + day + month,
 
 ```{r}
 mm %>%
-  filter(aqs_location == "Beacon Hill" |
-           aqs_location == "10th & Weller") %>%
+  filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
   ggplot(aes(x=hour, y=value)) + 
   geom_boxplot(aes(group=hour, fill=time_of_day)) +
   geom_smooth(se=F, method = "loess") + 
   facet_wrap(~aqs_location) # + time_of_week
  
 mm %>%
-  filter(aqs_location == "Beacon Hill" |
-           aqs_location == "10th & Weller") %>%
+  filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
   ggplot(aes(x=day, y=value)) + 
   geom_boxplot() + 
   geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") + 
   facet_wrap(~aqs_location)
 
 mm %>%
-  filter(aqs_location == "Beacon Hill" |
-           aqs_location == "10th & Weller") %>%
+  filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
   ggplot(aes(x=as.numeric(month), y=value)) + 
   geom_boxplot(aes(group=month)) + 
   geom_smooth(aes(), se=F, method = "loess") + 
@@ -534,7 +531,7 @@ mm %>%
 
 ## Concentrations by Geographic Features 
 
-### --> need geocovariates  
+### --> upload geocovariate dataset
 
 ```{r}
 #distance to roadway
@@ -631,7 +628,8 @@ UFPs are poorly correlated with PM2.5 & BC
 mm.wide %>%
   select(ufp_disc_ct_cm3, 
          ufp_pt_noscreen_ct_cm3, 
-         ufp_scan_ct_cm3, 
+         ufp_scan_10_421_nm_ct_cm3, 
+         ufp_scan_20_421_nm_ct_cm3, 
          bc_ir880nm_ng_m3, 
          neph_bscat_per_m) %>%
   plot()  
@@ -644,7 +642,8 @@ Pearson Correlations
 mm.wide %>%
   select(ufp_disc_ct_cm3, 
          ufp_pt_noscreen_ct_cm3, 
-         ufp_scan_ct_cm3, 
+         ufp_scan_10_421_nm_ct_cm3, 
+         ufp_scan_20_421_nm_ct_cm3, 
          bc_ir880nm_ng_m3, 
          neph_bscat_per_m) %>%
    cor(use = "complete.obs") %>%

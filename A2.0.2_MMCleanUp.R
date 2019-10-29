@@ -3,6 +3,24 @@
 
 ##2) clean up overnight data from AQS sites, calculate median hourly concentrations
 
+############### to do 
+
+# clean up geocovariates:
+## take out AP predictions (drop all "em_..." & "no2_..."? e.g., em_NOx_s03000)
+## take out variables: w/ little variation, those w/ lot variation (see: https://github.com/kaufman-lab/STmodel/blob/master/functions_covariate_preprocess_regional.R)
+ 
+#geocovariates 
+mm.geo <- read.csv("~/Everything/School/PhD_UW/Dissertation/TRAP R Project/Data/Aim 2/Geocovariates/dr0311_mobile_locations.txt")
+
+ 
+
+
+
+
+
+
+
+
 ##########################################################################################
 # Clear workspace of all objects and unload all extra (non-base) packages
 rm(list = ls(all = TRUE))
@@ -26,13 +44,14 @@ source("A2.0.1_Var&Fns.R")
 
 #mobile monitoring 
 
-mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_190917.rda")) %>%
+mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191021.rda")) %>%
   #drop unwanted variable values to reduce data size
   filter(!variable %in% c("gps_lat",
                           "gps_long",
                           #"ufp_pt_screen_ct_cm3",
                           "ufp_disc_med_size_nm",
-                          "bc_uv375nm_ng_m3" #this is not total BC
+                          "bc_uv375nm_ng_m3", #this is not total BC
+                          "ufp_scan_20_5_ct_cm3" #don't need this bin
                           )
          )
 
@@ -54,23 +73,23 @@ mm_full <- mm_full %>%
                                               instrument_id)))
   )
 
-quant_limit_upper <- as.numeric(quantile(mm_full$value, myquantile_upper, na.rm = T))
-quant_limit_lower <- as.numeric(quantile(mm_full$value, myquantile_lower, na.rm = T))
+# quant_limit_upper <- as.numeric(quantile(mm_full$value, myquantile_upper, na.rm = T))
+# quant_limit_lower <- as.numeric(quantile(mm_full$value, myquantile_lower, na.rm = T))
 
-mm_full <- mm_full %>%
-  group_by(variable, instrument_id) %>%
-  #remove top 1% of values for each pollutant and instrument before taking avg
-  filter(value > as.numeric(quantile(value, myquantile_lower, na.rm = T)) & 
-           value < as.numeric(quantile(value, myquantile_upper, na.rm = T))) %>%
-     # mutate(value = ifelse(value < quantile(value, myquantile_upper, na.rm = T), value, NA)) %>%
-  # #drop rows w/ NA "values"
-#   drop_na(value) %>%
-  ungroup()
+# mm_full <- mm_full %>%
+#   group_by(variable, instrument_id) %>%
+#   #remove top 1% of values for each pollutant and instrument before taking avg
+#   filter(value > as.numeric(quantile(value, myquantile_lower, na.rm = T)) &
+#            value < as.numeric(quantile(value, myquantile_upper, na.rm = T))) %>%
+#      # mutate(value = ifelse(value < quantile(value, myquantile_upper, na.rm = T), value, NA)) %>%
+#   # #drop rows w/ NA "values"
+# #   drop_na(value) %>%
+#   ungroup()
 
-mm_full2 %>%
-  ggplot(aes(x=value)) + 
-  geom_histogram() + 
-  facet_wrap(~variable, scales="free")
+# mm_full2 %>%
+#   ggplot(aes(x=value)) + 
+#   geom_histogram() + 
+#   facet_wrap(~variable, scales="free")
 
 #take avg of each stop to REDUCE FILE SIZE
 mm <- mm_full %>%
@@ -113,9 +132,40 @@ mm <- mm %>%
 #add temporal variables
 mm <- mm %>% 
   mutate(
-   date = as.Date(substr(arrival_time, 1,10))) %>%
+   date = as.Date(substr(arrival_time, 1,10))
+   ) %>%
   add.temporal.variables(data = .,
                          date.var = "arrival_time")
+
+ 
+#create NanoScan counts (20-420 nm) (ptraks: 20-1000 nm)
+temp <- mm %>% 
+  #look at variables from NanoScan
+  filter(grepl("scan", variable)) %>%
+  #make wide format to calculate the difference
+  spread(variable, value) %>%
+  mutate(
+    ufp_scan_20_421_nm_ct_cm3 = ufp_scan_ct_cm3 - ufp_scan_11_5_ct_cm3 - ufp_scan_15_4_ct_cm3
+  ) %>% 
+  rename(
+    ufp_scan_10_421_nm_ct_cm3 = ufp_scan_ct_cm3
+  ) %>%
+  select( - ufp_scan_11_5_ct_cm3, 
+          -ufp_scan_15_4_ct_cm3) %>%
+  #make back to long forma
+  gather("variable", "value", ufp_scan_10_421_nm_ct_cm3:ufp_scan_20_421_nm_ct_cm3)
+
+#replace old nanoscan bin values with new ones 
+mm <- mm %>%
+  filter(!grepl("scan", variable)) %>%
+  rbind(temp) %>%
+  arrange(arrival_time)
+
+###################### merge mm w/ geocovariates ######################
+
+
+
+
   
 
 ############################ make wide format ############################################
@@ -136,8 +186,8 @@ mm.wide <- mm %>%
 
 ############################ save data for quicker access ################################
 
-# saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_190917.rda"))
-# saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_190917.rda"))
+# saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191021.rda"))
+# saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191021.rda"))
 
 ##########################################################################################
 ########################### 2. overnight collocations ####################################
@@ -157,7 +207,7 @@ ptrak <- ptrak %>%
     #get rid of minutes & seconds
     datetime = format(ptrak$datetime, "%Y-%m-%d %H:%M")
   ) %>%
-  group_by(datetime,location) %>%
+  group_by(datetime, location) %>%
   summarize(
     #estimate hourly medians
     Conc_pt_cm3 = round(median(Conc_pt_cm3))

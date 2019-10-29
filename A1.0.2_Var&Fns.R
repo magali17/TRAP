@@ -199,8 +199,25 @@ models.fn <- function(mydata = dem.w,
                       outcome.text = "All-cause Dementia",
                       no2.var = "no2_10yr",
                       pm25.var = "pm25_10yr",
+                      #myweights = 1,
                       no2.units = my.no2.units,
                       pm25.units = my.pm25.units) {
+  
+  # mydata = dem.w
+  # surv.time2 = "age_end_exposure"
+  # surv.event = "dementia_now"
+  # outcome.text = "All-cause Dementia"
+  # myweights = 1
+  # no2.var = "no2_10yr"
+  # pm25.var = "pm25_10yr"
+  # no2.units = my.no2.units
+  # pm25.units = my.pm25.units
+  
+  
+  # #if no weights given, use 1 for all, otherwise use specific weights
+  # if (length(myweights) == 1 ) {
+  #   myweights <- rep(myweights, nrow(mydata))
+  # }
   
   #rename variables for fns
   mydata <- mydata %>%
@@ -242,10 +259,11 @@ models.fn <- function(mydata = dem.w,
   m1 <- mydata %>%
     coxph(s.dem ~ no2, 
           data=., 
-          robust = T,
-    ) 
+          robust = T, 
+          weights = model_wt
+    )  
   
-  m1.s <- m1 %>% summary()
+   m1.s <- m1 %>% summary()
   
   #Model 2 (a priori): M1 + gender, education, median household income, race, birth cohort; APOE stratification.
   #-assuming missing values (e.g., APOE) are MCAR and doing a complete case analysis. This method can be bias if values are not MCAR.
@@ -256,7 +274,7 @@ models.fn <- function(mydata = dem.w,
           #don't use edu & birth year categories b/c too few ppl w/ low degrees and early birth years, thus reference category is small/unstable? 
           data=., 
           robust = T,
-          #ties = "exact" #output is weird if use this
+          weights = model_wt
     ) 
   
   m2.s <- m2 %>% summary()
@@ -268,6 +286,7 @@ models.fn <- function(mydata = dem.w,
             smoke + exercise_reg, 
           data=., 
           robust = T,
+          weights = model_wt
     ) 
   
   m3.s <- m3 %>% summary()
@@ -281,6 +300,7 @@ models.fn <- function(mydata = dem.w,
             Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi, 
           data=., 
           robust = T,
+          weights = model_wt
     ) 
   
   m4.s <- m4 %>% summary()
@@ -298,6 +318,7 @@ models.fn <- function(mydata = dem.w,
             male + edu + race_white + income + birth_cohort + strata(apoe),
           data=., 
           robust = T,
+          weights = model_wt
     ) 
   m5.s <- m5 %>% summary()
   
@@ -308,17 +329,18 @@ models.fn <- function(mydata = dem.w,
             pm25,  
           data=.,
           robust = T,
+          weights = model_wt
     )
   
   m6.s <- m6 %>% summary()
   
   #raw model output
-  model.ouputs <- list(model1 = m1.s, 
-                       model2= m2.s, 
-                       model3 = m3.s, 
-                       model4 = m4.s, 
-                       model5 = m5.s, 
-                       model6 = m6.s)
+  model.ouputs <- list(model1 = m1, 
+                       model2= m2, 
+                       model3 = m3, 
+                       model4 = m4, 
+                       model5 = m5, 
+                       model6 = m6)
   
   #dataframe w/ HR output from models
   hrs <- rbind(
@@ -354,7 +376,9 @@ models.fn <- function(mydata = dem.w,
 diff.exposures.fn <- function(mydata.2 = dem.w, 
                               surv.time2.2 = "age_end_exposure", 
                               surv.event.2 = "dementia_now", 
-                              outcome.text.2 = "All-cause Dementia") {
+                              outcome.text.2 = "All-cause Dementia" #,
+                              #weights.2 = 1
+                              ) {
   
   exposure = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr20yrlag")
   
@@ -374,7 +398,9 @@ diff.exposures.fn <- function(mydata.2 = dem.w,
                                    surv.event = surv.event.2,
                                    outcome.text = outcome.text.2,
                                    no2.var = paste0("no2_", exposure[i]),
-                                   pm25.var = paste0("pm25_", exposure[i])) 
+                                   pm25.var = paste0("pm25_", exposure[i]) #, 
+                               #myweights = weights.2
+                               ) 
     
     #save HRs
     hr.output.df <- rbind(hr.output.df, model_results[[1]])
@@ -389,9 +415,6 @@ diff.exposures.fn <- function(mydata.2 = dem.w,
   return(myresult) 
   
 }
-
-
-
 
 
 ###############################################################################
@@ -437,3 +460,79 @@ hr.plot <- function(mydata,
 #       )%>%
 #   hr.plot(.)
 
+
+######################## replace vector NAs for IPW ########################
+#returns vector of most frequently used value if variabl is factor or mean if variable is numeric  
+
+### ?? or return most frequent value for all? 
+
+replace.nas.fn <- function(myvector,
+                           numeric) {
+  # myvector <- apoe$education
+  # numeric <- mynumeric[1]
+  
+  myvector[is.na(myvector)] <- ifelse(numeric==1,
+                                      mean(myvector, na.rm = TRUE),
+                                      names(which.max(table(myvector)))
+         )
+  
+  # if (numeric == TRUE) {
+  #   myvector[is.na(myvector)] <- mean(myvector, na.rm = TRUE)
+  #   #myvector
+  #   
+  # } else {
+  #   myvector[is.na(myvector)] <- names(which.max(table(myvector)))
+  #   #myvector
+  # }
+  
+  return(myvector)
+}
+
+
+
+##############################################################################################
+#returns plot comparing HRs
+
+comp.x.y.plot.fn <- function(data.wide, 
+                                x.variable, y.variable, 
+                                int.digits = 0, 
+                                r2.digits = 2, 
+                                rmse.digits = 0, 
+                             mycolour.var = NULL) {
+  
+  #mycolour.var <- as.name(mycolour.var)
+  
+  data.wide <- data.wide %>% 
+    #only look at rows where have observations for both instruments
+    drop_na(x.variable, y.variable) 
+  
+  lm1 <- lm(formula(paste(y.variable, "~", x.variable)), 
+            data = data.wide)
+  
+  #rmse
+  rmse <- (data.wide[[y.variable]] - data.wide[[x.variable]])^2 %>%
+    mean() %>%
+    sqrt() %>%
+    round(digits = rmse.digits)
+  
+  #compare primary & secondary instrument agreement 
+  data.wide %>%
+    ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
+    geom_point(#alpha=0.3, 
+               aes(colour = data.wide[[mycolour.var]])) + 
+    geom_abline(intercept = 0, slope = 1) +
+    geom_smooth(method = "lm", aes(fill="lm")) + 
+    labs(fill="", 
+         title = paste0(data.wide$variable[1]),
+         subtitle = paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
+                           "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
+                           "\nRMSE = ", rmse,
+                           "\nno. pairs = ", nrow(data.wide)
+         ),
+         x=x.variable,
+         y=y.variable,
+         colour = mycolour.var
+    )
+  
+  
+}

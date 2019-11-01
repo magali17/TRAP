@@ -14,21 +14,12 @@ myquantile_upper <- 1.00
 #sampling dates
 start.date = "2019-02-22"
 
-#temporal variables
-##seasons
-# winter1 <- as.Date("2018-12-21")
-# winter2 <- as.Date("2019-12-21")
-# spring <- as.Date("2019-03-20")
-# summer <- as.Date("2019-06-21")
-# fall <- as.Date("2019-09-23")
-
 ##time of day
 early_am <- seq(5,8)
 am <- seq(9,11)
 noon <- seq(12,15)
 evening <- seq(16,20)
 night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
-
 
 ####################################################################################
 #################################### functions ####################################
@@ -43,8 +34,6 @@ colo.plot <- function(mydata=mm,
                       r2.digits = 2, 
                       rmse.digits = 0) {
   
-  # primary.instrument = "PMPT_93"
-  # secondary.instrument = "PMPT_4"
   
   data.wide <- mydata %>% 
     #select only values from desired instruments
@@ -55,7 +44,6 @@ colo.plot <- function(mydata=mm,
              drop_na(primary.instrument, secondary.instrument) 
            
            data.wide <- data.wide %>%
-             #as.data.frame() %>%
              #calculate percent difference in estimates
              mutate(pct.diff = (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])/data.wide[[primary.instrument]]*100)
            
@@ -93,6 +81,7 @@ colo.plot <- function(mydata=mm,
   
 }
 
+#################################### correlation plot Wide format ####################################
 
 # same but for data in wide format 
 colo.plot.wide.data <- function(data.wide=mm.wide, 
@@ -100,9 +89,6 @@ colo.plot.wide.data <- function(data.wide=mm.wide,
                       int.digits = 0, 
                       r2.digits = 2, 
                       rmse.digits = 0) {
-  
-  # x.variable = "PMPT_93"
-  # y.variable = "PMPT_4"
   
   data.wide <- data.wide %>% 
              #only look at rows where have observations for both instruments
@@ -147,7 +133,6 @@ colo.plot.wide.data <- function(data.wide=mm.wide,
            
 }
   
-
 
 #################################### temporal variables ####################################
 
@@ -199,8 +184,6 @@ add.temporal.variables <- function(data,
 
 }
 
-#test <- add.temporal.variables()
-
 
 ################################ reads raw ptrak files ################################
 #returns clean ptrak files from raw files 
@@ -248,7 +231,7 @@ ptrak.bind.fn <- function(folder_path) {
   files_list <- list.files(folder_path)
   
   #create empty df
-  df <- as.data.frame(matrix(,ncol=3,nrow=0))
+  df <- as.data.frame(matrix(ncol=3,nrow=0))
   
   #rbind files
   for (i in 1:length(files_list)) {
@@ -260,9 +243,7 @@ ptrak.bind.fn <- function(folder_path) {
   return(df)
   
   }
-
-#t <- ptrak.bind.fn(folder_path = file.path("Data", "Aim 2", "Overnight Collocations", "BH_raw", "ptrak_noscreen"))
-
+ 
 
 #############################################################################################
 

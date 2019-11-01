@@ -70,11 +70,18 @@ temp <- read.csv(file.path( "Data", "Aim 2", "Temp Data", "dr0311_mobile_locatio
 
 ```
 
-# --> trim data 
+# --> trim data   
 LS: "I think we trim before weighting and then do the weighting based on the data we have."
 
-# --> Calculate Weighted Means 
+# --> Calculate Weighted Means   
 LS: "Ultimately we want each DOW to have a weight of 1/7, each quarter to have a weight of ¼, and each time of day to have the weight according to how we ultimately bin or otherwise model time of day"
+
+Assume temporal pattern is same across locations. Strong assumption, but can’t relax this very easily  
+
+# --> how to deal w/ missing observations    
+e.g., season.    
+Day of week will be more straight forward  
+
 
 ```{r}
 #season-weekend-day-time_of_day
@@ -90,4 +97,5 @@ LS: "Ultimately we want each DOW to have a weight of 1/7, each quarter to have a
 
 ```
 
- 
+# Comparing to AQS sites  
+if have 6 months of data, compare to the 6-mo estimate at AQS sites

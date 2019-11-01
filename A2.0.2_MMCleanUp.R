@@ -1,6 +1,5 @@
 #script to: 
 ##1) summarize high temporal resolution mobile monitoring data into stop MEDIANS (reduce file size); data are not trimmed as of  9/19/19
-
 ##2) clean up overnight data from AQS sites, calculate median hourly concentrations
 
 ############### to do 
@@ -13,12 +12,6 @@
 mm.geo <- read.csv("~/Everything/School/PhD_UW/Dissertation/TRAP R Project/Data/Aim 2/Geocovariates/dr0311_mobile_locations.txt")
 
  
-
-
-
-
-
-
 
 
 ##########################################################################################
@@ -73,24 +66,6 @@ mm_full <- mm_full %>%
                                               instrument_id)))
   )
 
-# quant_limit_upper <- as.numeric(quantile(mm_full$value, myquantile_upper, na.rm = T))
-# quant_limit_lower <- as.numeric(quantile(mm_full$value, myquantile_lower, na.rm = T))
-
-# mm_full <- mm_full %>%
-#   group_by(variable, instrument_id) %>%
-#   #remove top 1% of values for each pollutant and instrument before taking avg
-#   filter(value > as.numeric(quantile(value, myquantile_lower, na.rm = T)) &
-#            value < as.numeric(quantile(value, myquantile_upper, na.rm = T))) %>%
-#      # mutate(value = ifelse(value < quantile(value, myquantile_upper, na.rm = T), value, NA)) %>%
-#   # #drop rows w/ NA "values"
-# #   drop_na(value) %>%
-#   ungroup()
-
-# mm_full2 %>%
-#   ggplot(aes(x=value)) + 
-#   geom_histogram() + 
-#   facet_wrap(~variable, scales="free")
-
 #take avg of each stop to REDUCE FILE SIZE
 mm <- mm_full %>%
   group_by(runname, site_id) %>%  #, instrument_id, variable
@@ -98,7 +73,7 @@ mm <- mm_full %>%
   mutate(arrival_time = min(time)) %>%
   select(-time) %>%
   
-  #take avg/median of each unique site stop for each instrument
+#take avg/median of each unique site stop for each instrument
   group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, duration_sec, arrival_time, instrument_id, variable, site_no) %>%
   summarize(value = median(value, na.rm = T)) %>%
   ungroup()
@@ -119,9 +94,7 @@ site_id_visit_no <- mm %>%
   select(site_id, runname) %>%
   unique() %>%
   #group_by(site_id) %>%
-  mutate(
-    site_id_visit_no = seq(1:n())
-  )
+  mutate(site_id_visit_no = seq(1:n()))
 
 mm <- mm %>% left_join(site_id_visit_no)
 
@@ -132,10 +105,8 @@ mm <- mm %>%
 #add temporal variables
 mm <- mm %>% 
   mutate(
-   date = as.Date(substr(arrival_time, 1,10))
-   ) %>%
-  add.temporal.variables(data = .,
-                         date.var = "arrival_time")
+   date = as.Date(substr(arrival_time, 1,10))) %>%
+  add.temporal.variables(data = ., date.var = "arrival_time")
 
  
 #create NanoScan counts (20-420 nm) (ptraks: 20-1000 nm)
@@ -218,16 +189,8 @@ ptrak <- ptrak %>%
     datetime = ymd_hm(datetime)
   ) %>%
   #add temporal variables
-  add.temporal.variables(data = ., date.var = "datetime") #%>%
-  # # take out extreme low and high values
-  # filter(Conc_pt_cm3 > as.numeric(quantile(Conc_pt_cm3, myquantile_lower, na.rm = T)) &
-  #        Conc_pt_cm3 < as.numeric(quantile(Conc_pt_cm3, myquantile_upper, na.rm = T))) %>%
-  
-  
-# #before/after daylight savings? 
-# ptrak <- ptrak %>%
-#   mutate(DaylightSavings = date > "2019-03-10" & date < "2019-11-03")
-
+  add.temporal.variables(data = ., date.var = "datetime")  
+     
 ############################ save data for quicker access ################################
 #saveRDS(ptrak, file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda"))
 

@@ -232,13 +232,20 @@ models.fn <- function(mydata = dem.w,
       #m6
       pm25 = pm25.var
     ) %>%
+    mutate_at(
+      c("income",
+        "edu",
+        "birth_cohort",
+        "smoke",
+        "bmi"), 
+      as.factor) %>%
     mutate(
-      #make factors
-      income = factor(income),
-      edu = factor(edu),
-      birth_cohort = factor(birth_cohort),
-      smoke = factor(smoke),
-      bmi = factor(bmi),
+      # #make factors & rename
+      # income = factor(income),
+      # edu = factor(edu),
+      # birth_cohort = factor(birth_cohort),
+      # smoke = factor(smoke),
+      # bmi = factor(bmi),
       
       #adjust AP units
       no2 = no2/no2.units,
@@ -249,8 +256,7 @@ models.fn <- function(mydata = dem.w,
   s.dem <- Surv(
     time = as.numeric(unlist(mydata["age_start_exposure"])),  
     time2 = as.numeric(unlist(mydata[surv.time2])) ,  
-    event = as.numeric(unlist(mydata[surv.event]))
-  )
+    event = as.numeric(unlist(mydata[surv.event])))
   
 
   #Model 1 (Reduced): Age (time axis), NO2 (time-varying) 
@@ -360,10 +366,8 @@ models.fn <- function(mydata = dem.w,
   
   return(list(table_of_no2_HRs= no2.hrs,
               raw_model_output = model.ouputs,
-              survival_object = s.dem,
-              renamed_df = mydata
-              )
-         )
+              survival_object = s.dem
+              ))
   
 }
 
@@ -407,9 +411,7 @@ diff.exposures.fn <- function(mydata.2 = dem.w,
   
   myresult <- list(HRs = hr.output.df,
                    model.output = model.output.list,
-                   survival.object = model_results[[3]],
-                   renamed_df = model_results[[4]]
-                   )
+                   survival.object = model_results[[3]])
   
   return(myresult) 
   

@@ -27,26 +27,24 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(dplyr, tidyverse, chron, knitr)  #chronn: is.holiday, is.weekend
+pacman::p_load(dplyr, tidyverse, knitr, Himsc, EnvStats, lubridate, glmnet, ggpubr)   
+#Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
 #set plot theme
 theme_set(theme_linedraw() + theme(legend.position="bottom")) 
 
+source("A2.0.1_Var&Fns.R")
 
 ```
 
 ```{r}
-
 #load stop average data 
-mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190806.rda"))
-mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190806.rda"))
+mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191021.rda"))
+mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191021.rda"))
 
-#fake, temp data from Amanda
-temp <- read.csv(file.path( "Data", "Aim 2", "Temp Data", "dr0311_mobile_locations.txt"))
-  
 ```
 
-```{r simple avg}
+```{r simple avg for ACT symposium}
 # #estimate site-specific median pollutant concentrations up until now
 # median.conc <- mm %>% 
 #   #filter(instrument_id =="PMDISC_8") %>% 
@@ -70,32 +68,166 @@ temp <- read.csv(file.path( "Data", "Aim 2", "Temp Data", "dr0311_mobile_locatio
 
 ```
 
-# --> trim data   
+# --> 1. trim data   
 LS: "I think we trim before weighting and then do the weighting based on the data we have."
 
-# --> Calculate Weighted Means   
+# --> 2. Calculate Weighted Means   
 LS: "Ultimately we want each DOW to have a weight of 1/7, each quarter to have a weight of ¼, and each time of day to have the weight according to how we ultimately bin or otherwise model time of day"
 
 Assume temporal pattern is same across locations. Strong assumption, but can’t relax this very easily  
-
-# --> how to deal w/ missing observations    
+## --> how to deal w/ missing observations    
 e.g., season.    
 Day of week will be more straight forward  
 
+### ? use wide format (uses avg when multiple readings exist from duplicate instruments)
+## ?? how to select all columns After a certain one? 
 
 ```{r}
-#season-weekend-day-time_of_day
+#1. trim data 
+mm.w.ptrak <- mm.wide %>% 
+  select(
+    site_id: site_lat, site_no, site_id_visit_no, aqs_site:season,
+    ufp_pt_noscreen_ct_cm3
+  ) %>%
+  #remove NAs
+  drop_na(ufp_pt_noscreen_ct_cm3)
 
+untrimmed.plot <- mm.w.ptrak %>% 
+  ggplot(aes(y=ufp_pt_noscreen_ct_cm3)) + 
+  geom_boxplot() + #scale_y_log10() +
+  labs(title = "untrimmed data")
 
+#trip bottom and top 5% observations 
+trimmed.plot <- mm.w.ptrak %>%
+  filter(ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, (1-trim_quantile), na.rm = T),
+         ufp_pt_noscreen_ct_cm3 >= quantile(ufp_pt_noscreen_ct_cm3, (trim_quantile), na.rm = T)
+         ) %>%
+  ggplot(aes(y=ufp_pt_noscreen_ct_cm3)) + 
+  geom_boxplot() +
+  labs(title = paste0("trimmed top and bottom ", trim_quantile*100, "% of data " ))
+  
+ggarrange(untrimmed.plot, trimmed.plot )
+
+mm.w.ptrak <- mm.w.ptrak %>%
+  #trim high and low values
+  filter(ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, (1-trim_quantile), na.rm = T),
+         ufp_pt_noscreen_ct_cm3 >= quantile(ufp_pt_noscreen_ct_cm3, (trim_quantile), na.rm = T)
+         )
+
+#table of means by season-week-day w/ N, wts
 
 
 ```
 
+#### ? group by DOW or time_of_week (weekend)? 
+
+Lot of locations w/o observations during each season-time_of_week-time_of_day combination
 
 ```{r}
-#table of obsevations over time before/after weighing (e.g., % samples during day before/after weighting)
+#counts at each location by quarter, DOW, hour bins - see how much missin data there are
+
+#df w/ times that each stop Should have sampled
+loc <- unique(mm.w.ptrak$site_id)
+seasons <- unique(mm.w.ptrak$season)
+dow <- unique(mm.w.ptrak$time_of_week)
+hour <- unique(mm.w.ptrak$time_of_day)
+
+loc.vec <- rep(loc, each = length(seasons)*length(dow)*length(hour))
+seasons.vec <- rep(seasons, each = length(dow)*length(hour), times=length(loc))
+dow.vec <- rep(dow, each = length(hour), times=length(loc)*length(seasons))
+hour.vec <- rep(hour, times=length(loc)*length(seasons)*length(dow))
+#View(hour.vec)
+
+df <- data.frame(
+  site_id = loc.vec,
+  season = seasons.vec,
+  time_of_week = dow.vec,
+  time_of_day = hour.vec
+)
+
+mm.w.ptrak <- full_join(mm.w.ptrak, df) %>%
+  mutate(
+    ufp_available = as.numeric(!is.na(ufp_pt_noscreen_ct_cm3))
+  )
+
+samples_per_stop <- mm.w.ptrak %>% 
+  group_by(site_id, season, time_of_week, time_of_day) %>%
+  summarize(
+    N = sum(ufp_available)
+  )
+
+samples_per_stop %>%
+  ggplot(aes(x=N, fill = (N==0))) + 
+  geom_bar() + 
+  labs(title= paste("Histograms of No. Samples per", paste0(names(samples_per_stop)[1], collapse = "-"), ""),
+       x = paste0("No. Samples from stop locations (", length(unique(mm.w.ptrak$site_id)), ")")
+       ) + 
+  facet_grid(time_of_week+ time_of_day ~ season)  
+  
+```
+
+```{r example location w/ missing obs}
+#example location
+MC0002 <- mm.w.ptrak %>%
+  select(
+    site_id,
+    date:ufp_available
+  ) %>%
+  filter(site_id == "MC0002") %>%
+  arrange(season, time_of_week, time_of_day)
+
+#early_am and evening will be weighted more heavily b/c we never have sampling @ night
+#
+
+
+#test models
+MC0002 %>%
+  lm(ufp_pt_noscreen_ct_cm3 ~ time_of_day + time_of_week + season, data = .) %>%
+  summary()
 
 ```
 
-# Comparing to AQS sites  
+
+```{r lme code exp}
+#mixed effecdts model
+## see B540 L4 # ~57
+
+#can set covariance structure using nlme::lme()
+#fit0 <-lme( fev1 ~ age0 + ageL + relevel(sex, ref="male")*ageL + relevel(f508, ref="none")*ageL,
+#method = "ML", #best for inferences at pop/?indiv lvl 
+#random = reStruct( ~ 1 + ageL | id, pdClass="pdSymm", REML=F), #random int & slope
+#correlation = corAR1( form = ~ 1 | id ), ## within group corr structure
+#data = cf.long )
+
+#make predictions
+#pred.fit1 <- predict(fit1)
+
+# library(nlme)
+# me1 <- mm.w.ptrak %>% 
+#   #model won't run w/ missing Y's
+#   drop_na(ufp_pt_noscreen_ct_cm3) %>%
+#   mutate(
+#     time_of_day = factor(time_of_day, ordered = F),
+#     time_of_week = factor(time_of_week, ordered = F)
+#     ) %>%
+#   lme(ufp_pt_noscreen_ct_cm3 ~ time_of_day + time_of_week + season,
+#       method = "ML", 
+#       # --> add rand slope for other vars?      
+#       random =  reStruct( ~ 1 + time_of_day | site_id,  #random int & slope for each site_id
+#                                pdClass="pdSymm", REML=F),
+#       # --> add? 
+#       #correlation = corAR1( form = ~ 1 | site_id), ## within group corr structure
+#             data = .) 
+# 
+# me1 %>% summary()
+# 
+# mm.w.ptrak$pred.me1 <- predict(me1, newdata = mm.w.ptrak)
+
+#plot(residuals(me1) )
+```
+
+
+
+
+# Compare trimmed means at AQS sites  
 if have 6 months of data, compare to the 6-mo estimate at AQS sites

@@ -1,8 +1,6 @@
 #scrit of values & functions used in various RMarkdown scripts.
 
 
-### --> create fn to add temporal variables to any dataset? 
-
 ####################################################################################
 ############################### global variables ####################################
 ####################################################################################
@@ -10,6 +8,9 @@
 #data to use  # use all data for now
 myquantile_lower <- 0.00 
 myquantile_upper <- 1.00 
+
+#trim
+trim_quantile <- 0.05
 
 #sampling dates
 start.date = "2019-02-22"
@@ -43,16 +44,16 @@ colo.plot <- function(mydata=mm,
              #only look at rows where have observations for both instruments
              drop_na(primary.instrument, secondary.instrument) 
            
-           data.wide <- data.wide %>%
-             #calculate percent difference in estimates
-             mutate(pct.diff = (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])/data.wide[[primary.instrument]]*100)
+           # data.wide <- data.wide %>%
+           #   #calculate percent difference in estimates
+           #   mutate(pct.diff = (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])/data.wide[[primary.instrument]]*100)
            
            
            lm1 <- lm(formula(paste(secondary.instrument, "~", primary.instrument)), 
                      data = data.wide)
            
            #percent difference between instruments
-           pct.diff.median <- round(median(data.wide$pct.diff, na.rm = T), 1)
+           #pct.diff.median <- round(median(data.wide$pct.diff, na.rm = T), 1)
            
            #rmse
            rmse <- (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])^2 %>%
@@ -71,7 +72,6 @@ colo.plot <- function(mydata=mm,
                   subtitle = paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
                                     "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
                                     "\nRMSE = ", rmse,
-                                    #"\nmedian percent diff = ", pct.diff.median, "%",
                                     "\nno. pairs = ", nrow(data.wide)
                   ),
                   x=primary.instrument,
@@ -85,7 +85,8 @@ colo.plot <- function(mydata=mm,
 
 # same but for data in wide format 
 colo.plot.wide.data <- function(data.wide=mm.wide, 
-                      x.variable, y.variable, 
+                      x.variable, y.variable,
+                      mytitle = "",
                       int.digits = 0, 
                       r2.digits = 2, 
                       rmse.digits = 0) {
@@ -94,17 +95,13 @@ colo.plot.wide.data <- function(data.wide=mm.wide,
              #only look at rows where have observations for both instruments
              drop_na(x.variable, y.variable) 
            
-           data.wide <- data.wide %>%
-             #as.data.frame() %>%
-             #calculate percent difference in estimates
-             mutate(pct.diff = (data.wide[[y.variable]] - data.wide[[x.variable]])/data.wide[[x.variable]]*100)
+           # data.wide <- data.wide %>%
+           #   #calculate percent difference in estimates
+           #   mutate(pct.diff = (data.wide[[y.variable]] - data.wide[[x.variable]])/data.wide[[x.variable]]*100)
            
            
            lm1 <- lm(formula(paste(y.variable, "~", x.variable)), 
                      data = data.wide)
-           
-           #percent difference between instruments
-           pct.diff.median <- round(median(data.wide$pct.diff, na.rm = T), 1)
            
            #rmse
            rmse <- (data.wide[[y.variable]] - data.wide[[x.variable]])^2 %>%
@@ -119,11 +116,10 @@ colo.plot.wide.data <- function(data.wide=mm.wide,
              geom_abline(intercept = 0, slope = 1) +
              geom_smooth(method = "lm", aes(fill="lm")) + 
              labs(fill="", 
-                  title = paste0(data.wide$variable[1]),
+                  title = mytitle,
                   subtitle = paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
                                     "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
                                     "\nRMSE = ", rmse,
-                                    #"\nmedian percent diff = ", pct.diff.median, "%",
                                     "\nno. pairs = ", nrow(data.wide)
                   ),
                   x=x.variable,
@@ -158,6 +154,8 @@ add.temporal.variables <- function(data,
     ) %>%
     mutate(
       hour = hour(mydate),
+      #group night hours together 
+      hour_night = ifelse(hour < min(early_am.), hour + 24, hour),
       time_of_day = factor(ifelse(hour %in% early_am., "early_am",
                                 ifelse(hour %in% am., "am",
                                        ifelse(hour %in% noon., "noon",
@@ -166,7 +164,7 @@ add.temporal.variables <- function(data,
     day = wday(mydate, label = T, abbr = T),
     time_of_week = factor(ifelse(wday(mydate) %in% c(1, 7), "weekend", "weekday")),
     month = month(mydate, label = T, abbr = T),
-    season = ifelse((mydate >= ymd(paste0((year(mydate)-1), winter)) & mydate < ymd(paste0(year(mydate), spring))) |
+    season = factor(ifelse((mydate >= ymd(paste0((year(mydate)-1), winter)) & mydate < ymd(paste0(year(mydate), spring))) |
                        mydate >= ymd(paste0(year(mydate), winter)), "winter",
                      ifelse(mydate >= ymd(paste0(year(mydate), spring)) &
                               mydate < ymd(paste0(year(mydate), summer)), "spring",
@@ -174,7 +172,8 @@ add.temporal.variables <- function(data,
                                      mydate < ymd(paste0(year(mydate), fall)), "summer", 
                                    ifelse( mydate >= ymd(paste0(year(mydate), fall)) &
                                              mydate < ymd(paste0(year(mydate), winter)), "fall", 
-                                           NA))))
+                                           NA)))), 
+                    levels = c("spring", "summer", "fall", "winter"))
     )  
   
   #change time variable back to what it was originally

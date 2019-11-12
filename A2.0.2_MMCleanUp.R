@@ -1,15 +1,10 @@
 #script to: 
-##1) summarize high temporal resolution mobile monitoring data into stop MEDIANS (reduce file size); data are not trimmed as of  9/19/19
-##2) clean up overnight data from AQS sites, calculate median hourly concentrations
+##1) summarize high temporal resolution mobile monitoring data into stop MEDIANS (reduce file size)
+##2) clean up geocovariates. drop: a) AP predictions, which are based on other covariates & other models, b) variables w/ too little or too much variation 
+##3) clean up overnight data from AQS sites, calculate median hourly concentrations
 
 ############### to do 
 
-# clean up geocovariates:
-## take out AP predictions (drop all "em_..." & "no2_..."? e.g., em_NOx_s03000)
-## take out variables: w/ little variation, those w/ lot variation (see: https://github.com/kaufman-lab/STmodel/blob/master/functions_covariate_preprocess_regional.R)
- 
-#geocovariates 
-mm.geo <- read.csv("~/Everything/School/PhD_UW/Dissertation/TRAP R Project/Data/Aim 2/Geocovariates/dr0311_mobile_locations.txt")
 
  
 
@@ -36,7 +31,6 @@ source("A2.0.1_Var&Fns.R")
 ############################ read in data ################################################
 
 #mobile monitoring 
-
 mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191021.rda")) %>%
   #drop unwanted variable values to reduce data size
   filter(!variable %in% c("gps_lat",
@@ -48,7 +42,20 @@ mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191
                           )
          )
 
+#read in current locations
+site_ids <- read.csv(file.path("Data", "Aim 2", "Mobile Monitoring", "locations_190715.csv")) %>%
+  select(site_id) %>%
+  #drop Roosevelt garage stop
+  filter(site_id != "MS0000") %>%
+  unique()
+
+#### --> update file later: there are 310 site_ids and in mm_full. There should be 309.           
+
+
+
 ############################ clean up ###################################################
+#drop old stops 
+mm_full <- left_join(site_ids, mm_full)
 
 #give each site unique number ID, based on time when stop was first sampled
 site_no <- mm_full %>%
@@ -73,8 +80,10 @@ mm <- mm_full %>%
   mutate(arrival_time = min(time)) %>%
   select(-time) %>%
   
-#take avg/median of each unique site stop for each instrument
-  group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, duration_sec, arrival_time, instrument_id, variable, site_no) %>%
+#take median of each unique site stop for each instrument
+  ## don't include duration_sec b/c for some reason, some stops have 2 (or more?) entries @ same time, but diff durations (? GPS error??) and this creates multiple rows per sample
+  group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, arrival_time, instrument_id, variable, site_no #duration_sec
+           ) %>%
   summarize(value = median(value, na.rm = T)) %>%
   ungroup()
 
@@ -132,12 +141,25 @@ mm <- mm %>%
   rbind(temp) %>%
   arrange(arrival_time)
 
-###################### merge mm w/ geocovariates ######################
+###################### 2. clean up geocovariates ######################
+mm.geo0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
+
+mm.geo <- mm.geo0 %>% 
+  #drop AP predictions, which are based on other covariates & other models
+  select(-contains("em_"),
+         -contains("no2_"),
+         -location_id,
+         site_id = native_id
+         )
+
+
+## -->  take out variables: w/ little variation, those w/ lot variation (see: https://github.com/kaufman-lab/STmodel/blob/master/functions_covariate_preprocess_regional.R)
+
+
+#?? var(mm.geo)
 
 
 
-
-  
 
 ############################ make wide format ############################################
 
@@ -148,12 +170,17 @@ mm.wide <- mm %>%
   # ??? HOW do you account for completely missed stops for which we have no data?
   #group_by arrival_time first to order by time
   group_by(arrival_time, runname, site_id, variable, 
-           #variables not immediately necessary
-           route, aqs_id, aqs_location, site_long, site_lat, duration_sec, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season) %>% 
+           route, aqs_id, aqs_location, site_long, site_lat, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season, #duration_sec
+           ) %>% 
   #spread() fn has issues when have dupliate instruments taking readings at same time - so take avg of both the readings
   summarize(value = mean(value)) %>%
   ungroup() %>%
   spread(variable, value) 
+
+###################### merge mm w/ geocovariates ######################
+
+mm <- left_join(mm, mm.geo)
+mm.wide <- left_join(mm.wide, mm.geo)
 
 ############################ save data for quicker access ################################
 
@@ -161,7 +188,7 @@ mm.wide <- mm %>%
 # saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191021.rda"))
 
 ##########################################################################################
-########################### 2. overnight collocations ####################################
+########################### 3. overnight collocations ####################################
 ##########################################################################################
 
 # folders with files to be uploaded. folder should only include ptraks w/o screens. new files added to folder will automatically be uploaded

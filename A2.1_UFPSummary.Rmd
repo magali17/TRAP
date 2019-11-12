@@ -55,6 +55,8 @@ ptrak <- readRDS(file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda
 #start/end dates
 end.date = max(mm$date)
 
+plot_quantile <- 0.99
+
 #on what days have instruments been used?
 instrument.use <- mm %>% group_by(instrument_id) %>%
   summarize(no_runs = length(unique(runname)))
@@ -115,7 +117,10 @@ kable(data_completeness, digits = 1, caption = "Data Completeness")
 ```{r}
 #instrument used each day
 mm %>%
-  filter(variable != "ufp_scan_20_421_nm_ct_cm3") %>%
+  filter(
+    #grepl(pattern = "ufp|bc", x = variable),
+    variable != "ufp_scan_20_421_nm_ct_cm3"
+         ) %>%
   #1 record per variable combination - to reduce file size
   select(date, instrument_id, variable) %>% 
   unique() %>%
@@ -200,25 +205,54 @@ mm %>%
 #need to compare PMPT_1 to PMPT_93 and PMPT_94, and PMPT_93 to PMPT_94
 
 #the colocations we actually have
-colo.plot(primary.instrument = "PMPT_93", 
-          secondary.instrument = "PMPT_4",
-          r2.digits =3)
 
-colo.plot(primary.instrument = "PMPT_94", 
-          secondary.instrument = "PMPT_4",
-          r2.digits =3)
+mm %>%
+    #select only values from desired instruments
+    filter(instrument_id %in% c("PMPT_93", "PMPT_4")) %>%
+             #make wide format
+             spread(instrument_id, value) %>%
+             #only look at rows where have observations for both instruments
+             drop_na("PMPT_93", "PMPT_4") %>%
+  filter(PMPT_93 <= quantile(PMPT_93, plot_quantile, na.rm = T),
+         PMPT_4 <= quantile(PMPT_4, plot_quantile, na.rm = T)
+         ) %>%
+  colo.plot.wide.data(data.wide = ., x.variable = "PMPT_93",
+                      y.variable = "PMPT_4",
+                      mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"),
+                      r2.digits = 3  
+                      )
 
+mm %>%
+    #select only values from desired instruments
+    filter(instrument_id %in% c("PMPT_94", "PMPT_4")) %>%
+             #make wide format
+             spread(instrument_id, value) %>%
+             #only look at rows where have observations for both instruments
+             drop_na("PMPT_94", "PMPT_4") %>%
+  filter(PMPT_94 <= quantile(PMPT_94, plot_quantile, na.rm = T),
+         PMPT_4 <= quantile(PMPT_4, plot_quantile, na.rm = T)
+         ) %>%
+  colo.plot.wide.data(data.wide = ., x.variable = "PMPT_94",
+                      y.variable = "PMPT_4",
+                      mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"),
+                      r2.digits = 3  
+                      )
 
 ```
 
 Compare NanoScan (20-421 nm +) to ptrak (20- 1000 nm) since NanoScan tends to be more steady. Assuming few particles > 421 nm, such that the NanoScan and PTRAK are comparable.
 
-### --> take out outlier, which makes R2 look very high
+Excluding top 1% of data. 
 
 ```{r}
+
 mm.wide %>%
+  #take out extreme values that make R2 look very large
+  filter(ufp_scan_20_421_nm_ct_cm3 <= quantile(ufp_scan_20_421_nm_ct_cm3, plot_quantile, na.rm = T),
+         ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, plot_quantile, na.rm = T)
+         ) %>%
   colo.plot.wide.data(data.wide = ., x.variable = "ufp_scan_20_421_nm_ct_cm3",
-                      y.variable = "ufp_pt_noscreen_ct_cm3")
+                      y.variable = "ufp_pt_noscreen_ct_cm3", mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"))
 
 ```
 
@@ -276,18 +310,17 @@ Using PST.
 
 ### PTRAK
 
-#### Plots 
-
-Plotting mean hourly concentrations (all data included) at Beacon hill (BH) and 10th & Weller (10W).
+Plotting median hourly concentrations (all data included) at Beacon hill (BH) and 10th & Weller (10W).
 
 #### --> ? color by date (have to create date varaible)? 
 
 ```{r}
+
 ptrak %>%
-  ggplot(aes(x=hour, y=Conc_pt_cm3)) + 
-  geom_boxplot(aes(group=hour, fill=time_of_day)) +
-  geom_smooth(se=F, method = "loess") + 
-  facet_wrap(~location) #+DaylightSavings
+  ggplot(aes(x=month, y=Conc_pt_cm3)) + 
+  geom_boxplot() + 
+  #geom_smooth(aes(x=as.numeric(month)), se=F, method = "loess") + 
+  facet_wrap(~location)
 
 ptrak %>%
   ggplot(aes(x=day, y=Conc_pt_cm3)) + 
@@ -296,64 +329,24 @@ ptrak %>%
   facet_wrap(~location)
 
 ptrak %>%
-  ggplot(aes(x=month, y=Conc_pt_cm3)) + 
-  geom_boxplot() + 
-  #geom_smooth(aes(x=as.numeric(month)), se=F, method = "loess") + 
-  facet_wrap(~location)
-
+  ggplot(aes(x=hour, y=Conc_pt_cm3)) + 
+  geom_boxplot(aes(group=hour, fill=time_of_day)) +
+  geom_smooth(se=F, method = "loess") + 
+  facet_wrap(~location) #+DaylightSavings
 
 ```
-
-#### Models by time of day, time of week and season   
-##### LS linear Fit
 
 ```{r}
 #only spring (vs winter) is significant
-lm(Conc_pt_cm3 ~ time_of_day + time_of_week + season, data=ptrak) %>%
-  summary() 
+lm(Conc_pt_cm3 ~ factor(hour) + day + month, data=ptrak) %>% summary()
+
+lm(Conc_pt_cm3 ~ time_of_day + time_of_week + season, data=ptrak) %>% summary() 
  
-```
-
-###### --> calc & add to plots adjusted means
-
-```{r}
-
-```
-
-
-##### ANOVA Variance Component Analyses for random models
-
-```{r}
-###### --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week) ?
+anovaVCA(Conc_pt_cm3 ~ hour + day + month, 
+         Data=as.data.frame(ptrak)) 
 
 anovaVCA(Conc_pt_cm3 ~ time_of_day + time_of_week + season, 
          Data=as.data.frame(ptrak))  
-
-```
-
-#### Models by hour, day and month   
-##### LS linear fit   
-
-```{r}
- 
-lm(Conc_pt_cm3 ~ factor(hour) + day + month, data=ptrak) %>%
-  summary()
-
-```
-
-###### --> calc & add to plots adjusted means
-
-```{r}
-
-```
-
-
-##### ANOVA Variance Component Analyses for random models
-
-
-```{r}
-anovaVCA(Conc_pt_cm3 ~ hour + day + month, 
-         Data=as.data.frame(ptrak)) 
 
 ```
 
@@ -387,13 +380,14 @@ mm %>%
 ```
 
 
-# Data Summary  
+# PTRAK Data Summary  
 
-## Concentrations Over Time
+## Temporal Patterns
 
 ```{r}
-#concentrations by time & season 
+#month
 mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
   ggplot(aes(x=date, y=value)) + 
   geom_boxplot(aes(fill=season, group=month)) + 
   geom_smooth(aes(), se=F, method = "loess") +  
@@ -403,27 +397,9 @@ mm %>%
        subtitle = paste0(start.date, " - ", end.date)) + 
   scale_y_log10()
 
-```
-
-```{r}
-##ptraks
- mm %>%
-  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
-  ggplot(aes(x=date, y=value)) + 
-  geom_boxplot(aes(fill=season, group=month)) + 
-  # error, doesn't print loess line correctly on x axis
-  geom_smooth(aes(), se=F, method = "loess") +  
-  labs(title= "PTRAK Concentrations over time",
-       x="month",
-       subtitle = paste0(start.date, " - ", end.date))  + 
-  scale_y_log10()   
-
-```
-
-
-```{r}
-#concentrations by week day
+#day
 mm %>%
+  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
   ggplot(aes(x=day, y=value)) + 
   geom_boxplot(aes(fill=time_of_week)) + 
   geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
@@ -432,26 +408,10 @@ mm %>%
        subtitle = paste0(start.date, " - ", end.date)) + 
   scale_y_log10()
  
-```
-
-```{r}
-##ptraks
+ 
+#hour
 mm %>%
   filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
-  ggplot(aes(x=day, y=value)) + 
-  geom_boxplot(aes(fill=time_of_week)) + 
-  facet_wrap(~variable, scales="free") + #, ncol = 3
-  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
-  labs(title= "PTRAK Concentrations by week day",
-       subtitle = paste0(start.date, " - ", end.date))  + 
-  scale_y_log10()
-
-```
-
-
-```{r}
-#concentrations by hour and time of day
-mm %>%
   ggplot(aes(x=hour, y=value)) + 
   geom_boxplot(aes(fill=time_of_day, group=hour)) + 
   geom_smooth(aes(), se=F, method = "loess") +  
@@ -463,171 +423,122 @@ mm %>%
  
 ```
 
-```{r}
-##ptraks
-mm %>%
-  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
-  ggplot(aes(x=hour, y=value)) + 
-  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
-  #geom_point(alpha=0.1)+
-  geom_smooth(aes(x=hour), se=F, method = "loess") +  
-  labs(title= "PTRAK Concentrations by hour",
-       subtitle = paste0(start.date, " - ", end.date))  + 
-  scale_y_log10()
+## Spatial Patterns
 
-
-```
-
-## Concentrations by Location
-
+### --> use lasso to select geocovariates & then plot UFP vs geocov
+### ? bad plots since not usign annual averages & obsrvations at each location taken at slighty different times 
 
 ```{r}
 mm %>%
+ filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
   ggplot(aes(x=site_no, y=value)) + 
-  geom_point(alpha=0.1, aes(colour=route)) +   
+  geom_point(alpha=0.2, aes(colour=route)) +   
   geom_smooth( se=F, method = "loess") +  
   facet_wrap(~variable, scales="free", ncol = 3) + 
   labs(title= "Concentrations by Site",
        subtitle = paste0(start.date, " - ", end.date)) + 
   scale_y_log10()
 
+
+
+#### --> use lasso instead to select predictive geocovariates 
+
+
+
+
+
+mm.w.geo <- mm.wide %>% 
+  # geocovariates
+  select(arrival_time:season,
+         ufp_pt_noscreen_ct_cm3,
+         m_to_a1:m_to_a3,
+        #airport, largest airport
+        m_to_airp, #m_to_l_airp,
+        m_to_rr,
+        #dist to and length of
+        m_to_truck, #contains("tl_s"),
+        #m_to_bus, contains("bus_"),
+        elev_elevation,
+        #contains("lu_industrial_"),
+        #contains("ndvi_q50_"),
+        pop_s01000, #contains("pop_s")
+       )
+
+mm.w.geo$m_to_a1_or_a2 <- apply(mm.w.geo[c("m_to_a1", "m_to_a2")], 1, function(x) min(x))
+
+mm.geo <- gather(mm.w.geo, geocovariate, value, m_to_a1:m_to_a1_or_a2)
+
+
+
+geo_quantile <- 0.99
+
+mm.geo %>%
+  filter(ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, geo.quantile, na.rm = T)) %>%
+  ggplot(aes(x=value, y=ufp_pt_noscreen_ct_cm3)) + 
+  geom_point(alpha=0.3) + 
+  geom_smooth( se=F, method = "loess") +  
+  facet_wrap(~geocovariate, scales = "free_x") + 
+  labs(title = paste0("excludes top ", (1-geo_quantile)*100, "% of observations") )
+  
+ 
+
+
 ```
 
-```{r}
-# ptrak
-# mm %>%
-#   filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
-#   ggplot(aes(x=site_no, y=value)) + 
-#   geom_point(alpha=0.1, aes(colour=route)) +   
-#   geom_smooth( se=F, method = "loess") +  
-#   facet_wrap(~variable, scales="free", ncol = 3) + 
-#   labs(title= "PTRAK Concentrations by Site",
-#        subtitle = paste0(start.date, " - ", end.date))  + 
-#  scale_y_log10()
-
-```
-
-
-## Concentrations by Geographic Features 
+## Models 
+ 
+variability: error > location > month > day > hour    
+variability: error > location > time_of_week > season > time_of_day
 
 ```{r}
-#distance to roadway
+mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+lm(value ~ factor(hour) + factor(day, ordered = F) + factor(month, ordered = F) + site_id, data=.) %>%
+  summary()
 
-#distance to airport
-
-#population density
-
-#elevation
-
-```
-
-## UFP Models by time of day, time of week and season   
-### LS linear Fit
-
-AM and noon are higher than early AM; weekend is lower than weekday; winter is higher than spring 
-
-```{r}
-   mm %>%
+mm %>%
   filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
 lm(value ~ time_of_day + time_of_week + season + site_id, data=.) %>%
   summary()
 
-```
-
-#### --> ? use mixed effects model instead (id=site_id)? ?serial correlation structure?
-
-```{r}
-# mm %>% 
-#   filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
-#   #can't have empty levels in geeglm()
-#   mutate(season = droplevels(season)) %>%   
-#   geeglm(value ~ time_of_day + time_of_week + season,
-#        data = ., id = site_id, 
-#        corstr = "ar1")
-
-```
-
-
-### ANOVA Variance Component Analyses for random models
-
-Most of the variation is "noise" within groups; some variation due to site_id
-
-```{r}
-###### --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week) ?
-   mm %>%
-  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
-  as.data.frame() %>%
-  anovaVCA(value ~ time_of_day + time_of_week + season + site_id, 
-         Data=.)  
-
-```
-
-## Models by hour, day and month   
-### LS linear fit   
-
-no significant difference between 5 AM and other hours; Wed and Thur are higher than Mon; Sat is lower than Monday; Mar, Apr & Aug higher than Feb 
-
-```{r}
- mm %>%
-  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
-lm(value ~ factor(hour) + day + month + site_id, data=.) %>%
-  summary()
-
-```
-
-#### --> ? use mixed effects model instead (id=site_id)? ?serial correlation structure?
-
-```{r}
-
-```
-
-
-### ANOVA Variance Component Analyses for random models
-
-Most of the variation is within groups, a little from site, a minor amount from month & hour
-
-```{r}
 mm %>%
   filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
   as.data.frame() %>%
  anovaVCA(value ~ hour + day + month + site_id, 
          Data=.) 
 
+mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  as.data.frame() %>%
+  anovaVCA(value ~ time_of_day + time_of_week + season + site_id, 
+         Data=.)  
+
+
 ```
 
 
-
-## Pollutant Correlations  
+## Pollutant Correlations (R)  
 
 UFPs are poorly correlated with PM2.5 & BC
 
 ```{r}
 mm.wide %>%
-  select(ufp_disc_ct_cm3, 
-         ufp_pt_noscreen_ct_cm3, 
-         ufp_scan_10_421_nm_ct_cm3, 
-         ufp_scan_20_421_nm_ct_cm3, 
-         bc_ir880nm_ng_m3, 
-         neph_bscat_per_m) %>%
-  plot()  
+  select(disc = ufp_disc_ct_cm3, 
+         pt = ufp_pt_noscreen_ct_cm3, 
+         pt_screen = ufp_scan_10_421_nm_ct_cm3, 
+         ns = ufp_scan_20_421_nm_ct_cm3, 
+         bc = bc_ir880nm_ng_m3, 
+         neph = neph_bscat_per_m) %>%
+  cor(method = "pearson",
+      use ="complete.obs") %>%
+  corrplot::corrplot(method="color", 
+                     addCoef.col = T, 
+                     title = "Pearson Correlation (R)"
+                     )
+
 
 ```
 
-Pearson Correlations (R)
-
-```{r}
-mm.wide %>%
-  select(ufp_disc_ct_cm3, 
-         ufp_pt_noscreen_ct_cm3, 
-         ufp_scan_10_421_nm_ct_cm3, 
-         ufp_scan_20_421_nm_ct_cm3, 
-         bc_ir880nm_ng_m3, 
-         neph_bscat_per_m) %>%
-   cor(use = "complete.obs") %>%
-   kable()
-
-```
-
-
+ 
 
  

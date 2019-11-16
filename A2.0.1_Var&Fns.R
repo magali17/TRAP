@@ -146,7 +146,7 @@ add.temporal.variables <- function(data,
   winter <- "-12-21" #usually winter starts on 21st, sometimes on 22nd 
   spring <- "-03-20"
   summer <- "-06-21" #usually summer starts on 21st, sometimes on 22nd 
-  fall <- "-09-22" #usually fall starts on 22nd, sometimes on 23nd 
+  fall <- "-09-23" #usually fall starts on 22nd, sometimes on 23nd. Using 23rd for 2019 mobile monitoring campaign 
  
   mydata <- data %>% 
     rename(
@@ -245,5 +245,32 @@ ptrak.bind.fn <- function(folder_path) {
  
 
 #############################################################################################
-
+#returns boxplots of UFP estimates for selected sites by method
+ufp_by_method <- function(dt,
+                          .months.sampled = months.sampled) {
+  #dt = annual
+  
+  ufp_by_site <- dt %>%
+    drop_na() %>%
+    gather(key = "method", value = "ufp", -site_id) %>%
+    ggplot(aes(x=site_id, y= ufp, col=method)) + 
+    geom_boxplot(aes(group=site_id), show.legend = F) +
+    geom_point(aes(shape=method))   
+  
+  
+  ufp_by_method <- dt %>%
+    drop_na() %>%
+    gather(key = "method", value = "ufp", -site_id) %>%
+    ggplot(aes(x=method, y= ufp, col=site_id)) + 
+    geom_boxplot(aes(group=method), show.legend = F) +
+    geom_point(aes()) + 
+    geom_line(aes(group=site_id), alpha=0.3)  
+  
+  plots <- ggarrange(ufp_by_site, ufp_by_method) %>%
+    annotate_figure(., 
+                    top = paste0("Site mean/median for ", .months.sampled[1], " - ", .months.sampled[length(.months.sampled)], " (Spring - Winter)"))
+  
+  return(plots)
+  
+}
 

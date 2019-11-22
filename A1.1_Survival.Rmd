@@ -45,7 +45,6 @@ pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats, lubridate, gl
                )  #Himsc: describe(); EnvStats: summaryFull(); survminer: ggflexsurvplot()  
 
 #To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
-
 # dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
 
 source("A1.0.2_Var&Fns.R")
@@ -188,7 +187,7 @@ enrollment_yrs <-rep(yr$study_id, yr$fu_yrs) %>%
   select(study_id, fu_yrs, enrollment_yr, exposure_year) %>%
   as.data.frame()
 
-#data that can be used for all analyses 
+#data that can be used for most analyses (recode age_end_expo, dementia_now, ad_now when using onset age for cases)
 dem0.1 <-  dem0.1 %>% 
   #keep all enrollment years
   right_join(enrollment_yrs) %>%
@@ -258,6 +257,70 @@ pm25 <- dem1 %>%
     )   
 dem.w <- full_join(no2, pm25)
 
+#add variables for alternative analysis using age at onset (cases) or age at last visit (noncases)
+dem.w <- dem.w %>%
+  mutate(
+    last_act_fu_yr = ifelse(!is.na(onsetdate), year(onsetdate),
+                             year(last_visit)),
+    age_end_exposure2 = round(ifelse(last_act_fu_yr == exposure_year,
+                                age_act,
+                                as.numeric(as.Date(paste0(exposure_year, "-12-31")) - birthdt)/365), 3),
+    dementia_now2 = ifelse(age_end_exposure2 < age_act, 0, anydementia),
+    ad_now2 = ifelse(age_end_exposure2 < age_act, 0, ad_nincds),
+  )
+
+dem.w2 <- dem.w %>%
+  #drop exposure predictions after individuals are no longer "at risk"  
+  filter(exposure_year <= last_act_fu_yr)
+
+```
+
+note: there > dem & AD cases when using ACT FU age definition b/c missing no2 exposure estimates differ for different incident years. 
+
+number_events:
+dem_now: 802
+dem_now2: 858
+
+ad_now: 653
+ad_now2: 701 
+
+coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  birth_cohort
+
+```{r}
+t2 <- dem.w2 %>% select(
+  study_id,
+  last_visit, last_act_fu_yr,
+  age_end_exposure, age_end_exposure2,
+  anydementia,
+  dementia_now, dementia_now2,
+  ad_now, ad_now2,
+  exposure_year
+)
+
+#View(t2)
+
+t1 <- dem.w %>%
+  filter(dementia_now == 1,
+         !is.na(no2_10yr)
+         ) %>%
+  select(
+    study_id, 
+    dementia_now,
+    exposure_year,
+    no2_10yr, apoe, male, race_white, income_cat, degree, birth_cohort
+  )
+
+t2 <- dem.w2 %>%
+  filter(dementia_now2 ==1,
+        !is.na(no2_10yr)
+         ) %>%
+  select(
+    study_id,
+    dementia_now2,
+    exposure_year,
+    no2_10yr, apoe, male, race_white, income_cat, degree, birth_cohort
+    )
+
 ```
 
 ```{r}
@@ -282,6 +345,156 @@ fixed.covariates <- dem.w %>%
   unique() 
 
 ```
+
+## IPW since there is a lot of missing APOE values 
+
+```{r}
+# see B540 L7-8
+#1. fill in missing values with their most likely option (mean for continuous, mode for categorical variables)
+#2. use selection model (e.g. lasso for glm) to select predictors of whether or not we have APOE values for people: apoe_available (in apoe.w)
+# 3. fit logistic model to determine probability of observing an observation given predictors: glm(apoe_available ~ [predictors]). use model w/ dataset to get predicted values (probability of being observed), 
+# 4. calculate stablized weights 
+
+apoe <- fixed.covariates %>%
+  mutate(apoe_available = !is.na(apoe)) %>% 
+  #don't inclue race b/c causes issues - creates 1 Very large wt for race==5...
+  select(-apoe, 
+         -race
+         ) 
+
+#1. replace missing values w/ most likely outcome  
+##variables w/ missing values  
+with.nas <- names(which(colSums(is.na(apoe)) > 0))
+#1 = TRUE, 0 = FALSE
+mynumeric = c(0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0)
+  
+#replace  missing values w/ mean (if numeric) or mode (if factor)
+for (i in seq_along(with.nas)) {
+  #vector w/ missing values 
+  myvar <- with.nas[i]  
+  apoe[[myvar]] <- replace.nas.fn(apoe[[myvar]], 
+                                  numeric = mynumeric[i])
+  }
+
+#check that there are no more NAs #looks good
+#describe(apoe) 
+#table(!is.na(apoe))
+ 
+#2. Use Lasso to select variables most predictive of APOE being present
+#apoe2 <-apoe 
+
+apoe <- apoe %>%
+  #convert character variables to numberic
+  mutate_if(is.character, as.numeric) %>%
+  #convert these to factors
+  mutate_at(c("birth_cohort", 
+              "nindx",
+              "education",
+              "degree",
+              "income_cat",
+              #"race_white",
+              "smoke",
+              "bmi4"
+              ), 
+            as.factor)
+
+#create categorical dummy variables
+x <- model.matrix(apoe_available~., apoe)[,-1]
+y <- as.numeric(apoe$apoe_available)
+
+#select lambda through CV
+cv.out <- cv.glmnet(x = x, 
+                    y = y, 
+                    alpha=1, 
+                    family= "binomial")
+
+bestlam <- cv.out$lambda.min
+
+lasso.m <- glmnet(x = x, 
+                  y = y, 
+                 alpha = 1, 
+                 family= "binomial")
+
+lasso.coef <- predict(lasso.m, 
+                      type= "coefficients", 
+                      s= bestlam)[1:(ncol(x)+1),]
+
+#coefficients chosen by Lasso w/ bestlam that are not 0
+lasso.vars <- lasso.coef[lasso.coef != 0]
+print("variables selected via Lasso")
+names(lasso.vars)[names(lasso.vars) != "(Intercept)"]
+ 
+apoe <- apoe %>%
+  select(
+    study_id,
+     #y
+    apoe_available,
+    #categories selected via Lasso 
+    #x's
+    birth_cohort,
+    age_intake, 
+    age_last_visit,   
+    dsmivdx, 
+    nindx, 
+    #ad_nincds, 
+    male, 
+    education,
+    degree,
+    tr_med_inc_hshld,
+    race_white, #race,
+    smoke,
+    exercise_reg,
+    Diabetes,
+    Heart_Dis,
+    bmi4,
+    casi_irt,
+    intake_yr,
+    onset_yr
+    )  
+
+#3. model to predict APOE variable being present
+apoe.m <- apoe %>%
+  select(-study_id) %>%
+  glm(apoe_available ~ .,
+  family = "binomial",
+  data = .) 
+#apoe.m %>% summary()
+##denominator: probability of APOE being present
+apoe_available_prob <- predict(apoe.m, type = "response") 
+
+#min(apoe_available_prob) #check that probability isn't Tiny (like when used "race")
+ 
+#numerator: stabilizer 
+apoe.male.m <- apoe %>%
+  glm(apoe_available ~ male,
+  family = "binomial",
+  data = .) 
+#summary(apoe.male.m)
+apoe_male_prob <- predict(apoe.male.m, type = "response") 
+#max(apoe_male_prob)
+
+apoe.wts <- apoe %>% 
+  select(study_id) %>%
+  mutate(model_wt = apoe_male_prob/apoe_available_prob)
+  
+# 4. take the inverse of probabilities to calculate "weights", use these weights in coxph(, weights = c()) 
+dem.w <- dem.w %>% 
+  #add stabilized weights  
+  left_join(apoe.wts)
+
+```
+
+Summary of stabilized weights used in coxph()
+
+```{r}
+summary(dem.w$model_wt)
+
+```
+
+### --> fn to automatically select lasso-selected variables 
+
+
+
 
 
 # Quality Control
@@ -496,6 +709,8 @@ How others have stratified:
 - by exposure quartiles at baseline (baseline was during same time period, e.g., 1993-1995) (Oudin 2016; Chang 2014) ["baseline" was same time period for cohort]   
 - mean personal AP  
 
+### --> make better headers (e.g., subheaders) - kableExtra?
+
 ```{r}
 #characteristics for entire cohort 
 t1.all <- dem1 %>%
@@ -594,6 +809,7 @@ Statistics calculated for individuals for whom we know at least `r min.pct*100`%
 Using NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline.
 
 ### ? onl include bsl observations so non-varying covariates only counted once for each person? 
+
 ```{r exposure}
 print("10 yr NO2 and PM2.5 R2:")
 (with(dem.w, cor(no2_10yr, pm25_10yr, use = "complete.obs")))^2 %>% round(2)
@@ -762,7 +978,6 @@ model.vars <- dem.w %>%
   select(-c(no2_1yr:no2_20yr, 
             pm25_1yr:pm25_20yr)) 
 
-
 #plots
 model.vars %>% 
   mutate(
@@ -786,189 +1001,60 @@ with(dem.w, cor(no2_10yr, pm25_10yr,
 
 # Inferential Statistics
 
-## IPW 
-
-#### --> ? fix glmnet() issue (rmarkdown won't knit).  
-
-
-```{r,  eval=F}
-# see B540 L7-8
-#1. fill in missing values with their most likely option (mean for continuous, mode for categorical variables)
-#2. use selection model (e.g. lasso for glm) to select predictors of whether or not we have APOE values for people: apoe_available (in apoe.w)
-# 3. fit logistic model to determine probability of observing an observation given predictors: glm(apoe_available ~ [predictors]). use model w/ dataset to get predicted values (probability of being observed), 
-# 4. calculate stablized weights 
-
-apoe <- fixed.covariates %>%
-  mutate(
-    apoe_available = !is.na(apoe)
-  ) %>% 
-  #don't inclue race_white b/c it's calculated from race (already in df)
-  select(-apoe, 
-         -race_white
-         ) 
-
-#1. replace missing values w/ most likely outcome  
-##variables w/ missing values  
-with.nas <- names(which(colSums(is.na(apoe)) > 0))
-#1 = TRUE, 0 = FALSE
-mynumeric = c(0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0)
-  
-#replace  missing values w/ mean (if numeric) or mode (if factor)
-for (i in seq_along(with.nas)) {
-  #vector w/ missing values 
-  myvar <- with.nas[i]  
-  apoe[[myvar]] <- replace.nas.fn(apoe[[myvar]], 
-                                  numeric = mynumeric[i])
-  }
-
-#check that there are no more NAs #looks good
-#describe(apoe) 
-#table(!is.na(apoe))
- 
-#2. Use Lasso to select variables most predictive of APOE being present
-#apoe2 <-apoe 
-
-apoe <- apoe %>%
-  #convert character variables to numberic
-  mutate_if(is.character, as.numeric) %>%
-  #convert these to factors
-  mutate_at(c("birth_cohort", 
-              "nindx",
-              "education",
-              "degree",
-              "income_cat",
-              "race",
-              "smoke",
-              "bmi4"
-              ), 
-            as.factor)
-
-#create categorical dummy variables
-x <- model.matrix(apoe_available~., apoe)[,-1]
-y <- as.numeric(apoe$apoe_available)
-
-#select lambda through CV
-cv.out <- cv.glmnet(x = x, 
-                    y = y, 
-                    alpha=1, 
-                    family= "binomial")
-
-bestlam <- cv.out$lambda.min
-
-lasso.m <- glmnet(x = x, 
-                  y = y, 
-                 alpha = 1, 
-                 family= "binomial")
-
-lasso.coef <- predict(lasso.m, 
-                      type= "coefficients", 
-                      s= bestlam)[1:(ncol(x)+1),]
-
-#coefficients chosen by Lasso w/ bestlam that are not 0
-lasso.vars <- lasso.coef[lasso.coef != 0]
-print("variables selected via Lasso")
-names(lasso.vars)[names(lasso.vars) != "(Intercept)"]
- 
-apoe <- apoe %>%
-  select(
-    study_id,
-     #y
-    apoe_available,
-    #categories selected via Lasso 
-    #x's
-    birth_cohort,
-    age_intake, 
-    age_last_visit,   
-    dsmivdx, 
-    nindx, 
-    #ad_nincds, 
-    male, 
-    education,
-    degree,
-    tr_med_inc_hshld,
-    race,
-    smoke,
-    exercise_reg,
-    Diabetes,
-    Heart_Dis,
-    bmi4,
-    casi_irt,
-    intake_yr,
-    onset_yr
-    )  
-
-#3. model to predict APOE variable being present
-apoe.m <- apoe %>%
-  select(-study_id) %>%
-  glm(apoe_available ~ .,
-  family = "binomial",
-  data = .) 
-#apoe.m %>% summary()
-##denominator: probability of APOE being present
-apoe_available_prob <- predict(apoe.m, type = "response") 
- 
-#numerator: stabilizer 
-apoe.male.m <- apoe %>%
-  glm(apoe_available ~ male,
-  family = "binomial",
-  data = .) 
-#summary(apoe.male.m)
-apoe_male_prob <- predict(apoe.male.m, type = "response") 
-
-apoe.wts <- apoe %>% 
-  select(study_id) %>%
-  mutate(model_wt = apoe_male_prob/apoe_available_prob)
-  
-# 4. take the inverse of probabilities to calculate "weights", use these weights in coxph(, weights = c()) 
-dem.w <- dem.w %>% 
-  #add stabilized weights  
-  left_join(apoe.wts)
-
- 
-```
-
 ## Primary Analysis, Redued & Extended Models
 
 "Hazard of dementia incidence is __% higher for every additional 10 ppb of NO2 exposure in the past 10 years.
 
-### Dementia Incidence 
+### Dementia Incidence  
 using dataset w/ missing values 
 
-### --> ? make diff.exposures.fn() only calc diff exposure periods for M2 - so can see if model warning msgs are relevant 
-
-### --> FIX "model_wt not found" issue 
-
 ```{r, fig.height=8}
-#run all models, all exposure windows
-dem.results <- diff.exposures.fn(mydata.2 = dem.w,
-                   surv.time2.2 = "age_end_exposure", 
-                   surv.event.2 = "dementia_now", 
-                   outcome.text.2 = "Dementia")
+ 
+dem_10yr <- models.fn(mydata = dem.w,
+                models = paste0("m", 1:6),
+                surv.time2 = "age_end_exposure", 
+                surv.event = "dementia_now", 
+                #outcome.text = "All-cause Dementia",
+                no2.var = "no2_10yr",
+                pm25.var = "pm25_10yr")
 
+dem_10yr_hrs <- dem_10yr$hrs %>%
+  mutate(
+    Model = c("1. Reduced",
+           "2. Primary", 
+           "3. Extended", 
+           "4. Extended & Mediation", 
+           "5. Interaction (no APOE)", 
+           "5. Interaction (APOE)", 
+           "6. PM2.5 Adjusted")
+    )
 
-```
+#m2 for other exposure years
+dem_other_yrs <- data.frame()
+expo.prds <- paste0("no2_", c("1yr", "5yr", "20yr", "10yr10yrlag", "10yr20yrlag"))
 
-```{r}
-#table of all HRs for all times & models
- dem.results$HRs %>%
-   filter(exposure == "10yr" | Model == "2. Primary") %>%
-   arrange(Model) %>%
-   kable(caption = "Dementia HRs")
+for (i in seq_along(expo.prds)) {
+  df <- models.fn(mydata = dem.w,
+                models = "m2",
+                surv.time2 = "age_end_exposure", 
+                surv.event = "dementia_now", 
+                #outcome.text = "All-cause Dementia",
+                no2.var = expo.prds[i],
+                pm25.var = "pm25_1yr")
+  
+  dem_other_yrs <- rbind(dem_other_yrs, df$hrs)
+  }
 
-#plot of all HRs for all times & models
-dem.results$HRs %>%
-  filter(
-    exposure == "10yr" | Model == "2. Primary") %>%
-  hr.plot(., outcome.var = "Dementia")   
+dem_other_yrs$Model <- "2. Primary"
 
-# example of raw model output
-print("10 yr exposure model")
-dem.results$model.output$`10yr` 
-dem.results$model.output$`1yr`$model2
-dem.results$model.output$`5yr`$model2
-dem.results$model.output$`10yr10yrlag`$model2
-dem.results$model.output$`10yr20yrlag`$model2
-dem.results$model.output$`20yr`$model2
+#HR table 
+dem_hrs <- rbind(dem_10yr_hrs, dem_other_yrs) %>%
+  mutate(exposure = factor(exposure, levels = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr20yrlag")))
+
+dem_hrs %>% kable(caption = "Dementia HRs")
+
+#HR plot 
+dem_hrs %>% hr.plot(., outcome.var = "Dementia")   
 
 ```
 
@@ -976,51 +1062,101 @@ dem.results$model.output$`20yr`$model2
 ## Other Sensitivity Analyses    
 ### AD Incidence      
 
-```{r}
-#run all models, all exposure windows
-ad.results <- diff.exposures.fn(mydata.2 = dem.w,
-                   surv.time2.2 = "age_end_exposure", 
-                   surv.event.2 = "ad_now", 
-                   outcome.text.2 = "AD")
+```{r, fig.height=8}
+ad_10yr <- models.fn(mydata = dem.w,
+                models = paste0("m", 1:6),
+                surv.time2 = "age_end_exposure", 
+                surv.event = "ad_now", 
+                #outcome.text = "AD",
+                no2.var = "no2_10yr",
+                pm25.var = "pm25_10yr")
 
-#table of all HRs for all times & models
-ad.results$HRs %>% 
-   filter(exposure == "10yr" | Model == "2. Primary") %>% 
-   arrange(Model) %>%
-   kable(caption = "AD HRs")
+ad_10yr_hrs <- ad_10yr$hrs %>%
+  mutate(Model = c("1. Reduced",
+           "2. Primary", 
+           "3. Extended", 
+           "4. Extended & Mediation", 
+           "5. Interaction (no APOE)", 
+           "5. Interaction (APOE)", 
+           "6. PM2.5 Adjusted"))
 
-#plot of all HRs for all times & models
-ad.results$HRs %>% 
-   filter(exposure == "10yr" | Model == "2. Primary") %>% 
-  hr.plot(., outcome.var = "AD")   
+#m2 for other exposure years
+ad_other_yrs <- data.frame()
 
-# example of raw model output
-print("10 yr exposure model")
-ad.results$model.output$`10yr`
-ad.results$model.output$`1yr`$model2
-ad.results$model.output$`5yr`$model2
-ad.results$model.output$`10yr10yrlag`$model2
-ad.results$model.output$`10yr20yrlag`$model2
-ad.results$model.output$`20yr`$model2
+for (i in seq_along(expo.prds)) {
+  df <- models.fn(mydata = dem.w,
+                models = "m2",
+                surv.time2 = "age_end_exposure", 
+                surv.event = "ad_now", 
+                #outcome.text = "AD",
+                no2.var = expo.prds[i],
+                pm25.var = "pm25_1yr")
+  
+  ad_other_yrs <- rbind(ad_other_yrs, df$hrs)
+  }
+
+ad_other_yrs$Model <- "2. Primary"
+
+#HR table 
+ad_hrs <- rbind(ad_10yr_hrs, ad_other_yrs) %>%
+  mutate(exposure = factor(exposure, levels = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr20yrlag")))
+
+ad_hrs %>% kable(caption = "AD HRs")
+
+#HR plot 
+ad_hrs %>% hr.plot(., outcome.var = "AD")   
 
 ```
 
-### Redefine dementia onset to match ACT study definition
+### M2 using age at onset (cases) or last visit (noncases) 
 
 ```{r}
-##when using ONSET AGE (age_act), need to drop exposure predictions after age_act. filter(age_at_exposure <= age_act) & dementia_now = ifelse(age_at_exposure < age_act, 0, anydementia),
 
+#check that new coding is correct #looks good
+# t <- dem.w2 %>% select(study_id, onsetdate, last_visit, last_act_fu_yr, 
+#                        exposure_year,
+#                        age_start_exposure, age_end_exposure, age_end_exposure2,
+#                        dementia_now, dementia_now2,
+#                        ad_now, ad_now2) 
+# View(t)
+
+# dem.w2 %>%
+#   filter(exposure_year == last_act_fu_yr) %>%
+#   ggplot(aes(x=age_end_exposure, y= age_end_exposure2)) + 
+#   geom_point(alpha=0.15) +
+#   geom_abline(intercept = 0, slope = 1, col = "red") + 
+#   labs(x = "age at last visit (everyone)", 
+#        y = "age at onset (cases) or last visit (non-cases)")
+
+
+dem_10yr_act <- models.fn(mydata = dem.w2,
+                models = paste0("m2"),
+                surv.time2 = "age_end_exposure2", 
+                surv.event = "dementia_now2", 
+                #outcome.text = "Dementia",
+                no2.var = "no2_10yr",
+                pm25.var = "pm25_10yr")$hrs 
+
+dem_10yr_act %>% kable(caption = "Dementia HR using age at onset (cases) or last visit (non-cases)")
+
+ad_10yr_act <- models.fn(mydata = dem.w2,
+                models = paste0("m2"),
+                surv.time2 = "age_end_exposure2", 
+                surv.event = "ad_now2", 
+                #outcome.text = "AD",
+                no2.var = "no2_10yr",
+                pm25.var = "pm25_10yr")$hrs 
+
+ad_10yr_act %>% kable(caption = "AD HR using age at onset (cases) or last visit (non-cases)")
 
 ```
-
-
 
 ### Cox model assumptions and inference validity    
 1. Proportional hazards Assumption    
 a) Schoenfeld residuals. If the proportional hazards model is correctly specified, there should be no trend in the residuals over time (uncorrelated, with mean zero across event times)
 
 ```{r}
-m2 <- dem.results$model.output$`10yr`$model2
+m2 <- dem_10yr$raw_model_output$m2
 
 ```
 
@@ -1055,7 +1191,7 @@ If a correct model is used, these residuals are uncorrelated and have mean nearl
 
 Martingale residuals are used to check if the functional form of the covariate is okay (eg. linear vs quadratic terms). 
 
-```{r, eval=F}
+```{r, eval=T}
 ##??
 martingalesid = residuals(m2, type = "martingale", data = dem.w) %>%
   as.data.frame() %>%
@@ -1079,7 +1215,8 @@ plot.martingaleresid %>%
 
 #mean, +-SD  # looks good, mean is close to 0?
 print("mean, SD")
-mean_sd(plot.martingaleresid$resid)
+mean(plot.martingaleresid$resid)
+sd(plot.martingaleresid$resid)
 
 ```
 
@@ -1114,21 +1251,13 @@ dfbetas %>%
 ```
 
 
-
-### Restrict Analysis to individuals for whom we have high quality data
-
-now, using everyone   
-...get rid of PO boxes 
-
-```{r}
-#describe address covrage over time?
-
-
-```
-
 ### Adjust for baseline CASI score 
 
 ```{r}
+
+
+
+
 
 ```
 
@@ -1142,25 +1271,24 @@ now, using everyone
 
 ```{r}
 #don't use IPW
-dem.w$model_wt <- 1
-
-dem.results.wt1 <- models.fn(mydata = dem.w,
-               surv.time2 = "age_end_exposure",
-               surv.event = "dementia_now",
-               outcome.text = "All-cause Dementia",
-               no2.var = "no2_10yr",
-               pm25.var = "pm25_10yr")
+dem.w.w1 <- dem.w %>% 
+  mutate(model_wt = 1)
  
- dem.results.wt1$table_of_no2_HRs %>%
-  filter(Model == "2. Primary") %>%
+dem_10yr_m2_wt1 <- models.fn(mydata = dem.w.w1, 
+                              models = "m2",
+                              surv.time2 = "age_end_exposure",
+                              surv.event = "dementia_now",
+                              #outcome.text = "All-cause Dementia",
+                              no2.var = "no2_10yr",
+                              pm25.var = "pm25_10yr")
+ 
+dem_10yr_m2_wt1$hrs %>% 
   kable(caption = "unweighted HR for dementia incidence based on 10 yr avg exposure")
 
- #compare to weighted results  
-dem.results$HRs %>%
-  filter(Model == "2. Primary",
-         exposure == "10yr") %>%
+#compare to weighted results  
+dem_10yr_hrs %>%
+  filter(Model == "2. Primary") %>%
 kable(caption = "weighted HR for dementia incidence based on 10 yr avg exposure")
-
 
 ```
 

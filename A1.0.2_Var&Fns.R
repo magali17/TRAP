@@ -38,7 +38,7 @@ model.digits <- 2
 
 ###################################################################################
 
-#function renturns Table 1 summary statistics for a given dataset, with a column name describing group 
+#function returns Table 1 summary statistics for a given dataset, with a column name describing group 
 t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",], 
                   #description variables
                   column.name = "entire cohort") {  
@@ -194,13 +194,15 @@ hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
 
 #hr.output.fn(model.s = m2.s)
 
-####################################################################################
-# returns raw model output & table of NO2 HRs
 
-models.fn <- function(mydata = dem.w, 
+################################################ new models.fn ###########################################
+# returns various models for diff exposure periods
+
+models.fn <- function(mydata = dem.w,
+                       models,
                       surv.time2 = "age_end_exposure", 
                       surv.event = "dementia_now", 
-                      outcome.text = "All-cause Dementia",
+                      #outcome.text = "All-cause Dementia",
                       no2.var = "no2_10yr",
                       pm25.var = "pm25_10yr",
                       no2.units = my.no2.units,
@@ -211,11 +213,11 @@ models.fn <- function(mydata = dem.w,
   # surv.event = "dementia_now"
   # outcome.text = "All-cause Dementia"
   # myweights = 1
-  # no2.var = "no2_20yr"
-  # pm25.var = "pm25_20yr"
+  # no2.var = "no2_10yr"
+  # pm25.var = "pm25_10yr"
   # no2.units = my.no2.units
   # pm25.units = my.pm25.units
-
+  # models <- c("m1", "m5")
   
   #rename variables for fns
   mydata <- mydata %>%
@@ -240,13 +242,6 @@ models.fn <- function(mydata = dem.w,
         "bmi"), 
       as.factor) %>%
     mutate(
-      # #make factors & rename
-      # income = factor(income),
-      # edu = factor(edu),
-      # birth_cohort = factor(birth_cohort),
-      # smoke = factor(smoke),
-      # bmi = factor(bmi),
-      
       #adjust AP units
       no2 = no2/no2.units,
       pm25 = pm25/pm25.units,
@@ -258,162 +253,143 @@ models.fn <- function(mydata = dem.w,
     time2 = as.numeric(unlist(mydata[surv.time2])) ,  
     event = as.numeric(unlist(mydata[surv.event])))
   
-
   #Model 1 (Reduced): Age (time axis), NO2 (time-varying) 
-  m1 <- mydata %>%
-    coxph(s.dem ~ no2, 
+  if("m1" %in% models) {
+    m1 <- mydata %>%
+      coxph(s.dem ~ no2, 
           data=., 
           robust = T, 
-          weights = model_wt
-    )  
+          weights = model_wt)  
   
-   m1.s <- m1 %>% summary()
+    m1.s <- m1 %>% summary()
+  }
   
   #Model 2 (a priori): M1 + gender, education, median household income, race, birth cohort; APOE stratification.
+  if("m2" %in% models) {  
   #assuming missing values (e.g., APOE) are MCAR and doing a complete case analysis. This method can be bias if values are not MCAR.
-
-  m2 <- mydata %>%
-    coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
-            edu +  birth_cohort, 
-          data=., 
-          robust = T,
-          weights = model_wt
-    ) 
   
-  m2.s <- m2 %>% summary()
-   
+    m2 <- mydata %>%
+      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
+              edu +  birth_cohort, 
+            data=., 
+            robust = T,
+            weights = model_wt) 
+    
+    m2.s <- m2 %>% summary()
+    }
+  
   #M3 (extended): M2 + smoking + physical activity 
-  m3 <- mydata %>%
-    coxph(s.dem ~ no2 + 
-            male + edu + race_white + income + birth_cohort + strata(apoe) + 
-            smoke + exercise_reg, 
-          data=., 
-          robust = T,
-          weights = model_wt
-    ) 
-  
-  m3.s <- m3 %>% summary()
-  
+  if("m3" %in% models) {
+    m3 <- mydata %>%
+      coxph(s.dem ~ no2 + 
+              male + edu + race_white + income + birth_cohort + strata(apoe) + 
+              smoke + exercise_reg, 
+            data=., 
+            robust = T,
+            weights = model_wt) 
+    
+    m3.s <- m3 %>% summary()
+    }
   
   #Model 4 (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
-  m4 <- mydata %>%
-    coxph(s.dem ~ no2 + 
-            male + edu + race_white + income + birth_cohort + strata(apoe) + 
-            smoke + exercise_reg +
-            Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi, 
-          data=., 
-          robust = T,
-          weights = model_wt
-    ) 
-  
-  m4.s <- m4 %>% summary()
+  if("m4" %in% models) {
+    m4 <- mydata %>%
+      coxph(s.dem ~ no2 + 
+              male + edu + race_white + income + birth_cohort + strata(apoe) + 
+              smoke + exercise_reg +
+              Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi, 
+            data=., 
+            robust = T,
+            weights = model_wt) 
+    
+    m4.s <- m4 %>% summary()
+  }
   
   #Model 5 (APOE interaction): M2 + NO2*APOE
+  if("m5" %in% models) {
   ## create single variable for interaction term so that interaction HRs is directly interpretable #see B537 L3 # 56
   mydata <- mydata %>%
     mutate(
       no2_noapoe = (1-apoe)*no2,
-      no2_apoe = apoe*no2
-    )
- 
+      no2_apoe = apoe*no2)
+  
   m5 <- mydata %>%
     coxph(s.dem ~ no2_noapoe + no2_apoe + apoe +
             male + edu + race_white + income + birth_cohort + strata(apoe),
           data=., 
           robust = T,
-          weights = model_wt
-    ) 
+          weights = model_wt)
+  
   m5.s <- m5 %>% summary()
   
+  }
+  
   #Model 6 (copollutant): M2 + PM2.5 (time-varying)
-  m6 <- mydata %>%
-    coxph(s.dem ~ no2 +
-            male + race_white + income + edu + birth_cohort + strata(apoe) +
-            pm25,  
-          data=.,
-          robust = T,
-          weights = model_wt
-    )
-  
-  m6.s <- m6 %>% summary()
-  
-  #raw model output
-  model.ouputs <- list(model1 = m1, 
-                       model2= m2, 
-                       model3 = m3, 
-                       model4 = m4, 
-                       model5 = m5, 
-                       model6 = m6)
-  
-  #dataframe w/ HR output from models
-  hrs <- rbind(
-    hr.output.fn(m1.s),
-    hr.output.fn(m2.s),
-    hr.output.fn(m3.s),
-    hr.output.fn(m4.s),
-    hr.output.fn(m5.s, no2.coef = "no2_noapoe"),
-    hr.output.fn(m5.s, no2.coef = "no2_apoe"),
-    hr.output.fn(m6.s)
-  )
-  
-  
-  no2.hrs <- cbind(
-    Model = factor(c("1. Reduced", "2. Primary", "3. Extended", "4. Extended & Mediation", "5. Interaction (no APOE)", "5. Interaction (APOE)", "6. PM2.5 Adjusted"), 
-                   levels = c("1. Reduced", "2. Primary", "3. Extended", "4. Extended & Mediation", "5. Interaction (no APOE)", "5. Interaction (APOE)", "6. PM2.5 Adjusted")),
-    exposure = substr(no2.var, 5, nchar(no2.var)),
-    hrs
-    )  
-  
-  return(list(table_of_no2_HRs= no2.hrs,
-              raw_model_output = model.ouputs,
-              survival_object = s.dem
-              ))
-  
-}
-
-###############################################################################################
-
-# returns HRs for diff exposure time windows 
-diff.exposures.fn <- function(mydata.2 = dem.w, 
-                              surv.time2.2 = "age_end_exposure", 
-                              surv.event.2 = "dementia_now", 
-                              outcome.text.2 = "All-cause Dementia" 
-                              ) {
-  
-  exposure = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr20yrlag")
-  
-  #df for HRs
-  hr.output.df = as.data.frame(matrix(nrow=0, ncol = 8))
-  names(hr.output.df) = c("Model", "exposure", "hr", "lower_limit", "upper_limit", "p", "person_years", "number_events")
-  
-  #list for all model output
-  model.output.list <- vector(mode="list", length = 6)
-  names(model.output.list) <- exposure
+  if("m6" %in% models) {
+    m6 <- mydata %>%
+      coxph(s.dem ~ no2 +
+              male + race_white + income + edu + birth_cohort + strata(apoe) +
+              pm25,  
+            data=.,
+            robust = T,
+            weights = model_wt
+      )
     
-  for (i in seq_along(exposure)) {
+    m6.s <- m6 %>% summary()
     
-    #run model, only save HR table otuput
-    model_results <- models.fn(mydata = mydata.2,
-                                   surv.time2 = surv.time2.2,
-                                   surv.event = surv.event.2,
-                                   outcome.text = outcome.text.2,
-                                   no2.var = paste0("no2_", exposure[i]),
-                                   pm25.var = paste0("pm25_", exposure[i]) #, 
-                               #myweights = weights.2
-                               ) 
+    }
+  
+  #raw model output for models run
+  raw_model_output <- list()
+  for (i in seq_along(models)) {
+    #create a list w/ all models that were run
+    raw_model_output[[models[i]]] <- get(models[i])
+  }
+  
+  #HR output from model summaries 
+  models.s <- paste0(models, ".s")  
+  hrs <- data.frame()
+  
+  for(i in seq_along(models.s)) {
+    if (models.s[i] != "m5.s") {
+      df <- hr.output.fn(get(models.s[i]))
+    }
+    #if m5  
+    else {
+      df1 <- hr.output.fn(get(models.s[i]), no2.coef = "no2_noapoe")
+      df2 <- hr.output.fn(get(models.s[i]), no2.coef = "no2_apoe")
+      df <- rbind(df1, df2)
+    }
+    # combine all HRs
+    hrs <- rbind(hrs, df)
     
-    #save HRs
-    hr.output.df <- rbind(hr.output.df, model_results[[1]])
-    #save raw model output
-    model.output.list[[i]] <- model_results[[2]]
+     
+    
+    # ##label model output
+    # if (substr(models.s[i], 2, 2) %in% 1:4) {
+    #   hrs$model[i] <- models.s[i]
+    # }
+    # ## m5
+    # if(substr(models.s[i], 2, 2) == 5) {
+    #   hrs$model[i] <- "noapoe"
+    #   hrs$model[i+1] <- "apoe"
+    # }
+    # ## m6
+    # else{
+    #   #n <- nrow(hr) + 1
+    #   hrs$model[nrow(hrs)] <- models.s[i]
+    # }
     
   }
   
-  myresult <- list(HRs = hr.output.df,
-                   model.output = model.output.list,
-                   survival.object = model_results[[3]])
-  
-  return(myresult) 
+  ##add exposure period labels  
+  hrs <- cbind(exposure = substr(no2.var, 5, nchar(no2.var)),
+                   hrs) 
+ 
+  return(list(hrs= hrs,
+              raw_model_output = raw_model_output,
+              survival_object = s.dem
+  ))
   
 }
 

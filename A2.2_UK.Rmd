@@ -27,11 +27,11 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(dplyr, tidyverse, knitr, Himsc, EnvStats, lubridate, glmnet, ggpubr)   
+pacman::p_load(dplyr, tidyverse, knitr, Himsc, EnvStats, lubridate, glmnet, ggpubr, VCA)   
 #Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
 #set plot theme
-theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+#theme_set(theme_linedraw() + theme(legend.position="bottom")) 
 
 source("A2.0.1_Var&Fns.R")
 
@@ -76,14 +76,26 @@ mm.w.ptrak <- mm.wide %>%
 
 ```
 
+### -->	Combine 2 stops if they are “close”? We stopped sampling MS0398 and switched to MS0601 which is close
+
+```{r}
+geo <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) %>%
+  select("native_id", "latitude", "longitude", "m_to_a1", "m_to_a2", "m_to_coast", "m_to_l_port", "m_to_comm", "m_to_airp", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")
+#write.csv(geo, file.path("Data", "Aim 2", "Geocovariates", "geo_few.csv"))
+
+#"We stopped sampling MS0398 and switched to MS0601 which is close"
+#t <- geo %>% filter(native_id %in% c("MS0398", "MS0601"))
+
+```
+
+
 ### ? use wide format (uses avg when multiple readings exist from duplicate instruments)
 ## ?? how to select all columns After a certain one? 
 
 # Available MM observations 
   
 Lot of locations w/o observations during each season-time_of_week-time_of_day combination
-#### --> knit error: "passing fn as a global data...misspelled the 'data' argument in ggplot()
-
+ 
 ```{r}
 
 #counts at each location by quarter, DOW, hour bins - see how much missin data there are
@@ -169,35 +181,39 @@ samples_per_stop_season_wk %>%
   
 ```
 
-# Trim data   
+# Trim data    
+### --> ?use windosirzed mean instead?  
 
-```{r}
+###--> ? trim 10% & compare
+
+```{r} 
 untrimmed.plot <- mm.w.ptrak %>% 
   ggplot(aes(y=ufp_pt_noscreen_ct_cm3)) + 
   geom_boxplot() + #scale_y_log10() +
   labs(title = "untrimmed data")
 
 #trip bottom and top 5% observations 
-trimmed.plot <- mm.w.ptrak %>%
+mm.w.ptrak <- mm.w.ptrak %>%
+  group_by(site_id) %>%
+  #trim high and low values
   filter(ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, (1-trim_quantile), na.rm = T),
-         ufp_pt_noscreen_ct_cm3 >= quantile(ufp_pt_noscreen_ct_cm3, (trim_quantile), na.rm = T)
-         ) %>%
+         ufp_pt_noscreen_ct_cm3 >= quantile(ufp_pt_noscreen_ct_cm3, (trim_quantile), na.rm = T))
+
+trimmed.plot <- mm.w.ptrak %>%
   ggplot(aes(y=ufp_pt_noscreen_ct_cm3)) + 
   geom_boxplot() +
-  labs(title = paste0("trimmed top and bottom ", trim_quantile*100, "% of data " ))
+  labs(title = paste0("trimmed top and bottom ", trim_quantile*100, "% \nof data at each site" ))
   
 ggarrange(untrimmed.plot, trimmed.plot ) 
 
-```
 
-### --> use windosirzed mean instead? 
-
-```{r}
-mm.w.ptrak <- mm.w.ptrak %>%
-  #trim high and low values
-  filter(ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, (1-trim_quantile), na.rm = T),
-         ufp_pt_noscreen_ct_cm3 >= quantile(ufp_pt_noscreen_ct_cm3, (trim_quantile), na.rm = T)
-         )
+# #windosrized alternative 
+# mm.w.ptrak <- mm.w.ptrak %>%
+#   group_by(site_id) %>%
+#   mutate(
+#     ufp_wind = ifelse(ufp_pt_noscreen_ct_cm3 > quantile(ufp_pt_noscreen_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ufp_pt_noscreen_ct_cm3, (1-trim_quantile), na.rm = T), 
+#                       ifelse(ufp_pt_noscreen_ct_cm3 < quantile(ufp_pt_noscreen_ct_cm3, (trim_quantile), na.rm = T), quantile(ufp_pt_noscreen_ct_cm3, (trim_quantile), na.rm = T), 
+#                              ufp_pt_noscreen_ct_cm3)))
 
 ```
 
@@ -264,9 +280,9 @@ MC0002 %>%
 ```
 
 # 2. Calculate Weighted Means   
-? Assume temporal pattern is same across locations. Strong assumption, but can’t relax this very easily  
+? Assume temporal pattern is same across locations. Strong assumption, but can’t relax this very easily.  
   
-a) calculate weighted annual avg (~Feb - Oct) means using different methods to determine how sensitve estimates are to using these approaches: 
+a) calculate weighted annual avg (Mar - Oct) means using different methods to determine how sensitve estimates are to using these approaches: 
 * weighted (various weights) vs unweighted
 * binning hour differently 
 
@@ -312,17 +328,22 @@ mm.w.ptrak <- mm.w.ptrak %>%
 
 ```
 
-? as bins increase, sample size will also increase. keep same locations for consistency??
-
+### --> recalculate means @ individual level (don't group first). don't group_by() all temporal variables at once (inclde as long a site has a measurement during all seasons, TOW, TOD even if not necessarily together) 
+#### -->  has Hank done this?
+ 
 ```{r}
 #calc diff summary measures
 mm.w.ptrak <- mm.w.ptrak %>%
   group_by(site_id) %>%
   #unweighted mean
-  mutate(mean_uw = round(mean(ufp_pt_noscreen_ct_cm3)),
-         #unweighted median
-         median_uw = round(median(ufp_pt_noscreen_ct_cm3)),
-         )
+  mutate(mean_uw = round(mean(ufp_pt_noscreen_ct_cm3)))
+
+
+
+
+
+
+
 
 
 #means by seaason-wk-tod5 (5 tods)
@@ -502,14 +523,14 @@ m.same_months <- mm.w.ptrak %>%
 
 ```
 
-compare mean estimates for 8 sites using different methods
+### --> ? how to see if the "rank order" of sites is impacted when we use different methods 
 
-### ---> ? do we want "noisier" estimates? taking site-specific characterstics into account?
+compare mean estimates for 8 sites using different methods
 
 ```{r}
 #join all estimates
 annual <- mm.w.ptrak %>%
-  select(site_id, mean_uw, median_uw) %>%
+  select(site_id, route, mean_uw) %>%
   unique() %>%
   left_join(s_tow2_tod2) %>%
   rename(mean_sea_tow2_tod2 = mean_wt) %>%
@@ -524,7 +545,7 @@ annual <- mm.w.ptrak %>%
   rename(mean_mo = mean_wt)  
 
 annual.l <- annual %>%
-  gather(key = "method", value = "ufp", -site_id) %>%
+  gather(key = "method", value = "ufp", -site_id, -route) %>%
   drop_na()
 
 #plot of number of locations that met criteria for estimating means 
@@ -533,74 +554,383 @@ annual.l %>%
   geom_bar() + 
   labs(title = "no. sites with mean/median estimates using various methods")
 
-#estimates for 8 locations with all estimation methods
-
-ufp_by_method(dt = annual)
 
 ```
 
 
-### --> make plots of diff btw 'gold standard' and other methods 
-
-
-### --> add sample size to plots 
-### --> standardize SD? 
-
 ```{r}
+#estimates for 19 locations with all estimation methods
+annual %>% ufp_by_method(dt = .)
+
+  ## compare to a ref method
+comp_to_tod2 <- annual %>%
+  mutate(
+    #look at difference in estimates from "best" estimate
+    mean_uw = mean_uw - mean_sea_tow2_tod2,
+    mean_sea_tow2 = mean_sea_tow2 - mean_sea_tow2_tod2,
+    mean_sea = mean_sea - mean_sea_tow2_tod2,
+    mean_mo = mean_mo - mean_sea_tow2_tod2,
+  ) %>%
+  select(-mean_sea_tow2_tod2) 
+
+comp_to_tod2 %>% ufp_by_method(., 
+                add.to.title = "relative to mean_sea_tow2_tod2")
+  
+ ## table of mean difference
+comp_to_tod2 %>%
+  gather("method", "value", -site_id, -route) %>%
+  group_by(method) %>%
+  summarize(
+    mean_diff = round(mean(value, na.rm=T)),
+    median_diff = round(median(value, na.rm=T))) %>%
+  arrange(desc(median_diff)) %>%
+  kable(caption = "Estimate difference relative to mean_sea_tow2_tod2")
+
+##############
 #estimates for locations w/ 5+ estimation methods (not considering tod)
-annual %>%
-  select(-mean_sea_tow2_tod2) %>%
-  drop_na() %>%
-  gather(key = "method", value = "ufp", -site_id) %>%
-  ggplot(aes(x=site_id, y= ufp, col=method)) + 
-  geom_boxplot(aes(group=site_id), show.legend = F) +
-  geom_point(aes(shape=method)) + 
-  #geom_line() +
-  labs(title = paste0("Site mean/median for ", months.sampled[1], " - ", months.sampled[length(months.sampled)], " (Spring - Winter)")  )
+annual %>% select(-mean_sea_tow2_tod2) %>%
+  ufp_by_method(dt=.)
+ 
+  ## compare to ref mean_sea_tow2
+comp_to_tow2 <- annual %>%
+  mutate(
+    #look at difference in estimates from "best" estimate
+    mean_uw = mean_uw - mean_sea_tow2,
+    mean_sea = mean_sea - mean_sea_tow2,
+    mean_mo = mean_mo - mean_sea_tow2,
+  ) %>%
+  select(-mean_sea_tow2_tod2, 
+         -mean_sea_tow2,
+         # -mean_uw,
+         ) 
 
-annual %>%
-  select(-mean_sea_tow2_tod2) %>%
-  drop_na() %>%
-  gather(key = "method", value = "ufp", -site_id) %>%
-  ggplot(aes(x=method, y= ufp, col=site_id)) + 
-  geom_boxplot(aes(group=method), show.legend = F) +
-  geom_point(alpha=0.3, show.legend = F) + 
-  labs(title = paste0("Site mean/median for ", months.sampled[1], " - ", months.sampled[length(months.sampled)], " (Spring - Winter)"))
+comp_to_tow2 %>% ufp_by_method(., add.to.title = "relative to mean_sea_tow2")
 
-# DELETE? can kind of see this in previosu plot
-# annual %>%
-#   select(-mean_sea_tow2_tod2) %>%
+comp_to_tow2 %>%
+  gather("method", "value", -site_id, -route) %>%
+  group_by(method) %>%
+  summarize(
+    mean_diff = round(mean(value, na.rm=T)),
+    median_diff = round(median(value, na.rm=T))) %>%
+  arrange(desc(median_diff)) %>%
+  kable(caption = "Estimate difference relative to mean_sea_tow2")
+
+
+```
+
+See whic sites have large differences between diff estimation methods.      
+- sites w/ high inter-method variabiitly have high extreme values, while those w/ low inter-method variability have either: a) no or b) both high and low extreme values
+
+```{r}
+ 
+tod2 <- annual %>%
+  drop_na()  
+
+tod2$min <- apply(tod2[,c(3:7)], 1, function(x)  range(x)[1])  
+tod2$max <- apply(tod2[,c(3:7)], 1, function(x)  range(x)[2])  
+tod2$diff <- apply(tod2[,c(3:7)], 1, function(x)  diff(range(x)))  
+
+tod2 <- tod2 %>%
+  left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")]))
+
+tod2$m_to_a1_a2 <- apply(tod2[c("m_to_a1", "m_to_a2")], 1, min)
+
+# tod2.lm1 <- tod2 %>% lm(diff ~ m_to_a1_a2 +
+#        m_to_airp + #m_to_l_port + 
+#        m_to_rr + #m_to_truck + 
+#          elev_elevation + 
+#        pop_s01000, 
+#        data = .) 
+# 
+# tod2.lm1 %>% summary()
+# #anova(tod2.lm1)  #almost identical to: summary.aov(movup.lm2)
+
+# tod2 %>%
+#     ggplot(aes(x=site_id, y= diff, col = elev_elevation)) + 
+#     geom_point(aes()) + 
+#     theme(axis.text.x = element_text(angle = 90))   
+
+
+#plots looking at which sites have largest diff btwn estimates
+extremes <- 0.25
+
+tod.2.high <- tod2 %>%
+  filter(diff > quantile(tod2$diff, (1-extremes)))
+
+tod.2.low <- tod2 %>%
+  filter(diff < quantile(tod2$diff, extremes))
+
+
+#RAW values for high/low values - are there any extreme values? 
+#high range of values
+h <- mm.w.ptrak %>%
+  filter(site_id %in% unique(tod.2.high$site_id)) %>% 
+  mutate(diff_lvl = "high")
+l <- mm.w.ptrak %>%
+  filter(site_id %in% unique(tod.2.low$site_id)) %>% 
+  mutate(diff_lvl = "low")
+h.l <- rbind(h, l) %>%
+  ungroup()
+
+h.l %>%
+  ggplot(aes(x=ufp_pt_noscreen_ct_cm3)) +
+  geom_density(aes(fill = diff_lvl), alpha=0.5) + 
+  labs(subtitle = paste("Sea_TOW2_TOD2, n =", length(unique(h.l$site_id))))
+
+h.l %>%
+  ggplot(aes(x=site_no, y= ufp_pt_noscreen_ct_cm3, fill=factor(diff_lvl),  col=route, group=site_no)) + 
+  geom_boxplot() +
+  scale_x_continuous(breaks=h.l$site_no, labels=h.l$site_id) + 
+  theme(axis.text.x = element_text(angle = 90)) + 
+  labs(title = "Sites with 'high' and 'low' inter-method variability. \nX-asis is arranged by stop order.", 
+       subtitle = paste("Sea_TOW2_TOD2, n =", length(unique(h.l$site_id))))
+
+
+```
+
+Compare sites w/ estimates that vary a lot vs those that vary little  
+-those that vary more are closer to sources? 
+
+```{r}
+tow2 <- annual %>%
+  select(-mean_sea_tow2_tod2) %>%
+  drop_na()  
+
+tow2$min <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  range(x)[1])  
+tow2$max <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  range(x)[2])  
+tow2$diff <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  diff(range(x)))  
+
+tow2 <- tow2 %>%
+  left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")]))
+
+tow2$m_to_a1_a2 <- apply(tow2[c("m_to_a1", "m_to_a2")], 1, min)
+
+# tow2.lm1 <- tow2 %>% lm(diff ~ m_to_a1_a2 +
+#        m_to_airp + #m_to_l_port + 
+#        m_to_rr + m_to_truck + 
+#          elev_elevation, #+ 
+#        #pop_s01000, 
+#        data = .) 
+# 
+# tow2.lm1 %>% summary()
+# 
+# anova(tow2.lm1)  #almost identical to: summary.aov(movup.lm2)
+
+# tow2 %>%
+#     ggplot(aes(x=site_id, y= diff, col = m_to_truck/100)) + 
+#     geom_point(aes()) + 
+#     theme(axis.text.x = element_text(angle = 90)) 
+
+#sites w/ most/least variability in estimates
+tow.2.high <- tow2 %>%
+  filter(diff > quantile(tow2$diff, (1-extremes)))
+tow.2.low <- tow2 %>%
+  filter(diff < quantile(tow2$diff, extremes))
+
+
+
+#RAW values for high/low values - are there any extreme values?
+#high range of values
+h.tow2 <- mm.w.ptrak %>%
+  filter(site_id %in% unique(tow.2.high$site_id)) %>%
+  mutate(diff_lvl = "high")
+l.tow2 <- mm.w.ptrak %>%
+  filter(site_id %in% unique(tow.2.low$site_id)) %>%
+  mutate(diff_lvl = "low")
+h.l.tow2 <- rbind(h.tow2, l.tow2)
+
+#density/box plots for UFP  
+h.l.tow2 %>%
+  ggplot(aes(x=ufp_pt_noscreen_ct_cm3)) +
+  geom_density(aes(fill = diff_lvl), alpha=0.5) +
+  labs(subtitle = paste("Sea_TOW2, n =", length(unique(h.l.tow2$site_id))))
+
+h.l.tow2 %>%
+  ggplot(aes(x=site_no, y= ufp_pt_noscreen_ct_cm3, fill=factor(diff_lvl), group=site_no)) + 
+  geom_boxplot() +
+  scale_x_continuous(breaks=h.l.tow2$site_no, labels=h.l.tow2$site_id) + 
+  theme(axis.text.x = element_text(angle = 90)) +
+  facet_wrap(~route, scales="free_x") +
+  labs(title = "Sites with 'high' and 'low' inter-method variability. \nX-asis is arranged by stop order.",
+       subtitle = paste("Sea_TOW2, n =", length(unique(h.l.tow2$site_id))))
+
+```
+
+Density plots by geocovariates
+
+```{r}
+#tod
+tod.2.high$diff_lvl <- "high"
+tod.2.low$diff_lvl <- "low"
+tod.2.high.low <- rbind(tod.2.high, tod.2.low) 
+
+tod.2.high.low %>%
+  gather("geocov", "value", m_to_airp:m_to_a1_a2) %>%
+  ggplot(aes(x = value, fill = factor(diff_lvl))) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~geocov, scales="free") +
+  labs(subtitle = paste("Sea_TOW2_TOD2, n =", length(unique(tod.2.high.low$site_id))))
+
+
+#tow
+tow.2.high$diff_lvl <- "high"
+tow.2.low$diff_lvl <- "low"
+tow.2.high.low <- rbind(tow.2.high, tow.2.low) 
+
+tow.2.high.low %>%
+  gather("geocov", "value", m_to_airp:m_to_a1_a2) %>%
+  ggplot(aes(x = value, fill = factor(diff_lvl))) +
+  geom_density(alpha=0.5) +
+  facet_wrap(~geocov, scales="free") +
+  labs(subtitle = paste("Sea_TOW2, n =", length(unique(tow.2.high.low$site_id))))
+# #same but boxplots
+# tow.2.high.low %>%
+#   gather("geocov", "value", m_to_airp:m_to_a1_a2) %>%
+#   ggplot(aes(y = value, x = factor(diff_lvl), fill= diff_lvl)) +
+#   geom_boxplot() +
+#   facet_wrap(~geocov, scales="free")
+
+```
+
+
+
+ANOVA & LS: method vs site effect
+   
+- most variation comes from site, tiny (but significant) amount from estimation method
+- mean_mo and mean_sea estimates significantly lower than two2 and tow2_tod2
+- 
+
+Anova for Sea_TOW2_TOD2
+
+```{r}
+#ANOVA for TOD2
+tod2.anova <- tod2 %>%
+  select(site_id:mean_mo) %>%
+  gather("method", "value", -site_id, -route)  
+
+anovaVCA(value ~ method + site_id, Data=as.data.frame(tod2.anova))
+
+tod2.lm1a <- tod2.anova %>%                               #mean_sea_tow2_tod2
+  mutate(method = relevel(factor(method, ordered = F), ref = "mean_uw")) %>% 
+  lm(value ~ method + site_id, data = .)
+
+anova(tod2.lm1a)
+summary(tod2.lm1a)
+#CI
+confint(tod2.lm1a)[c(1:5),]
+
+
+```
+
+Anova for Sea_TOW2
+
+```{r}
+#ANOVA for TOW2
+tow2.anova <- tow2 %>%
+  select(site_id:mean_mo) %>%
+  gather("method", "value", -site_id)  
+
+anovaVCA(value ~ method + site_id, Data=as.data.frame(tow2.anova))
+
+
+tow2.lm1a <- tow2.anova %>% #mean_sea_tow2
+  mutate(method = relevel(factor(method, ordered = F), ref = "mean_uw")) %>% 
+  lm(value ~ method + site_id, data = .)
+
+anova(tow2.lm1a)
+summary(tow2.lm1a)
+#CI
+confint(tow2.lm1a)[c(1:4),]
+```
+
+
+# b) Rank Order
+ 
+?? "rank order" - are coefficients similar across models, at least in sign (+/-)?
+
+? more varibility in UFP estimates at places w/ more direct sources? (Bossche 2015)
+
+Models comparing various methods of estimating central tendency using sites w/ season-TOW2-TOD2 estimates.
+
+```{r}
+# # compare to tod2  
+# comp_to_tod2 <- comp_to_tod2 %>%
 #   drop_na() %>%
-#   gather(key = "method", value = "ufp", -site_id) %>%
-#   group_by(method) %>%
-#   summarize(method_sd = sd(ufp)) %>%
-#   ggplot(aes(x=method, y= method_sd)) + 
-#   geom_point(aes()) + 
-#   labs(title = paste0("SD of mean/median estimation methods for several location; ", months.sampled[1], " - ", months.sampled[length(months.sampled)], " (Spring - Winter)"))
+#   left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation",  "pop_s01000")]))
+# 
+# comp_to_tod2$m_to_a1_a2 <- apply(comp_to_tod2[c("m_to_a1", "m_to_a2")], 1, min)
 
+#mea_sea_tow2_tod2
+ tod2 %>% lm(mean_sea_tow2_tod2 ~ m_to_a1_a2 +  
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
+ 
+ #mea_sea_tow2
+ tod2 %>% lm(mean_sea_tow2 ~ m_to_a1_a2 +  
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
+
+#mean_mo
+tod2 %>% lm(mean_mo ~ m_to_a1_a2 +  #m_to_truck + 
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
+
+#mean_sea
+tod2 %>% lm(mean_sea ~ m_to_a1_a2 +  #m_to_truck + 
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
+
+#mean_uw
+tod2 %>% lm(mean_uw ~ m_to_a1_a2 +  #m_to_truck + 
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
+
+ 
 ```
 
-
-
-includes most locations
+Models comparing various methods of estimating central tendency using sites w/ season and TOW2 estimates.
 
 ```{r}
-#estimates for locations w/ 4 estimation methods (not considering tow or tod)
+# comp_to_tow2 <- comp_to_tow2 %>%
+#   drop_na() %>%
+#   left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation",  "pop_s01000")]))
+# 
+# comp_to_tow2$m_to_a1_a2 <- apply(comp_to_tow2[c("m_to_a1", "m_to_a2")], 1, min)
 
+ #mea_sea_tow2
+ tow2 %>% lm(mean_sea_tow2 ~ m_to_a1_a2 +  
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
 
+#mean_mo
+tow2 %>% lm(mean_mo ~ m_to_a1_a2 +  #m_to_truck + 
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
+
+#mean_sea
+tow2 %>% lm(mean_sea ~ m_to_a1_a2 +  #m_to_truck + 
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
+
+#mean_uw
+tow2 %>% lm(mean_uw ~ m_to_a1_a2 +  #m_to_truck + 
+       m_to_airp + m_to_rr + elev_elevation + pop_s01000,
+       data = .) %>%
+  summary()
 
 
 ```
 
 
-## --> compare ?select months/season w/ 3-5 dow?
 
-```{r}
-
-```
-
-
-
-
-# ? Compare trimmed means at AQS sites  
+ 
+# Compare trimmed means at AQS sites  
 if have 6 months of data, compare to the 6-mo estimate at AQS sites

@@ -247,30 +247,24 @@ ptrak.bind.fn <- function(folder_path) {
 #############################################################################################
 #returns boxplots of UFP estimates for selected sites by method
 ufp_by_method <- function(dt,
-                          .months.sampled = months.sampled) {
-  #dt = annual
+                          .months.sampled = months.sampled,
+                          add.to.title = "") {
   
-  ufp_by_site <- dt %>%
-    drop_na() %>%
-    gather(key = "method", value = "ufp", -site_id) %>%
-    ggplot(aes(x=site_id, y= ufp, col=method)) + 
-    geom_boxplot(aes(group=site_id), show.legend = F) +
-    geom_point(aes(shape=method))   
+  dt <- dt %>% 
+    drop_na()
   
+  n <- length(unique(dt$site_id))
   
-  ufp_by_method <- dt %>%
-    drop_na() %>%
-    gather(key = "method", value = "ufp", -site_id) %>%
-    ggplot(aes(x=method, y= ufp, col=site_id)) + 
-    geom_boxplot(aes(group=method), show.legend = F) +
-    geom_point(aes()) + 
-    geom_line(aes(group=site_id), alpha=0.3)  
+  dt.l <- dt %>% gather(key = "method", value = "ufp", -site_id, -route) 
   
-  plots <- ggarrange(ufp_by_site, ufp_by_method) %>%
-    annotate_figure(., 
-                    top = paste0("Site mean/median for ", .months.sampled[1], " - ", .months.sampled[length(.months.sampled)], " (Spring - Winter)"))
-  
-  return(plots)
+  ufp_by_site <- dt.l %>%
+    ggplot(aes(x=site_id, y= ufp, col=method, group=site_id)) + 
+    geom_boxplot(aes( fill = route), alpha=0.3) +
+    geom_point(aes(shape=method)) + 
+    theme(axis.text.x = element_text(angle = 90)) + 
+    labs(title = paste0("Site mean/median UFP for ", .months.sampled[1], " - ", .months.sampled[length(.months.sampled)], " (Spring - Winter), n = ", n, " sites ", add.to.title))
+   
+  return(ufp_by_site)
   
 }
 

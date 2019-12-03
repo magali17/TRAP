@@ -17,7 +17,7 @@ editor_options:
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE)  
 
 # Clear workspace of all objects and unload all extra (non-base) packages
 rm(list = ls(all = TRUE))
@@ -90,13 +90,12 @@ geo <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locat
 
 
 ### ? use wide format (uses avg when multiple readings exist from duplicate instruments)
-## ?? how to select all columns After a certain one? 
 
 # Available MM observations 
   
 Lot of locations w/o observations during each season-time_of_week-time_of_day combination
  
-```{r}
+```{r, include=F}
 
 #counts at each location by quarter, DOW, hour bins - see how much missin data there are
 #df w/ times that each stop Should have sampled
@@ -183,8 +182,6 @@ samples_per_stop_season_wk %>%
 
 # Trim data    
 ### --> ?use windosirzed mean instead?  
-
-###--> ? trim 10% & compare
 
 ```{r} 
 untrimmed.plot <- mm.w.ptrak %>% 
@@ -279,17 +276,12 @@ MC0002 %>%
 #plot(residuals(me1) )
 ```
 
-# 2. Calculate Weighted Means   
+# Weighted Means   
 ? Assume temporal pattern is same across locations. Strong assumption, but can’t relax this very easily.  
   
 a) calculate weighted annual avg (Mar - Oct) means using different methods to determine how sensitve estimates are to using these approaches: 
 * weighted (various weights) vs unweighted
 * binning hour differently 
-
-b) how may these estimates be impacted over space? are some sites more likely to be sensitive to using different estimation methods? 
-* LUR: site means [?using various methods] ~ geocovariates  (e.g. dist to rd/airport/rr, elevation, pop density )    
-
-? c) ? do LUR by hour to see how diff geocovarites impact diff hourly estimates? 
 
 ```{r}
 #drop winter values for now (drops Feb) since little data here & fewer stops meet min requirements
@@ -299,7 +291,8 @@ mm.w.ptrak <- mm.w.ptrak %>%
 # hist of unique times_of_day locations have sampled at 
 mm.w.ptrak %>%
   ggplot(aes(x=hour)) +
-  geom_bar(aes( ))
+  geom_bar(aes( )) + 
+  labs(title = "hours sampled during mobile monitoring campaign")
 
 #when are sites least likely to sample (inclue these gaps in other hours)
 # mm.w.ptrak %>%
@@ -329,6 +322,7 @@ mm.w.ptrak <- mm.w.ptrak %>%
 ```
 
 ### --> recalculate means @ individual level (don't group first). don't group_by() all temporal variables at once (inclde as long a site has a measurement during all seasons, TOW, TOD even if not necessarily together) 
+
 #### -->  has Hank done this?
  
 ```{r}
@@ -523,11 +517,11 @@ m.same_months <- mm.w.ptrak %>%
 
 ```
 
-### --> ? how to see if the "rank order" of sites is impacted when we use different methods 
+## Plots
 
-compare mean estimates for 8 sites using different methods
+compare inter-method mean estimates 
 
-```{r}
+```{r, include=F}
 #join all estimates
 annual <- mm.w.ptrak %>%
   select(site_id, route, mean_uw) %>%
@@ -558,7 +552,7 @@ annual.l %>%
 ```
 
 
-```{r}
+```{r, fig.height = 8}
 #estimates for 19 locations with all estimation methods
 annual %>% ufp_by_method(dt = .)
 
@@ -577,14 +571,14 @@ comp_to_tod2 %>% ufp_by_method(.,
                 add.to.title = "relative to mean_sea_tow2_tod2")
   
  ## table of mean difference
-comp_to_tod2 %>%
-  gather("method", "value", -site_id, -route) %>%
-  group_by(method) %>%
-  summarize(
-    mean_diff = round(mean(value, na.rm=T)),
-    median_diff = round(median(value, na.rm=T))) %>%
-  arrange(desc(median_diff)) %>%
-  kable(caption = "Estimate difference relative to mean_sea_tow2_tod2")
+# comp_to_tod2 %>%
+#   gather("method", "value", -site_id, -route) %>%
+#   group_by(method) %>%
+#   summarize(
+#     mean_diff = round(mean(value, na.rm=T)),
+#     median_diff = round(median(value, na.rm=T))) %>%
+#   arrange(desc(median_diff)) %>%
+#   kable(caption = "Estimate difference relative to mean_sea_tow2_tod2")
 
 ##############
 #estimates for locations w/ 5+ estimation methods (not considering tod)
@@ -606,23 +600,21 @@ comp_to_tow2 <- annual %>%
 
 comp_to_tow2 %>% ufp_by_method(., add.to.title = "relative to mean_sea_tow2")
 
-comp_to_tow2 %>%
-  gather("method", "value", -site_id, -route) %>%
-  group_by(method) %>%
-  summarize(
-    mean_diff = round(mean(value, na.rm=T)),
-    median_diff = round(median(value, na.rm=T))) %>%
-  arrange(desc(median_diff)) %>%
-  kable(caption = "Estimate difference relative to mean_sea_tow2")
+# comp_to_tow2 %>%
+#   gather("method", "value", -site_id, -route) %>%
+#   group_by(method) %>%
+#   summarize(
+#     mean_diff = round(mean(value, na.rm=T)),
+#     median_diff = round(median(value, na.rm=T))) %>%
+#   arrange(desc(median_diff)) %>%
+#   kable(caption = "Estimate difference relative to mean_sea_tow2")
 
 
 ```
 
-See whic sites have large differences between diff estimation methods.      
-- sites w/ high inter-method variabiitly have high extreme values, while those w/ low inter-method variability have either: a) no or b) both high and low extreme values
 
 ```{r}
- 
+# TOD2
 tod2 <- annual %>%
   drop_na()  
 
@@ -651,6 +643,90 @@ tod2$m_to_a1_a2 <- apply(tod2[c("m_to_a1", "m_to_a2")], 1, min)
 #     theme(axis.text.x = element_text(angle = 90))   
 
 
+# TOW2
+tow2 <- annual %>%
+  select(-mean_sea_tow2_tod2) %>%
+  drop_na()  
+
+tow2$min <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  range(x)[1])  
+tow2$max <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  range(x)[2])  
+tow2$diff <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  diff(range(x)))  
+
+tow2 <- tow2 %>%
+  left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")]))
+
+tow2$m_to_a1_a2 <- apply(tow2[c("m_to_a1", "m_to_a2")], 1, min)
+
+
+```
+
+
+## ANOVA & LS: method vs site effect
+   
+- most variation comes from site, tiny (but significant) amount from estimation method
+- mean_mo and mean_sea estimates significantly lower than two2 and tow2_tod2
+- 
+
+
+```{r, include=T}
+# text: "Anova for Sea_TOW2_TOD2"
+ 
+#ANOVA for TOD2
+tod2.anova <- tod2 %>%
+  select(site_id:mean_mo) %>%
+  gather("method", "value", -site_id, -route)  
+
+anovaVCA(value ~ method + site_id, Data=as.data.frame(tod2.anova))
+
+tod2.lm1a <- tod2.anova %>%                               #mean_sea_tow2_tod2
+  mutate(method = relevel(factor(method, ordered = F), ref = "mean_uw")) %>% 
+  lm(value ~ method + site_id, data = .)
+
+anova(tod2.lm1a) %>% kable()
+summary(tod2.lm1a)
+#CI
+confint(tod2.lm1a)[c(1:5),]
+
+
+```
+
+Anova for Sea_TOW2
+
+```{r, eval=T}
+#ANOVA for TOW2
+tow2.anova <- tow2 %>%
+  select(site_id:mean_mo) %>%
+  gather("method", "value", -site_id, -route) %>%
+  ungroup() %>%
+  mutate(
+    method = as.factor(method),
+    site_id = as.factor(site_id)) %>%
+  as.data.frame()
+
+anovaVCA(value ~ method + site_id, Data = tow2.anova)
+
+
+tow2.lm1a <- tow2.anova %>% #mean_sea_tow2
+  mutate(method = relevel(factor(method, ordered = F), ref = "mean_uw")) %>% 
+  lm(value ~ method + site_id, data = .)
+
+anova(tow2.lm1a) %>% kable()
+summary(tow2.lm1a)
+#CI
+confint(tow2.lm1a)[c(1:4),]
+
+```
+
+
+## Compare site with high vs low inter-method variability
+
+See whic sites have large differences between diff estimation methods.      
+- sites w/ high inter-method variabiitly have high extreme values, while those w/ low inter-method variability have either: a) no or b) both high and low extreme values
+
+Compare sites w/ estimates that vary a lot vs those that vary little  
+-those that vary more are closer to sources? 
+
+```{r, include=T}
 #plots looking at which sites have largest diff btwn estimates
 extremes <- 0.25
 
@@ -677,6 +753,10 @@ h.l %>%
   geom_density(aes(fill = diff_lvl), alpha=0.5) + 
   labs(subtitle = paste("Sea_TOW2_TOD2, n =", length(unique(h.l$site_id))))
 
+
+```
+
+```{r, fig.height=8}
 h.l %>%
   ggplot(aes(x=site_no, y= ufp_pt_noscreen_ct_cm3, fill=factor(diff_lvl),  col=route, group=site_no)) + 
   geom_boxplot() +
@@ -685,26 +765,9 @@ h.l %>%
   labs(title = "Sites with 'high' and 'low' inter-method variability. \nX-asis is arranged by stop order.", 
        subtitle = paste("Sea_TOW2_TOD2, n =", length(unique(h.l$site_id))))
 
-
 ```
 
-Compare sites w/ estimates that vary a lot vs those that vary little  
--those that vary more are closer to sources? 
-
 ```{r}
-tow2 <- annual %>%
-  select(-mean_sea_tow2_tod2) %>%
-  drop_na()  
-
-tow2$min <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  range(x)[1])  
-tow2$max <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  range(x)[2])  
-tow2$diff <- apply(tow2[,c(3:ncol(tow2))], 1, function(x)  diff(range(x)))  
-
-tow2 <- tow2 %>%
-  left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")]))
-
-tow2$m_to_a1_a2 <- apply(tow2[c("m_to_a1", "m_to_a2")], 1, min)
-
 # tow2.lm1 <- tow2 %>% lm(diff ~ m_to_a1_a2 +
 #        m_to_airp + #m_to_l_port + 
 #        m_to_rr + m_to_truck + 
@@ -745,6 +808,11 @@ h.l.tow2 %>%
   geom_density(aes(fill = diff_lvl), alpha=0.5) +
   labs(subtitle = paste("Sea_TOW2, n =", length(unique(h.l.tow2$site_id))))
 
+
+```
+
+
+```{r, fig.height=8}
 h.l.tow2 %>%
   ggplot(aes(x=site_no, y= ufp_pt_noscreen_ct_cm3, fill=factor(diff_lvl), group=site_no)) + 
   geom_boxplot() +
@@ -758,7 +826,7 @@ h.l.tow2 %>%
 
 Density plots by geocovariates
 
-```{r}
+```{r, include=T}
 #tod
 tod.2.high$diff_lvl <- "high"
 tod.2.low$diff_lvl <- "low"
@@ -771,7 +839,9 @@ tod.2.high.low %>%
   facet_wrap(~geocov, scales="free") +
   labs(subtitle = paste("Sea_TOW2_TOD2, n =", length(unique(tod.2.high.low$site_id))))
 
+```
 
+```{r}
 #tow
 tow.2.high$diff_lvl <- "high"
 tow.2.low$diff_lvl <- "low"
@@ -793,58 +863,7 @@ tow.2.high.low %>%
 ```
 
 
-
-ANOVA & LS: method vs site effect
-   
-- most variation comes from site, tiny (but significant) amount from estimation method
-- mean_mo and mean_sea estimates significantly lower than two2 and tow2_tod2
-- 
-
-Anova for Sea_TOW2_TOD2
-
-```{r}
-#ANOVA for TOD2
-tod2.anova <- tod2 %>%
-  select(site_id:mean_mo) %>%
-  gather("method", "value", -site_id, -route)  
-
-anovaVCA(value ~ method + site_id, Data=as.data.frame(tod2.anova))
-
-tod2.lm1a <- tod2.anova %>%                               #mean_sea_tow2_tod2
-  mutate(method = relevel(factor(method, ordered = F), ref = "mean_uw")) %>% 
-  lm(value ~ method + site_id, data = .)
-
-anova(tod2.lm1a)
-summary(tod2.lm1a)
-#CI
-confint(tod2.lm1a)[c(1:5),]
-
-
-```
-
-Anova for Sea_TOW2
-
-```{r}
-#ANOVA for TOW2
-tow2.anova <- tow2 %>%
-  select(site_id:mean_mo) %>%
-  gather("method", "value", -site_id)  
-
-anovaVCA(value ~ method + site_id, Data=as.data.frame(tow2.anova))
-
-
-tow2.lm1a <- tow2.anova %>% #mean_sea_tow2
-  mutate(method = relevel(factor(method, ordered = F), ref = "mean_uw")) %>% 
-  lm(value ~ method + site_id, data = .)
-
-anova(tow2.lm1a)
-summary(tow2.lm1a)
-#CI
-confint(tow2.lm1a)[c(1:4),]
-```
-
-
-# b) Rank Order
+# ? Rank Order
  
 ?? "rank order" - are coefficients similar across models, at least in sign (+/-)?
 
@@ -852,7 +871,7 @@ confint(tow2.lm1a)[c(1:4),]
 
 Models comparing various methods of estimating central tendency using sites w/ season-TOW2-TOD2 estimates.
 
-```{r}
+```{r, include=T}
 # # compare to tod2  
 # comp_to_tod2 <- comp_to_tod2 %>%
 #   drop_na() %>%
@@ -929,8 +948,38 @@ tow2 %>% lm(mean_uw ~ m_to_a1_a2 +  #m_to_truck +
 
 ```
 
+### --> compare diff method model predictions at each site (who do the predictions vary?)
+- use ~67 sites 
+- make scaterplot: Y: predictions, x: ?sites
+ - ?? look at R2, RMSE ??
+ 
+```{r}
+
+```
+
+
+
+# Temporal effects on mean estimates
+
+### --> 
+How do the seasonal/TOW/TOD effects impact annual mean UFP estimates relative to the method effects (~100-200 pt/cm3)
+-do this on 19 sites  [repeate what I’ve done before] using the individual level data (not the avg data)
+- Y ~ season + tow + tod + site_id 
+ 
+- if temporal effects are larger than effect of method, we need to weigh by that variable. If there’s not big differences by season, we don’t need to worry as much (What we’re really worried about is TOD)
+
+```{r}
+
+```
+
 
 
  
 # Compare trimmed means at AQS sites  
 if have 6 months of data, compare to the 6-mo estimate at AQS sites
+
+```{r}
+# repeat above w/ BC & compare to AQS site readings? is this data on server? 
+
+```
+

@@ -1,3 +1,5 @@
+#library(tidyverse)
+
 ###################################################################################
 ################################ VARIABLES ######################################## 
 ###################################################################################
@@ -39,9 +41,16 @@ model.digits <- 2
 ###################################################################################
 
 #function returns Table 1 summary statistics for a given dataset, with a column name describing group 
-t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",], 
+t1.fn <- function(data, 
                   #description variables
-                  column.name = "entire cohort") {  
+                  column.name = "") {  
+  
+  # data = dem1 %>%
+  #   filter(enrollment_yr == 1,
+  #     pollutant == "no2") %>%
+  #   filter(anydementia == 1)
+  
+  pacman::p_load(kableExtra)
   
   t1 <- data %>%
     dplyr::summarize(
@@ -54,16 +63,19 @@ t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",],
       male_n = sum(male),
       male_pct = round(male_n/N*100, 1),
       race_known_n = sum(!is.na(race)),
+      race_white_n = sum(race ==1, na.rm = T),
+      race_white_pct = round(race_white_n/race_known_n*100, 1),
       race_nonwhite_n = sum(race !=1, na.rm = T),
       race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
       edu_known_n = sum(!is.na(degree)),
       degree_known_n = sum(!is.na(degree)),
       degree0_n = sum(degree ==0, na.rm = T),
       degree0_pct = round(degree0_n/degree_known_n*100, 1),
+      #degree==1 is for GED or HS
       degree1_n = sum(degree ==1, na.rm = T),
       degree1_pct = round(degree1_n/degree_known_n*100, 1),
-      degree2_n = sum(degree ==2, na.rm = T),
-      degree2_pct = round(degree2_n/degree_known_n*100, 1),
+      # degree2_n = sum(degree ==2, na.rm = T),
+      # degree2_pct = round(degree2_n/degree_known_n*100, 1),
       degree3_n = sum(degree ==3, na.rm = T),
       degree3_pct = round(degree3_n/degree_known_n*100, 1),
       degree4_n = sum(degree ==4, na.rm = T),
@@ -122,40 +134,45 @@ t1.fn <- function(data=dem.bsl[dem.bsl$pollutant == "no2",],
       "Follow-up years (mean, SD)" = paste0(follow_up_yrs_mean, " (", follow_up_yrs_sd, ")"),
       "Entry age, years (median, IQR)" = paste0(age_entry_median, " (", age_entry_iqr, ")"),
       "Male (n, %)" = paste0(male_n, " (", male_pct, "%)"),
-      "Race, nonwhite (n, %)" = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
-      #"Beyond HS Education (n, %)" = paste0(edu_beyond_hs_n, " (", edu_beyond_hs_pct, "%)"),
-      "Degree, None (n, %)" = paste0(degree0_n, " (", degree0_pct, "%)"),
-      "Degree, GED (n, %)" = paste0(degree1_n, " (", degree1_pct, "%)"),
-      "Degree, HS (n, %)" = paste0(degree2_n, " (", degree2_pct, "%)"),
-      "Degree, Bachelor's (n, %)" = paste0(degree3_n, " (", degree3_pct, "%)"),
-      "Degree, Master's (n, %)" = paste0(degree4_n, " (", degree4_pct, "%)"),
-      "Degree, Doctorate (n, %)" = paste0(degree5_n, " (", degree5_pct, "%)"),
-      "Degree, Other (n, %)" = paste0(degree6_n, " (", degree6_pct, "%)"),
-      "Census Tract Income, $ (median, IQR)" = paste0(income_median, " (", income_iqr, ")"),
-      "Census Tract Income, < $35k (n, %)" = paste0(income1_n, " (", income1_pct, "%)"),
-      "Census Tract Income, $35-50k (n, %)" = paste0(income2_n, " (", income2_pct, "%)"),
-      "Census Tract Income, $50-75k (n, %)" = paste0(income3_n, " (", income3_pct, "%)"),
-      "Census Tract Income, > $75k (n, %)" = paste0(income4_n, " (", income4_pct, "%)"),
+      "Race (n, %)" = "",
+      "White" = paste0(race_white_n, " (", race_white_pct, "%)"),
+      "Nonwhite" = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
+      "Education (n, %)" = "",
+      "Less than High School" = paste0(degree0_n, " (", degree0_pct, "%)"),
+      "High School or GED" = paste0(degree1_n, " (", degree1_pct, "%)"),
+      #"High School" = paste0(degree2_n, " (", degree2_pct, "%)"),
+      "Bachelor's Degree" = paste0(degree3_n, " (", degree3_pct, "%)"),
+      "Master's Degree" = paste0(degree4_n, " (", degree4_pct, "%)"),
+      "Doctorate Degree" = paste0(degree5_n, " (", degree5_pct, "%)"),
+      "Other" = paste0(degree6_n, " (", degree6_pct, "%)"),
+      "Census Tract Income (n, %)" = "",
+      #"Census Tract Income, median, IQR" = paste0(income_median, " (", income_iqr, ")"),
+      "< $35k" = paste0(income1_n, " (", income1_pct, "%)"),
+      "$35-50k" = paste0(income2_n, " (", income2_pct, "%)"),
+      "$50-75k" = paste0(income3_n, " (", income3_pct, "%)"),
+      "> $75k" = paste0(income4_n, " (", income4_pct, "%)"),
       "APOE carrier (n, %)" = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
-      "Smoke, never (n, %)" = paste0(smoke_never_n, " (", smoke_never_pct, "%)"),
-      "Smoke, former (n, %)" = paste0(smoke_former_n, " (", smoke_former_pct, "%)"),
-      "Smoke, current (n, %)" = paste0(smoke_current_n, " (", smoke_current_pct, "%)"),
+      "Smoker (n, %)" = "",
+      "Never" = paste0(smoke_never_n, " (", smoke_never_pct, "%)"),
+      "Former" = paste0(smoke_former_n, " (", smoke_former_pct, "%)"),
+      "Current" = paste0(smoke_current_n, " (", smoke_current_pct, "%)"),
       "Regular exercise (n, %)" = paste0(exercise_regular_n, " (", exercise_regular_pct, "%)"),
-      #"BMI (median, IQR)" = paste0(bmi_median, " (", bmi_iqr, ")"),
-      "BMI, Underweight (n, %)" = paste0(bmi_under_n, " (", bmi_under_pct, "%)"),
-      "BMI, Normal (n, %)" = paste0(bmi_normal_n, " (", bmi_normal_pct, "%)"),
-      "BMI, Overweight (n, %)" = paste0(bmi_over_n, " (", bmi_over_pct, "%)"),
-      "BMI, Obese (n, %)" = paste0(bmi_obese_n, " (", bmi_obese_pct, "%)"),
-      "Hypertension (n, %)" = paste0(hypertension_n, " (", hypertension_pct, "%)"),
-      "Diabetes (n, %)" = paste0(diabetes_n, " (", diabetes_pct, "%)"),
-      "Cardiovascular Dz (n, %)" = paste0(cv_dis_n, " (", cv_dis_pct, "%)"),
-      "Heart Dz (n, %)" = paste0(heart_dis_n, " (", heart_dis_pct, "%)")
+      "BMI (n, %)" = "",
+      "Underweight" = paste0(bmi_under_n, " (", bmi_under_pct, "%)"),
+      "Normal" = paste0(bmi_normal_n, " (", bmi_normal_pct, "%)"),
+      "Overweight" = paste0(bmi_over_n, " (", bmi_over_pct, "%)"),
+      "Obese" = paste0(bmi_obese_n, " (", bmi_obese_pct, "%)"),
+      "Vascular Health (n, %)" = "",
+      "Hypertension" = paste0(hypertension_n, " (", hypertension_pct, "%)"),
+      "Diabetes" = paste0(diabetes_n, " (", diabetes_pct, "%)"),
+      "Cardiovascular Disease" = paste0(cv_dis_n, " (", cv_dis_pct, "%)"),
+      "Heart Disease" = paste0(heart_dis_n, " (", heart_dis_pct, "%)")
     ) %>%
     #get rid of repeat columns
     select(
       N, 
       #person_years,
-      "Follow-up years (mean, SD)":"Heart Dz (n, %)"
+      "Follow-up years (mean, SD)":"Heart Disease"
     ) #%>%
   
   # transpose
@@ -202,22 +219,19 @@ models.fn <- function(mydata = dem.w,
                        models,
                       surv.time2 = "age_end_exposure", 
                       surv.event = "dementia_now", 
-                      #outcome.text = "All-cause Dementia",
                       no2.var = "no2_10yr",
                       pm25.var = "pm25_10yr",
                       no2.units = my.no2.units,
                       pm25.units = my.pm25.units) {
   
   # mydata = dem.w
+  # models <- c("m1", "m3b", "m4b", "m5")
   # surv.time2 = "age_end_exposure"
   # surv.event = "dementia_now"
-  # outcome.text = "All-cause Dementia"
-  # myweights = 1
   # no2.var = "no2_10yr"
   # pm25.var = "pm25_10yr"
   # no2.units = my.no2.units
   # pm25.units = my.pm25.units
-  # models <- c("m1", "m5")
   
   #rename variables for fns
   mydata <- mydata %>%
@@ -238,13 +252,14 @@ models.fn <- function(mydata = dem.w,
       c("income",
         "edu",
         "birth_cohort",
+        "cohort",
         "smoke",
         "bmi"), 
       as.factor) %>%
     mutate(
       #adjust AP units
-      no2 = no2/no2.units,
-      pm25 = pm25/pm25.units,
+      no2 = as.double(no2/no2.units),
+      pm25 = as.double(pm25/pm25.units),
     )  
   
   #create a survival object
@@ -255,9 +270,8 @@ models.fn <- function(mydata = dem.w,
   
   #Model 1 (Reduced): Age (time axis), NO2 (time-varying) 
   if("m1" %in% models) {
-    m1 <- mydata %>%
-      coxph(s.dem ~ no2, 
-          data=., 
+    m1 <- coxph(s.dem ~ no2, 
+          data=mydata, 
           robust = T, 
           weights = model_wt)  
   
@@ -268,10 +282,9 @@ models.fn <- function(mydata = dem.w,
   if("m2" %in% models) {  
   #assuming missing values (e.g., APOE) are MCAR and doing a complete case analysis. This method can be bias if values are not MCAR.
   
-    m2 <- mydata %>%
-      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
+    m2 <- coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
               edu +  birth_cohort, 
-            data=., 
+            data=mydata, 
             robust = T,
             weights = model_wt) 
     
@@ -279,21 +292,33 @@ models.fn <- function(mydata = dem.w,
     }
   
   #M3 (extended): M2 + smoking + physical activity 
-  if("m3" %in% models) {
-    m3 <- mydata %>%
-      coxph(s.dem ~ no2 + 
-              male + edu + race_white + income + birth_cohort + strata(apoe) + 
+  if("m3a" %in% models) {
+    m3a <- mydata %>%
+      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + birth_cohort + 
               smoke + exercise_reg, 
             data=., 
             robust = T,
             weights = model_wt) 
     
-    m3.s <- m3 %>% summary()
+    m3a.s <- m3a %>% summary()
     }
   
-  #Model 4 (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
-  if("m4" %in% models) {
-    m4 <- mydata %>%
+  #M3b (extended + ACT cohort): M2 + smoking + physical activity + ACT cohort
+  if("m3b" %in% models) {
+    m3b <-  mydata %>%
+      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + birth_cohort +
+              smoke + exercise_reg  + cohort,
+            data=.,
+            robust = T,
+            weights = model_wt)
+
+    m3b.s <- m3b %>% summary()
+  }
+  
+  
+  #Model 4a (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
+  if("m4a" %in% models) {
+    m4a <- mydata %>%
       coxph(s.dem ~ no2 + 
               male + edu + race_white + income + birth_cohort + strata(apoe) + 
               smoke + exercise_reg +
@@ -302,8 +327,24 @@ models.fn <- function(mydata = dem.w,
             robust = T,
             weights = model_wt) 
     
-    m4.s <- m4 %>% summary()
+    m4a.s <- m4a %>% summary()
   }
+  
+  #Model 4b (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI + CASI score
+  if("m4b" %in% models) {
+    m4b <- mydata %>%
+      coxph(s.dem ~ no2 + 
+              male + edu + race_white + income + birth_cohort + strata(apoe) + 
+              smoke + exercise_reg +
+              Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi +
+              casi_irt, 
+            data=., 
+            robust = T,
+            weights = model_wt) 
+    
+    m4b.s <- m4b %>% summary()
+  }
+  
   
   #Model 5 (APOE interaction): M2 + NO2*APOE
   if("m5" %in% models) {
@@ -363,23 +404,6 @@ models.fn <- function(mydata = dem.w,
     # combine all HRs
     hrs <- rbind(hrs, df)
     
-     
-    
-    # ##label model output
-    # if (substr(models.s[i], 2, 2) %in% 1:4) {
-    #   hrs$model[i] <- models.s[i]
-    # }
-    # ## m5
-    # if(substr(models.s[i], 2, 2) == 5) {
-    #   hrs$model[i] <- "noapoe"
-    #   hrs$model[i+1] <- "apoe"
-    # }
-    # ## m6
-    # else{
-    #   #n <- nrow(hr) + 1
-    #   hrs$model[nrow(hrs)] <- models.s[i]
-    # }
-    
   }
   
   ##add exposure period labels  
@@ -401,6 +425,9 @@ models.fn <- function(mydata = dem.w,
 
 hr.plot <- function(mydata,
                     outcome.var) {
+  # mydata=dem_hrs
+  # outcome.var = "Dementia"
+  
   p <- mydata %>%
     ggplot(aes(x=exposure, 
                y=hr, ymin=lower_limit, ymax=upper_limit,
@@ -410,18 +437,21 @@ hr.plot <- function(mydata,
     geom_hline(yintercept = 1, linetype=2) + 
     labs(y= "Hazard Ratio (95% CI)",
          x = "NO2 Exposure Period",
-         title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " models, using different exposure time periods")
+         title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " models,\nusing different exposure time periods")
          ) + 
     facet_wrap(~Model, 
-               labeller = "label_both",
+               labeller = "label_both", 
+               scales = "free_y",
                #strip.position="left",
-               nrow=7) +
+               ncol=2) +
     theme(
       legend.position = "none",
       axis.ticks.y=element_blank()
       ) +  
   coord_flip() 
 
+  #p
+  
   return(p)
 }
 

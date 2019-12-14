@@ -52,91 +52,93 @@ t1.fn <- function(data,
   
   pacman::p_load(kableExtra)
   
+  round.var <- 0
+  
   t1 <- data %>%
     dplyr::summarize(
       N = n(),
       #person_years = nrow(data),
-      follow_up_yrs_mean = round(mean(fu_yrs), 1), 
-      follow_up_yrs_sd = round(sd(fu_yrs), 1),
-      age_entry_median = round(median(age_intake), 1),
-      age_entry_iqr = round(IQR(age_intake), 1),
+      follow_up_yrs_mean = round(mean(fu_yrs), round.var), 
+      follow_up_yrs_sd = round(sd(fu_yrs), round.var),
+      age_entry_median = round(median(age_intake), round.var),
+      age_entry_iqr = round(IQR(age_intake), round.var),
       male_n = sum(male),
-      male_pct = round(male_n/N*100, 1),
+      male_pct = round(male_n/N*100, round.var),
       race_known_n = sum(!is.na(race)),
       race_white_n = sum(race ==1, na.rm = T),
-      race_white_pct = round(race_white_n/race_known_n*100, 1),
-      race_nonwhite_n = sum(race !=1, na.rm = T),
-      race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
+      race_white_pct = round(race_white_n/race_known_n*100, round.var),
+      # race_nonwhite_n = sum(race !=1, na.rm = T),
+      # race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
       edu_known_n = sum(!is.na(degree)),
       degree_known_n = sum(!is.na(degree)),
       degree0_n = sum(degree ==0, na.rm = T),
-      degree0_pct = round(degree0_n/degree_known_n*100, 1),
+      degree0_pct = round(degree0_n/degree_known_n*100, round.var),
       #degree==1 is for GED or HS
       degree1_n = sum(degree ==1, na.rm = T),
-      degree1_pct = round(degree1_n/degree_known_n*100, 1),
+      degree1_pct = round(degree1_n/degree_known_n*100, round.var),
       # degree2_n = sum(degree ==2, na.rm = T),
       # degree2_pct = round(degree2_n/degree_known_n*100, 1),
       degree3_n = sum(degree ==3, na.rm = T),
-      degree3_pct = round(degree3_n/degree_known_n*100, 1),
+      degree3_pct = round(degree3_n/degree_known_n*100, round.var),
       degree4_n = sum(degree ==4, na.rm = T),
-      degree4_pct = round(degree4_n/degree_known_n*100, 1),
+      degree4_pct = round(degree4_n/degree_known_n*100, round.var),
       degree5_n = sum(degree ==5, na.rm = T),
-      degree5_pct = round(degree5_n/degree_known_n*100, 1),
+      degree5_pct = round(degree5_n/degree_known_n*100, round.var),
       degree6_n = sum(degree ==6, na.rm = T),
-      degree6_pct = round(degree6_n/degree_known_n*100, 1),
+      degree6_pct = round(degree6_n/degree_known_n*100, round.var),
       income_median = median(tr_med_inc_hshld, na.rm = T),
-      income_iqr = round(IQR(tr_med_inc_hshld, na.rm = T), 1),
+      income_iqr = round(IQR(tr_med_inc_hshld, na.rm = T), round.var),
       income_cat_known_n = sum(!is.na(income_cat)),
       income1_n = sum(income_cat==1, na.rm=T),
-      income1_pct = round(income1_n/income_cat_known_n*100, 1),
+      income1_pct = round(income1_n/income_cat_known_n*100, round.var),
       income2_n = sum(income_cat==2, na.rm=T),
-      income2_pct = round(income2_n/income_cat_known_n*100, 1),
+      income2_pct = round(income2_n/income_cat_known_n*100, round.var),
       income3_n = sum(income_cat==3, na.rm=T),
-      income3_pct = round(income3_n/income_cat_known_n*100, 1),
+      income3_pct = round(income3_n/income_cat_known_n*100, round.var),
       income4_n = sum(income_cat==4, na.rm=T),
-      income4_pct = round(income4_n/income_cat_known_n*100, 1),
+      income4_pct = round(income4_n/income_cat_known_n*100, round.var),
       apoe_known_n = sum(!is.na(apoe)),
       apoe_carrier_n = sum(apoe, na.rm=T),
-      apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n*100, 1),
+      apoe_carrier_pct = round(apoe_carrier_n/apoe_known_n*100, round.var),
       smoke_known_n = sum(!is.na(smoke)),
       smoke_never_n = sum(smoke==0, na.rm = T),
-      smoke_never_pct = round(smoke_never_n/smoke_known_n*100, 1),
+      smoke_never_pct = round(smoke_never_n/smoke_known_n*100, round.var),
       smoke_former_n = sum(smoke==1, na.rm = T),
-      smoke_former_pct = round(smoke_former_n/smoke_known_n*100, 1),
+      smoke_former_pct = round(smoke_former_n/smoke_known_n*100, round.var),
       smoke_current_n = sum(smoke==2, na.rm = T),
-      smoke_current_pct = round(smoke_current_n/smoke_known_n*100, 1),
+      smoke_current_pct = round(smoke_current_n/smoke_known_n*100, round.var),
       exercise_regular_known_n = sum(!is.na(exercise_reg)),
       exercise_regular_n = sum(exercise_reg==1, na.rm = T),
-      exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, 1),
+      exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, round.var),
       bmi_known_n = sum(!is.na(bmi4)),
       bmi_under_n = sum(bmi4==0, na.rm = T),
-      bmi_under_pct = round(bmi_under_n/bmi_known_n*100, 1),
+      bmi_under_pct = round(bmi_under_n/bmi_known_n*100, round.var),
       bmi_normal_n = sum(bmi4==1, na.rm = T),
-      bmi_normal_pct = round(bmi_normal_n/bmi_known_n*100, 1),
+      bmi_normal_pct = round(bmi_normal_n/bmi_known_n*100, round.var),
       bmi_over_n = sum(bmi4==2, na.rm = T),
-      bmi_over_pct = round(bmi_over_n/bmi_known_n*100, 1),
+      bmi_over_pct = round(bmi_over_n/bmi_known_n*100, round.var),
       bmi_obese_n = sum(bmi4==3, na.rm = T),
-      bmi_obese_pct = round(bmi_obese_n/bmi_known_n*100, 1),
+      bmi_obese_pct = round(bmi_obese_n/bmi_known_n*100, round.var),
       hypertension_known_n = sum(!is.na(Hypertension)),
       hypertension_n = sum(Hypertension == 1, na.rm=T),
-      hypertension_pct = round(hypertension_n/hypertension_known_n*100, 1),
+      hypertension_pct = round(hypertension_n/hypertension_known_n*100, round.var),
       diabetes_known_n = sum(!is.na(Diabetes)),
       diabetes_n = sum(Diabetes == 1, na.rm=T),
-      diabetes_pct = round(diabetes_n/diabetes_known_n*100, 1),
+      diabetes_pct = round(diabetes_n/diabetes_known_n*100, round.var),
       cv_dis_known_n = sum(!is.na(CV_DIS)),
       cv_dis_n = sum(CV_DIS == 1, na.rm=T),
-      cv_dis_pct = round(cv_dis_n/cv_dis_known_n*100, 1),
+      cv_dis_pct = round(cv_dis_n/cv_dis_known_n*100, round.var),
       heart_dis_known_n = sum(!is.na(Heart_Dis)),
       heart_dis_n = sum(Heart_Dis == 1, na.rm=T),
-      heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, 1)
+      heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, round.var)
     ) %>%
     mutate(
       "Follow-up years (mean, SD)" = paste0(follow_up_yrs_mean, " (", follow_up_yrs_sd, ")"),
       "Entry age, years (median, IQR)" = paste0(age_entry_median, " (", age_entry_iqr, ")"),
       "Male (n, %)" = paste0(male_n, " (", male_pct, "%)"),
-      "Race (n, %)" = "",
-      "White" = paste0(race_white_n, " (", race_white_pct, "%)"),
-      "Nonwhite" = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
+      #"Race (n, %)" = "",
+      "White (n, %)" = paste0(race_white_n, " (", race_white_pct, "%)"),
+      #"Nonwhite" = paste0(race_nonwhite_n, " (", race_nonwhite_pct, "%)"),
       "Education (n, %)" = "",
       "Less than High School" = paste0(degree0_n, " (", degree0_pct, "%)"),
       "High School or GED" = paste0(degree1_n, " (", degree1_pct, "%)"),
@@ -423,6 +425,7 @@ models.fn <- function(mydata = dem.w,
 
 # example code: https://datascienceplus.com/lattice-like-forest-plot-using-ggplot2-in-r/ 
 
+############## old plot FN - DELETE? ##############  
 hr.plot <- function(mydata,
                     outcome.var) {
   # mydata=dem_hrs
@@ -453,6 +456,124 @@ hr.plot <- function(mydata,
   #p
   
   return(p)
+}
+
+
+############## NEW PLOTS ##############
+###############################################################################
+#returns HR plot for models.fn()$table_of_no2_HRs  
+# example code: https://datascienceplus.com/lattice-like-forest-plot-using-ggplot2-in-r/ 
+
+## reduced & extended models, 10 yr exposure
+hr.plot.m1_m6 <- function(dt,
+                          outcome.var) {
+  
+  # dt = dem_all_hrs %>%
+  #   filter(Model != "2" |
+  #            (Model == "2" & Description == "Primary"))
+  # outcome.var <- "dementia"
+
+  p <- dt %>%
+    #only keep models of interest
+    filter(Model != "2" |
+             (Model == "2" & Description == "Primary")) %>%
+    #plot
+    ggplot(aes(x=model_description, 
+               y=hr, ymin=lower_limit, ymax=upper_limit,
+               #col=model_description,
+               linetype = (model_description == "2. Primary")
+    )) +
+    geom_pointrange() + 
+    geom_errorbar() +
+    geom_hline(yintercept = 1, linetype=2) + 
+    labs(y= "Hazard Ratio (95% CI)",
+         x = "Model",
+         #col = "Model Description",
+         linetype = "Primary Model",
+         title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " incidence\nusing reduced, primary and extended models"),
+         subtitle = "10 yr exposure"
+    )  +
+    theme(legend.position = "bottom") +  
+    coord_flip()  #+ 
+    #scale_x_discrete( aes(labels=hr),
+     # position="top"
+    #  )
+  
+  #p
+  
+  return(p)
+  
+}
+
+
+## different exposure periods
+hr.plot.diff.expo.prds <- function(dt,
+                                   outcome.var) {
+  # dt <- dem_all_hrs %>%
+  # filter(Model == "2",
+  #        Description %in% c("Primary", "Different exposure period")
+  #        )
+  
+  p <- dt %>%
+    filter(Model == "2",
+           Description %in% c("Primary", "Different exposure period")) %>%
+    
+    ggplot(aes(x=exposure, 
+               y=hr, ymin=lower_limit, ymax=upper_limit,
+               #col=Description,
+               linetype = (model_description == "2. Primary")
+    )) +
+    geom_pointrange() + 
+    geom_errorbar() +
+    geom_hline(yintercept = 1, linetype=2) + 
+    labs(y= "Hazard Ratio (95% CI)",
+         x = "Exposure Period",
+         #col = "Model Description",
+         linetype = "Primary Model",
+         title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " incidence\nusing different exposure periods"),
+         subtitle = "Model 2"
+    )  +
+    theme(legend.position = "bottom") +  
+    coord_flip()  
+  
+  return(p)
+  
+}
+
+# other sensitivity analyse 
+hr.plot.other.models <- function(dt,
+                                 outcome.var) {
+  # dt = dem_all_hrs %>%
+  # filter(Model == "2",
+  #        Description != "Different exposure period"
+  #        ) 
+  
+  p = dt %>%
+    filter(Model == "2",
+           Description != "Different exposure period") %>%
+    mutate(
+      Description = relevel(as.factor(Description), ref = "Primary")
+    ) %>%
+    ggplot(aes(x=Description, 
+               y=hr, ymin=lower_limit, ymax=upper_limit,
+               #col=Description,
+               linetype = (model_description == "2. Primary")
+    )) +
+    geom_pointrange() + 
+    geom_errorbar() +
+    geom_hline(yintercept = 1, linetype=2) + 
+    labs(y= "Hazard Ratio (95% CI)",
+         x = "Model Modification",
+         #col = "Model Description",
+         linetype = "Primary Model",
+         title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " incidence\nfor other sensitivity analyses"),
+         subtitle = "Model 2"
+    )  +
+    theme(legend.position = "bottom") +  
+    coord_flip()  
+  
+  return(p)
+  
 }
 
 

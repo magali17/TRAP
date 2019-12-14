@@ -35,19 +35,19 @@ theme_set(theme_linedraw() + theme(legend.position="bottom"))
 source("A2.0.1_Var&Fns.R")
 
 #load stop average data 
-mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191021.rda")) %>% 
+mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191112.rda")) %>% 
   #only keep relevant particle values
-  filter(variable %in% c("ufp_pt_noscreen_ct_cm3",
-                         "ufp_disc_ct_cm3",
+  filter(variable %in% c("ptrak_ct_cm3",
+                         "bc_880_ng_m3",
+                         #"ufp_disc_ct_cm3",
                           "ufp_scan_10_421_nm_ct_cm3",
-                         "ufp_scan_20_421_nm_ct_cm3",
-                          "bc_ir880nm_ng_m3",
-                          "neph_bscat_per_m"
+                         "scan_20_421_nm_ct_cm3_median"
+                          
                          )
          )
 
 
-mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191021.rda"))  
+mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191112.rda"))  
 
 #load overnight AQS site data 
 ptrak <- readRDS(file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda"))
@@ -75,12 +75,7 @@ Data used in this report are those greater than the `r myquantile_lower` quantil
 total_site_visits <- nrow(mm.wide)
 
 instrument_readings <- mm.wide %>%
-  select(ufp_disc_ct_cm3, 
-         ufp_pt_noscreen_ct_cm3, 
-         ufp_scan_10_421_nm_ct_cm3,
-         #ufp_scan_20_421_nm_ct_cm3,
-         bc_ir880nm_ng_m3, 
-         neph_bscat_per_m)  
+  select(bc_880_ng_m3_median: scan_20_421_nm_ct_cm3_median)
 
 unique_instruments <- dim(instrument_readings)[2]
 
@@ -119,7 +114,7 @@ kable(data_completeness, digits = 1, caption = "Data Completeness")
 mm %>%
   filter(
     #grepl(pattern = "ufp|bc", x = variable),
-    variable != "ufp_scan_20_421_nm_ct_cm3"
+    variable != "scan_20_421_nm_ct_cm3_median"
          ) %>%
   #1 record per variable combination - to reduce file size
   select(date, instrument_id, variable) %>% 
@@ -132,7 +127,7 @@ mm %>%
 
 ```
 
-```{r}
+```{r, include=F}
 #stops over time 
 mm %>%  
   #1 record per date-site_no to reduce file size
@@ -146,6 +141,8 @@ mm %>%
   labs(title = paste("Sites visited over time", subtitle= paste(start.date, "-", end.date))) 
   
 ```
+
+#### ---> replace w/ plot on A2_UK?
 
 ```{r}
 #stops by season/day of week/time of day/hour 
@@ -210,7 +207,8 @@ mm %>%
     #select only values from desired instruments
     filter(instrument_id %in% c("PMPT_93", "PMPT_4")) %>%
              #make wide format
-             spread(instrument_id, value) %>%
+  select(-mean_value) %>%           
+  spread(instrument_id, median_value) %>%
              #only look at rows where have observations for both instruments
              drop_na("PMPT_93", "PMPT_4") %>%
   filter(PMPT_93 <= quantile(PMPT_93, plot_quantile, na.rm = T),
@@ -225,8 +223,9 @@ mm %>%
 mm %>%
     #select only values from desired instruments
     filter(instrument_id %in% c("PMPT_94", "PMPT_4")) %>%
-             #make wide format
-             spread(instrument_id, value) %>%
+  select(-mean_value) %>%                      
+  #make wide format
+             spread(instrument_id, median_value) %>%
              #only look at rows where have observations for both instruments
              drop_na("PMPT_94", "PMPT_4") %>%
   filter(PMPT_94 <= quantile(PMPT_94, plot_quantile, na.rm = T),
@@ -248,23 +247,15 @@ Excluding top 1% of data.
 
 mm.wide %>%
   #take out extreme values that make R2 look very large
-  filter(ufp_scan_20_421_nm_ct_cm3 <= quantile(ufp_scan_20_421_nm_ct_cm3, plot_quantile, na.rm = T),
-         ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, plot_quantile, na.rm = T)
+  filter(scan_20_421_nm_ct_cm3_median <= quantile(scan_20_421_nm_ct_cm3_median, plot_quantile, na.rm = T),
+         ptrak_ct_cm3_median <= quantile(ptrak_ct_cm3_median, plot_quantile, na.rm = T)
          ) %>%
-  colo.plot.wide.data(data.wide = ., x.variable = "ufp_scan_20_421_nm_ct_cm3",
-                      y.variable = "ufp_pt_noscreen_ct_cm3", mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"))
+  colo.plot.wide.data(data.wide = ., x.variable = "scan_20_421_nm_ct_cm3_median",
+                      y.variable = "ptrak_ct_cm3_median", mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"))
 
 ```
 
-
-### DiscMini's
-
-```{r} 
-colo.plot(primary.instrument = "PMDISC_3", 
-          secondary.instrument = "PMDISC_8")
-
-```
-
+ 
 ### NanoScans
 
 ```{r} 
@@ -283,17 +274,7 @@ colo.plot(primary.instrument = "BC_63",
 
 ```
 
-### Neph   
-PM25_176 has always/mostly been used.
-
-```{r}
-colo.plot(primary.instrument = "PM25_176", 
-          secondary.instrument = "PM25_205",
-          int.digits=8,
-          rmse.digits = 8)
-
-```
-
+ 
 ## Lab/Garage Collocations
 
 ### --> see Lab collocations in database: Imports table/ lab0, lab C, or Rm 114 
@@ -357,21 +338,21 @@ anovaVCA(Conc_pt_cm3 ~ time_of_day + time_of_week + season,
 ```{r}
 mm %>%
   filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
-  ggplot(aes(x=hour, y=value)) + 
+  ggplot(aes(x=hour, y=median_value)) + 
   geom_boxplot(aes(group=hour, fill=time_of_day)) +
   geom_smooth(se=F, method = "loess") + 
   facet_wrap(~aqs_location) # + time_of_week
  
 mm %>%
   filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
-  ggplot(aes(x=day, y=value)) + 
+  ggplot(aes(x=day, y=median_value)) + 
   geom_boxplot() + 
   geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") + 
   facet_wrap(~aqs_location)
 
 mm %>%
   filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
-  ggplot(aes(x=as.numeric(month), y=value)) + 
+  ggplot(aes(x=as.numeric(month), y=median_value)) + 
   geom_boxplot(aes(group=month)) + 
   geom_smooth(aes(), se=F, method = "loess") + 
   facet_wrap(~aqs_location) 
@@ -387,8 +368,8 @@ mm %>%
 ```{r}
 #month
 mm %>%
-  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
-  ggplot(aes(x=date, y=value)) + 
+  filter(variable == "ptrak_ct_cm3") %>%
+  ggplot(aes(x=date, y=median_value)) + 
   geom_boxplot(aes(fill=season, group=month)) + 
   geom_smooth(aes(), se=F, method = "loess") +  
   facet_wrap(~variable, scales="free") +  #, ncol = 2
@@ -399,8 +380,8 @@ mm %>%
 
 #day
 mm %>%
-  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
-  ggplot(aes(x=day, y=value)) + 
+  filter(variable== "ptrak_ct_cm3") %>%
+  ggplot(aes(x=day, y=median_value)) + 
   geom_boxplot(aes(fill=time_of_week)) + 
   geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
   facet_wrap(~variable, scales="free") + 
@@ -411,8 +392,8 @@ mm %>%
  
 #hour
 mm %>%
-  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
-  ggplot(aes(x=hour, y=value)) + 
+  filter(variable== "ptrak_ct_cm3") %>%
+  ggplot(aes(x=hour, y=median_value)) + 
   geom_boxplot(aes(fill=time_of_day, group=hour)) + 
   geom_smooth(aes(), se=F, method = "loess") +  
   facet_wrap(~variable, scales="free") + #, ncol = 3
@@ -430,8 +411,8 @@ mm %>%
 
 ```{r}
 mm %>%
- filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
-  ggplot(aes(x=site_no, y=value)) + 
+ filter(variable== "ptrak_ct_cm3") %>%
+  ggplot(aes(x=site_no, y=median_value)) + 
   geom_point(alpha=0.2, aes(colour=route)) +   
   geom_smooth( se=F, method = "loess") +  
   facet_wrap(~variable, scales="free", ncol = 3) + 
@@ -450,7 +431,7 @@ mm %>%
 mm.w.geo <- mm.wide %>% 
   # geocovariates
   select(arrival_time:season,
-         ufp_pt_noscreen_ct_cm3,
+         ptrak_ct_cm3_median,
          m_to_a1:m_to_a3,
         #airport, largest airport
         m_to_airp, #m_to_l_airp,
@@ -473,8 +454,8 @@ mm.geo <- gather(mm.w.geo, geocovariate, value, m_to_a1:m_to_a1_or_a2)
 geo_quantile <- 0.99
 
 mm.geo %>%
-  filter(ufp_pt_noscreen_ct_cm3 <= quantile(ufp_pt_noscreen_ct_cm3, geo.quantile, na.rm = T)) %>%
-  ggplot(aes(x=value, y=ufp_pt_noscreen_ct_cm3)) + 
+  filter(ptrak_ct_cm3_median <= quantile(ptrak_ct_cm3_median, geo_quantile, na.rm = T)) %>%
+  ggplot(aes(x=value, y=ptrak_ct_cm3_median)) + 
   geom_point(alpha=0.3) + 
   geom_smooth( se=F, method = "loess") +  
   facet_wrap(~geocovariate, scales = "free_x") + 
@@ -492,25 +473,25 @@ variability: error > location > time_of_week > season > time_of_day
 
 ```{r}
 mm %>%
-  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
-lm(value ~ factor(hour) + factor(day, ordered = F) + factor(month, ordered = F) + site_id, data=.) %>%
+  filter(variable == "ptrak_ct_cm3") %>%
+lm(median_value ~ factor(hour) + factor(day, ordered = F) + factor(month, ordered = F) + site_id, data=.) %>%
   summary()
 
 mm %>%
-  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
-lm(value ~ time_of_day + time_of_week + season + site_id, data=.) %>%
+  filter(variable == "ptrak_ct_cm3") %>%
+lm(median_value ~ time_of_day + time_of_week + season + site_id, data=.) %>%
   summary()
 
 mm %>%
-  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  filter(variable == "ptrak_ct_cm3") %>%
   as.data.frame() %>%
- anovaVCA(value ~ hour + day + month + site_id, 
+ anovaVCA(median_value ~ hour + day + month + site_id, 
          Data=.) 
 
 mm %>%
-  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  filter(variable == "ptrak_ct_cm3") %>%
   as.data.frame() %>%
-  anovaVCA(value ~ time_of_day + time_of_week + season + site_id, 
+  anovaVCA(median_value ~ time_of_day + time_of_week + season + site_id, 
          Data=.)  
 
 
@@ -523,12 +504,9 @@ UFPs are poorly correlated with PM2.5 & BC
 
 ```{r}
 mm.wide %>%
-  select(disc = ufp_disc_ct_cm3, 
-         pt = ufp_pt_noscreen_ct_cm3, 
-         pt_screen = ufp_scan_10_421_nm_ct_cm3, 
-         ns = ufp_scan_20_421_nm_ct_cm3, 
-         bc = bc_ir880nm_ng_m3, 
-         neph = neph_bscat_per_m) %>%
+  select(pt = ptrak_ct_cm3_median, 
+         ns_20_421 = scan_20_421_nm_ct_cm3_median, 
+         bc = bc_880_ng_m3_median) %>%
   cor(method = "pearson",
       use ="complete.obs") %>%
   corrplot::corrplot(method="color", 

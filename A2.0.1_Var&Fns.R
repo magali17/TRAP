@@ -10,7 +10,7 @@ myquantile_lower <- 0.00
 myquantile_upper <- 1.00 
 
 #trim
-trim_quantile <- 0.05
+trim_quantile <- 0.05 #0.05
 
 #sampling dates
 start.date = "2019-02-22"
@@ -31,6 +31,7 @@ night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
 
 colo.plot <- function(mydata=mm, 
                       primary.instrument, secondary.instrument, 
+                      value_mean_median = "median_value",
                       int.digits = 0, 
                       r2.digits = 2, 
                       rmse.digits = 0) {
@@ -39,6 +40,8 @@ colo.plot <- function(mydata=mm,
   data.wide <- mydata %>% 
     #select only values from desired instruments
     filter(instrument_id %in% c(primary.instrument, secondary.instrument)) %>%
+    rename(value = value_mean_median) %>%
+    select(-mean_value) %>%
              #make wide format
              spread(instrument_id, value) %>% 
              #only look at rows where have observations for both instruments
@@ -109,10 +112,11 @@ colo.plot.wide.data <- function(data.wide=mm.wide,
              sqrt() %>%
              round(digits = rmse.digits)
            
-           #compare primary & secondary instrument agreement 
+           #compare  
            data.wide %>%
              ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
-             geom_point(alpha=0.3, aes(colour = route)) + 
+             geom_point(alpha=0.3, aes(#colour = route
+                                       )) + 
              geom_abline(intercept = 0, slope = 1) +
              geom_smooth(method = "lm", aes(fill="lm")) + 
              labs(fill="", 
@@ -262,9 +266,38 @@ ufp_by_method <- function(dt,
     geom_boxplot(aes( fill = route), alpha=0.3) +
     geom_point(aes(shape=method)) + 
     theme(axis.text.x = element_text(angle = 90)) + 
-    labs(title = paste0("Site mean/median UFP for ", .months.sampled[1], " - ", .months.sampled[length(.months.sampled)], " (Spring - Winter), n = ", n, " sites ", add.to.title))
+    labs(title = paste0("Site mean UFP for ", .months.sampled[1], " - ", .months.sampled[length(.months.sampled)], " (Spring - Winter), n = ", n, " sites ", add.to.title),
+         y = "UFP (pt/cm3)")
    
   return(ufp_by_site)
   
 }
+
+
+####################################################################################################
+#returns dataset with yhat (predictions) column
+
+save.pred.fn <- function(dt, 
+                         y_string,
+                         #x_string = "pop_s15000 + lu_comm_p15000 + lu_resi_p15000 + tl_s15000 +  lu_industrial_p15000 + ndvi_q50_a02500 + m_to_coast "
+                         x_string = "m_to_a1_a2 + m_to_airp + m_to_rr + elev_elevation + pop_s01000"
+                         ) {
+  
+  my.formula <- formula(paste0(y_string, "~", x_string))
+  
+  lm1 <- lm(my.formula, data = dt)
+  
+  #save predictions (yhat)
+  dt$yhat = predict(lm1) 
+  
+  names(dt)[names(dt) == "yhat"] <- paste0("yhat_", y_string)
+  
+  return(dt)
+  
+}
+
+
+####################################################################################################
+
+
 

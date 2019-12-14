@@ -31,16 +31,25 @@ source("A2.0.1_Var&Fns.R")
 ############################ read in data ################################################
 
 #mobile monitoring 
-mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191021.rda")) %>%
+mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191112.rda")) %>%
   #drop unwanted variable values to reduce data size
-  filter(!variable %in% c("gps_lat",
-                          "gps_long",
-                          #"ufp_pt_screen_ct_cm3",
-                          "ufp_disc_med_size_nm",
-                          "bc_uv375nm_ng_m3", #this is not total BC
-                          "ufp_scan_20_5_ct_cm3" #don't need this bin
-                          )
-         )
+  filter(
+    # !variable %in% c("gps_lat",
+    #                       "gps_long",
+    #                       #"ufp_pt_screen_ct_cm3",
+    #                       "ufp_disc_med_size_nm",
+    #                       "bc_uv375nm_ng_m3", #this is not total BC
+    #                       "ufp_scan_20_5_ct_cm3" #don't need this bin
+    #                       )
+    variable %in% c("bc_ir880nm_ng_m3", "ufp_pt_noscreen_ct_cm3", 
+                    "ufp_scan_11_5_ct_cm3", "ufp_scan_15_4_ct_cm3", "ufp_scan_ct_cm3")
+    )  %>%
+  mutate(
+    variable = recode_factor(factor(variable), 
+                              "bc_ir880nm_ng_m3" = "bc_880_ng_m3",
+                              "ufp_pt_noscreen_ct_cm3" = "ptrak_ct_cm3"
+                             )
+    )
 
 #read in current locations
 site_ids <- read.csv(file.path("Data", "Aim 2", "Mobile Monitoring", "locations_190715.csv")) %>%
@@ -50,6 +59,8 @@ site_ids <- read.csv(file.path("Data", "Aim 2", "Mobile Monitoring", "locations_
   unique()
 
 #### --> update file later: there are 310 site_ids and in mm_full. There should be 309.           
+# We stopped sampling MS0398  and switched to MS0601 which is fairly close
+
 
 
 
@@ -68,9 +79,9 @@ mm_full <- mm_full %>% left_join(site_no)
 #relabel instruments that were incorrectly labeled
 mm_full <- mm_full %>%
   mutate(instrument_id = ifelse(instrument_id == "BC_0063", "BC_63",
-                                ifelse(instrument_id == "CO_2", "CO_3",
+                                #ifelse(instrument_id == "CO_2", "CO_3",
                                        ifelse(instrument_id == "PMSCAN_1", "PMSCAN_3",
-                                              instrument_id)))
+                                              instrument_id)) #)
   )
 
 #take avg of each stop to REDUCE FILE SIZE
@@ -84,7 +95,9 @@ mm <- mm_full %>%
   ## don't include duration_sec b/c for some reason, some stops have 2 (or more?) entries @ same time, but diff durations (? GPS error??) and this creates multiple rows per sample
   group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, arrival_time, instrument_id, variable, site_no #duration_sec
            ) %>%
-  summarize(value = median(value, na.rm = T)) %>%
+  summarize(median_value = median(value, na.rm = T),
+            mean_value = mean(value, na.rm = T)
+            ) %>%
   ungroup()
 
 
@@ -118,28 +131,39 @@ mm <- mm %>%
   add.temporal.variables(data = ., date.var = "arrival_time")
 
  
-#create NanoScan counts (20-420 nm) (ptraks: 20-1000 nm)
-temp <- mm %>% 
+#create NanoScan counts (20-420 nm) (~similar to ptraks: 20-1000 nm)
+ns_mean_values <- mm %>% 
   #look at variables from NanoScan
   filter(grepl("scan", variable)) %>%
+  # drop median_value for now since spread fn is more complex if both mean_value and median_value
+  select(-median_value) %>%
   #make wide format to calculate the difference
-  spread(variable, value) %>%
-  mutate(
-    ufp_scan_20_421_nm_ct_cm3 = ufp_scan_ct_cm3 - ufp_scan_11_5_ct_cm3 - ufp_scan_15_4_ct_cm3
-  ) %>% 
-  rename(
-    ufp_scan_10_421_nm_ct_cm3 = ufp_scan_ct_cm3
-  ) %>%
+  spread(variable, mean_value) %>%
+  mutate(ufp_scan_20_421_nm_ct_cm3 = ufp_scan_ct_cm3 - ufp_scan_11_5_ct_cm3 - ufp_scan_15_4_ct_cm3) %>% 
+  rename(ufp_scan_10_421_nm_ct_cm3 = ufp_scan_ct_cm3) %>%
   select( - ufp_scan_11_5_ct_cm3, 
           -ufp_scan_15_4_ct_cm3) %>%
   #make back to long forma
-  gather("variable", "value", ufp_scan_10_421_nm_ct_cm3:ufp_scan_20_421_nm_ct_cm3)
+  gather("variable", "mean_value", ufp_scan_10_421_nm_ct_cm3:ufp_scan_20_421_nm_ct_cm3)
+
+# same as above but with medians
+ns_median_values <- mm %>% 
+  filter(grepl("scan", variable)) %>%
+  select(-mean_value) %>%
+  spread(variable, median_value) %>%
+  mutate(ufp_scan_20_421_nm_ct_cm3 = ufp_scan_ct_cm3 - ufp_scan_11_5_ct_cm3 - ufp_scan_15_4_ct_cm3) %>% 
+  rename(ufp_scan_10_421_nm_ct_cm3 = ufp_scan_ct_cm3) %>%
+  select( - ufp_scan_11_5_ct_cm3, 
+          -ufp_scan_15_4_ct_cm3) %>%
+  gather("variable", "median_value", ufp_scan_10_421_nm_ct_cm3:ufp_scan_20_421_nm_ct_cm3)
+
+ns_values <- left_join(ns_mean_values, ns_median_values) 
 
 #replace old nanoscan bin values with new ones 
 mm <- mm %>%
   filter(!grepl("scan", variable)) %>%
-  rbind(temp) %>%
-  arrange(arrival_time)
+  rbind(ns_values) %>%
+  arrange(arrival_time)  
 
 ###################### 2. clean up geocovariates ######################
 mm.geo0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
@@ -155,6 +179,8 @@ mm.geo <- mm.geo0 %>%
 
 ## -->  take out variables: w/ little variation, those w/ lot variation (see: https://github.com/kaufman-lab/STmodel/blob/master/functions_covariate_preprocess_regional.R)
 
+## --> drop AP predictions from other models
+
 
 #?? var(mm.geo)
 
@@ -164,18 +190,47 @@ mm.geo <- mm.geo0 %>%
 ############################ make wide format ############################################
 
 #note: dataframe does NOT include instrument_ID - takes avg reading if 2 instruments were collocated
-mm.wide <- mm %>% 
+mm.wide_means <- mm %>% 
   #?? don't care whate instrument took measurement, as long as we have a measurement?
-  select(-instrument_id) %>%
+  select(-instrument_id,
+         -median_value
+         ) %>%
   # ??? HOW do you account for completely missed stops for which we have no data?
   #group_by arrival_time first to order by time
   group_by(arrival_time, runname, site_id, variable, 
            route, aqs_id, aqs_location, site_long, site_lat, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season, #duration_sec
            ) %>% 
   #spread() fn has issues when have dupliate instruments taking readings at same time - so take avg of both the readings
-  summarize(value = mean(value)) %>%
+  summarize(mean = mean(mean_value)) %>%
   ungroup() %>%
-  spread(variable, value) 
+  spread(variable, mean) %>%
+  rename(
+    bc_880_ng_m3_mean = bc_880_ng_m3,
+    ptrak_ct_cm3_mean = ptrak_ct_cm3,
+    scan_10_421_nm_ct_cm3_mean = ufp_scan_10_421_nm_ct_cm3,
+    scan_20_421_nm_ct_cm3_mean = ufp_scan_20_421_nm_ct_cm3
+  )
+
+mm.wide_medians <- mm %>% 
+  #?? don't care whate instrument took measurement, as long as we have a measurement?
+  select(-instrument_id,
+         -mean_value) %>%
+  group_by(arrival_time, runname, site_id, variable, 
+           route, aqs_id, aqs_location, site_long, site_lat, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season) %>% 
+  #spread() fn has issues when have dupliate instruments taking readings at same time - so take avg of both the readings
+  summarize(one_median = mean(median_value)) %>%
+  ungroup() %>%
+  spread(variable, one_median) %>%
+  rename(
+    bc_880_ng_m3_median = bc_880_ng_m3,
+    ptrak_ct_cm3_median = ptrak_ct_cm3,
+    scan_10_421_nm_ct_cm3_median = ufp_scan_10_421_nm_ct_cm3,
+    scan_20_421_nm_ct_cm3_median = ufp_scan_20_421_nm_ct_cm3
+  )
+
+mm.wide <- left_join(mm.wide_means, mm.wide_medians)
+
+
 
 ###################### merge mm w/ geocovariates ######################
 
@@ -184,8 +239,8 @@ mm.wide <- left_join(mm.wide, mm.geo)
 
 ############################ save data for quicker access ################################
 
-# saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191021.rda"))
-# saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191021.rda"))
+# saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191112.rda"))
+# saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191112.rda"))
 
 ##########################################################################################
 ########################### 3. overnight collocations ####################################

@@ -74,15 +74,29 @@ site_no <- mm_full %>%
   select(site_id) %>% unique() %>%
   mutate(site_no = seq(1:length(site_id)))
 
-mm_full <- mm_full %>% left_join(site_no)
+#number of times each site has been visited
+site_visit_no <- mm_full %>%
+  select(site_id, runname) %>%
+  group_by(site_id) %>%
+  #only 1 observation row
+  unique() %>%
+  mutate(site_visit_no = seq(1:n()))
+
+mm_full <- mm_full %>% left_join(site_no) %>%
+  left_join(site_visit_no)
 
 #relabel instruments that were incorrectly labeled
 mm_full <- mm_full %>%
   mutate(instrument_id = ifelse(instrument_id == "BC_0063", "BC_63",
                                 #ifelse(instrument_id == "CO_2", "CO_3",
                                        ifelse(instrument_id == "PMSCAN_1", "PMSCAN_3",
-                                              instrument_id)) #)
+                                              instrument_id)) 
   )
+
+
+
+# no observations < 100  # 370/907k
+#table(mm_full$value[mm_full$variable=="ptrak_ct_cm3"] < 100)
 
 #take avg of each stop to REDUCE FILE SIZE
 mm <- mm_full %>%
@@ -90,35 +104,36 @@ mm <- mm_full %>%
   #set time to arrival time, in case a stop elapsed e.g., 2 diff hours
   mutate(arrival_time = min(time)) %>%
   select(-time) %>%
+  # ?drop faulty ptrak & BC readings (?? < 100)
+  
+  
   
 #take median of each unique site stop for each instrument
   ## don't include duration_sec b/c for some reason, some stops have 2 (or more?) entries @ same time, but diff durations (? GPS error??) and this creates multiple rows per sample
-  group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, arrival_time, instrument_id, variable, site_no #duration_sec
-           ) %>%
+  group_by(runname, route, site_id, aqs_id, aqs_location, site_long, site_lat, arrival_time, instrument_id, variable, site_no, site_visit_no) %>%
   summarize(median_value = median(value, na.rm = T),
-            mean_value = mean(value, na.rm = T)
-            ) %>%
+            mean_value = mean(value, na.rm = T)) %>%
   ungroup()
 
 
-#give each driving day a unique ID
-run_no <- mm %>%
-  arrange(runname) %>%
-  select(runname) %>%
-  unique() %>%
-  mutate(run_no = seq(1:length(runname)))
-
-mm <- mm %>% left_join(run_no)
-
-#number of times each site has been visited
-site_id_visit_no <- mm %>%
-  group_by(site_id) %>%
-  select(site_id, runname) %>%
-  unique() %>%
-  #group_by(site_id) %>%
-  mutate(site_id_visit_no = seq(1:n()))
-
-mm <- mm %>% left_join(site_id_visit_no)
+# #give each driving day a unique ID
+# run_no <- mm %>%
+#   arrange(runname) %>%
+#   select(runname) %>%
+#   unique() %>%
+#   mutate(run_no = seq(1:length(runname)))
+# 
+# mm <- mm %>% left_join(run_no)
+# 
+# #number of times each site has been visited
+# site_visit_no <- mm %>%
+#   group_by(site_id) %>%
+#   select(site_id, runname) %>%
+#   unique() %>%
+#   #group_by(site_id) %>%
+#   mutate(site_visit_no = seq(1:n()))
+# 
+# mm <- mm %>% left_join(site_id_visit_no)
 
 #ID if stops are AQS sites
 mm <- mm %>%
@@ -176,29 +191,16 @@ mm.geo <- mm.geo0 %>%
          site_id = native_id
          )
 
-
-## -->  take out variables: w/ little variation, those w/ lot variation (see: https://github.com/kaufman-lab/STmodel/blob/master/functions_covariate_preprocess_regional.R)
-
-## --> drop AP predictions from other models
-
-
-#?? var(mm.geo)
-
-
-
-
 ############################ make wide format ############################################
 
 #note: dataframe does NOT include instrument_ID - takes avg reading if 2 instruments were collocated
 mm.wide_means <- mm %>% 
-  #?? don't care whate instrument took measurement, as long as we have a measurement?
   select(-instrument_id,
          -median_value
          ) %>%
-  # ??? HOW do you account for completely missed stops for which we have no data?
   #group_by arrival_time first to order by time
   group_by(arrival_time, runname, site_id, variable, 
-           route, aqs_id, aqs_location, site_long, site_lat, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season, #duration_sec
+           route, aqs_id, aqs_location, site_long, site_lat, site_no, site_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season, #duration_sec
            ) %>% 
   #spread() fn has issues when have dupliate instruments taking readings at same time - so take avg of both the readings
   summarize(mean = mean(mean_value)) %>%
@@ -216,7 +218,7 @@ mm.wide_medians <- mm %>%
   select(-instrument_id,
          -mean_value) %>%
   group_by(arrival_time, runname, site_id, variable, 
-           route, aqs_id, aqs_location, site_long, site_lat, site_no, run_no, site_id_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season) %>% 
+           route, aqs_id, aqs_location, site_long, site_lat, site_no, site_visit_no, aqs_site, date, hour, time_of_day, day, time_of_week, month, season) %>% 
   #spread() fn has issues when have dupliate instruments taking readings at same time - so take avg of both the readings
   summarize(one_median = mean(median_value)) %>%
   ungroup() %>%
@@ -238,9 +240,9 @@ mm <- left_join(mm, mm.geo)
 mm.wide <- left_join(mm.wide, mm.geo)
 
 ############################ save data for quicker access ################################
-
 # saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191112.rda"))
 # saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191112.rda"))
+# saveRDS(mm_full, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_full_191112.rda"))
 
 ##########################################################################################
 ########################### 3. overnight collocations ####################################

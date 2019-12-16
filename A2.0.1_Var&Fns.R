@@ -26,82 +26,108 @@ night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
 #################################### functions ####################################
 ####################################################################################
 
+###################### table of distribution ######################
+#returns table of distribution of a variable
+
+distribution.table <- function(dt,
+                               var.string = "ptrak_ct_cm3",
+                               round.int = 0
+                               ) {
+  #dt=ufp
+  #round.int = 1
+  # dt <- dt %>% group_by(season)
+  
+  t <- dt %>%
+    rename(var = var.string) %>%
+    dplyr::summarize(
+      N = n(),
+      mean_sd =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
+      median_iqr =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
+      min = round(min(var), round.int),
+      max = round(max(var)), round.int)  
+  
+  return(t)
+}
+
+
+
 #################################### correlation plot ####################################
 #fn takes mm dataset (in long format) and creates a scatterplot comparing readings from 2 collocated instruments 
 
-colo.plot <- function(mydata=mm, 
-                      primary.instrument, secondary.instrument, 
-                      value_mean_median = "median_value",
-                      int.digits = 0, 
-                      r2.digits = 2, 
-                      rmse.digits = 0) {
-  
-  
-  data.wide <- mydata %>% 
-    #select only values from desired instruments
-    filter(instrument_id %in% c(primary.instrument, secondary.instrument)) %>%
-    rename(value = value_mean_median) %>%
-    select(-mean_value) %>%
-             #make wide format
-             spread(instrument_id, value) %>% 
-             #only look at rows where have observations for both instruments
-             drop_na(primary.instrument, secondary.instrument) 
-           
-           # data.wide <- data.wide %>%
-           #   #calculate percent difference in estimates
-           #   mutate(pct.diff = (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])/data.wide[[primary.instrument]]*100)
-           
-           
-           lm1 <- lm(formula(paste(secondary.instrument, "~", primary.instrument)), 
-                     data = data.wide)
-           
-           #percent difference between instruments
-           #pct.diff.median <- round(median(data.wide$pct.diff, na.rm = T), 1)
-           
-           #rmse
-           rmse <- (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])^2 %>%
-             mean() %>%
-             sqrt() %>%
-             round(digits = rmse.digits)
-           
-           #compare primary & secondary instrument agreement 
-           data.wide %>%
-             ggplot(aes(x= data.wide[[primary.instrument]], y= data.wide[[secondary.instrument]])) + 
-             geom_point(alpha=0.3, aes(colour = route)) + 
-             geom_abline(intercept = 0, slope = 1) +
-             geom_smooth(method = "lm", aes(fill="lm")) + 
-             labs(fill="", 
-                  title = paste0(data.wide$variable[1]),
-                  subtitle = paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
-                                    "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
-                                    "\nRMSE = ", rmse,
-                                    "\nno. pairs = ", nrow(data.wide)
-                  ),
-                  x=primary.instrument,
-                  y=secondary.instrument
-             )
-  
-  
-}
+# colo.plot <- function(mydata=mm, 
+#                       primary.instrument, secondary.instrument, 
+#                       value_mean_median = "median_value",
+#                       int.digits = 0, 
+#                       r2.digits = 2, 
+#                       rmse.digits = 0) {
+#   
+#   
+#   data.wide <- mydata %>% 
+#     #select only values from desired instruments
+#     filter(instrument_id %in% c(primary.instrument, secondary.instrument)) %>%
+#     rename(value = value_mean_median) %>%
+#     select(-mean_value) %>%
+#              #make wide format
+#              spread(instrument_id, value) %>% 
+#              #only look at rows where have observations for both instruments
+#              drop_na(primary.instrument, secondary.instrument) 
+#            
+#            # data.wide <- data.wide %>%
+#            #   #calculate percent difference in estimates
+#            #   mutate(pct.diff = (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])/data.wide[[primary.instrument]]*100)
+#            
+#            
+#            lm1 <- lm(formula(paste(secondary.instrument, "~", primary.instrument)), 
+#                      data = data.wide)
+#            
+#            #percent difference between instruments
+#            #pct.diff.median <- round(median(data.wide$pct.diff, na.rm = T), 1)
+#            
+#            #rmse
+#            rmse <- (data.wide[[secondary.instrument]] - data.wide[[primary.instrument]])^2 %>%
+#              mean() %>%
+#              sqrt() %>%
+#              round(digits = rmse.digits)
+#            
+#            #compare primary & secondary instrument agreement 
+#            data.wide %>%
+#              ggplot(aes(x= data.wide[[primary.instrument]], y= data.wide[[secondary.instrument]])) + 
+#              geom_point(alpha=0.3, aes(colour = route)) + 
+#              geom_abline(intercept = 0, slope = 1) +
+#              geom_smooth(method = "lm", aes(fill="lm")) + 
+#              labs(fill="", 
+#                   title = paste0(data.wide$variable[1]),
+#                   subtitle = paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
+#                                     "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
+#                                     "\nRMSE = ", rmse,
+#                                     "\nno. pairs = ", nrow(data.wide)
+#                   ),
+#                   x=primary.instrument,
+#                   y=secondary.instrument
+#              )
+#   
+#   
+# }
 
 #################################### correlation plot Wide format ####################################
 
-# same but for data in wide format 
-colo.plot.wide.data <- function(data.wide=mm.wide, 
-                      x.variable, y.variable,
+#fn takes dataset (in wide format) and creates a scatterplot comparing readings from 2 collocated instruments 
+colo.plot <- function(data.wide=mm.wide, 
+                      x.variable, x.label = "",
+                      y.variable, y.label = "",
+                      col.by = "",
                       mytitle = "",
                       int.digits = 0, 
                       r2.digits = 2, 
                       rmse.digits = 0) {
   
+  #if label is left blank, use variable name
+  if(x.label == ""){x.label <- x.variable}
+  if(y.label == ""){y.label <- y.variable}
+  
   data.wide <- data.wide %>% 
              #only look at rows where have observations for both instruments
-             drop_na(x.variable, y.variable) 
-           
-           # data.wide <- data.wide %>%
-           #   #calculate percent difference in estimates
-           #   mutate(pct.diff = (data.wide[[y.variable]] - data.wide[[x.variable]])/data.wide[[x.variable]]*100)
-           
+             drop_na(x.variable, y.variable)  
            
            lm1 <- lm(formula(paste(y.variable, "~", x.variable)), 
                      data = data.wide)
@@ -112,23 +138,25 @@ colo.plot.wide.data <- function(data.wide=mm.wide,
              sqrt() %>%
              round(digits = rmse.digits)
            
+           fit.info <- paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
+                              "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
+                              "\nRMSE = ", rmse,
+                              "\nno. pairs = ", nrow(data.wide)
+           )
            #compare  
            data.wide %>%
              ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
-             geom_point(alpha=0.3, aes(#colour = route
+             geom_point(alpha=0.3, aes(col = data.wide[[col.by]]
                                        )) + 
              geom_abline(intercept = 0, slope = 1) +
              geom_smooth(method = "lm", aes(fill="lm")) + 
-             labs(fill="", 
-                  title = mytitle,
-                  subtitle = paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
-                                    "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
-                                    "\nRMSE = ", rmse,
-                                    "\nno. pairs = ", nrow(data.wide)
-                  ),
-                  x=x.variable,
-                  y=y.variable
-             )
+             labs(title = mytitle,
+                  #subtitle = "",
+                  x = x.label,
+                  y = y.label,
+                  col = col.by
+             ) +
+             annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1)
            
            
 }

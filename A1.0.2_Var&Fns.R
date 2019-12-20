@@ -17,21 +17,33 @@ model.digits <- 2
 ###################################################################################
 ####returns baseline exposure distribution 
  expo.distrib.fn <- function(dt,
-                            years.description
+                            var.,
+                            years.description,
+                            round.int = 0
                             ) {
    
-  df <- dt %>% 
+  # dt=dem1
+  # var = "exp_avg10_yr"
+  # years.description="all"
+   #round.int = 0
+  
+   df <- dt %>% 
+     rename(var = var.) %>%
     group_by(pollutant) %>%
-    drop_na(exp_avg10_yr) %>%
+    drop_na(var) %>%
     dplyr::summarize(
       years = years.description,
       N = n(),
-      median = median(exp_avg10_yr),
-      iqr = IQR(exp_avg10_yr),
-      mean = mean(exp_avg10_yr),
-      sd = sd(exp_avg10_yr),
-      min = min(exp_avg10_yr),
-      max = max(exp_avg10_yr)
+      # median = median(exp_avg10_yr),
+      # iqr = IQR(exp_avg10_yr),
+      # mean = mean(exp_avg10_yr),
+      # sd = sd(exp_avg10_yr),
+      # min = min(exp_avg10_yr),
+      # max = max(exp_avg10_yr)
+      mean_sd =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
+      median_iqr =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
+      min = min(var),
+      max = max(var)
     )
   
   return(df)

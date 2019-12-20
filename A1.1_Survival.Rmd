@@ -26,8 +26,6 @@ editor_options:
 
 ```
 
- 
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
@@ -207,7 +205,6 @@ dem0.1 <-  dem0.1 %>%
     exposure_year:casi_irt
   )
 
-
 # #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
 # prop.table(table(dem0.1$exp_mos_coverage10_yr>0.95)) %>% round(2)
 
@@ -217,7 +214,9 @@ dem1 <- dem0.1 %>%
     #drop exposure predictions after the last visit when individuals are no longer "at risk" of the terminating event. 
     ## --> note: when using act_age, have to change last_visit to onsetdate
     exposure_year <= as.numeric(format(last_visit, "%Y")),
-  ) %>%
+    #drop ppl with only a baseline observation
+    fu_yrs > 1
+    ) %>%
   mutate(
     #copy all original predictions (for sensitivity analysis using min.pct = 0.75 vs 0.95)
     exp_avg01_yr_original = exp_avg01_yr,
@@ -309,6 +308,26 @@ dem.w2 <- dem.w %>%
   filter(exposure_year <= last_act_fu_yr)
 
 ```
+
+### --> hsit of # of missing apoe by enrollment date/yr
+
+Have a cut off since most recent enrollees: 
+*	tend to be those w/o apoe
+* wont contribute much to survival analysis
+* may have not-yet geocoded addresses 
+
+#### --> error w/ missing_apoe variable?
+
+```{r}
+t <- dem.w %>%
+  filter(enrollment_yr==1) %>%
+  mutate(missing_apoe = (is.na(apoe))) #%>%
+  
+ggplot(aes(x=exposure_year, y = missing_apoe)) + 
+  geom_bar(aes(stat_count()))
+
+```
+
 
 note: there > dem & AD cases when using ACT FU age definition b/c missing no2 exposure estimates differ for different incident years. 
 
@@ -1027,11 +1046,9 @@ cbind(t1.apoe.ad, t1.apoe.noad, t1.noapoe.ad, t1.noapoe.noad) %>%
 
 ```
 
-## Table 2: Exposure Table
+## Exposure Distribution
 
-Statistics calculated for individuals for whom we know at least `r min.pct*100`% of their past residential address (e.g., 114/120 months for 10-year avg).
-
-Using NO2 (ppb) and PM2.5 (µg/m3) concentration at baseline.
+Plot.
 
 ```{r exposure}
 #ANOVA: How much of the variability due to calendar yr vs other factors (e.g., age vs birth cohort)? 
@@ -1051,23 +1068,26 @@ anova(no2.exposure) %>% kable()
 
 ###########################
 #no2 trend over time by averaging periods
-# using everyone enrolled in study at any oen time (peson-years)
-no2_by_avg_prds <- dem1 %>%
+# using everyone enrolled in study at any point in time (peson-years)
+avg_no2_by_avg_prds <- dem1 %>%
   select(exposure_year, exp_avg01_yr:exp_avg20_yr) %>%
   gather(key = "Avg_Prd", value = "NO2_ppb" , -exposure_year) %>%
-  mutate(Avg_Prd = as.factor(substr(Avg_Prd, 8, nchar(Avg_Prd))))
+  mutate(Avg_Prd = as.factor(substr(Avg_Prd, 8, nchar(Avg_Prd)))) %>%
+  #calculate mean exposure prediction for any one year and averaging period
+  group_by(exposure_year, Avg_Prd) %>%
+  dplyr::summarize(mean_no2_ppb = mean(NO2_ppb, na.rm=T))
 
 dem1 %>%
   ggplot(aes(x=exposure_year, y = exp_avg01_yr)) +
   geom_point(alpha=0.1) +
-  geom_smooth(data=no2_by_avg_prds, aes(y=NO2_ppb, col=Avg_Prd), 
-              # method="lm",
-              # formula = y ~ splines::bs(x, 1000)
-              #formula = y ~x, method
-              ) + 
+  geom_point(data=avg_no2_by_avg_prds, aes(y=mean_no2_ppb, col=Avg_Prd)) + 
+  geom_line(data=avg_no2_by_avg_prds, aes(y=mean_no2_ppb, col=Avg_Prd)) + 
     labs(x = "Year",
          y = "NO2 Exposure (ppb)",
-         col = "Averaging Period")
+         col = "Averaging Period",
+         title = "NO2 exposure over time in the cohort", 
+         subtitle = "black points: individual exposure predictions;\ncolored points: average exposure predictions for that year and averaging period"
+           )
 
 # ggsave(filename = file.path("A1_Images", "NO2 over time by avg prd2.png"), 
 #        width = 8)    
@@ -1075,98 +1095,46 @@ dem1 %>%
 #formula = y ~ splines::bs(x, 3)
 ```
 
-```{r, }
-#old-delete?
+#### --> ? parallel plot for e.g., 2 ppl who never moved (show how their estimates decreased over time & how diff avg periods affect these estimates)
 
-# #plots of NO2 x year, race, income
-dem.w %>%
-filter(enrollment_yr == 1) %>%
-  ggplot(aes(x = exposure_year, y=no2_10yr)) +
-  geom_boxplot(aes(group = exposure_year)) +
-  geom_smooth() +
-  facet_grid(race_white~income_cat, labeller = "label_both") +
-  theme(axis.text.x = element_text(angle = 90))
-#
-# participants w/ APOE (~in M2) at any time point
-# apoe.participants <- dem1 %>%
-#   filter(!is.na(apoe)) %>%
-#   select(study_id) %>%
-#   unique()
-# apoe.participants <- apoe.participants$study_id
-#
-# dem.bsl <- dem1 %>%
-#   filter(
-#     #1st year of enrollment (baseline)
-#     enrollment_yr == 1
-#     ) #%>%
-#   # mutate(
-#   #   #in_m2 as long as Any rows (years) used (thus this count is greater than in_m2 variable)
-#   #   m2_id = study_id %in% m2.participants
-#   # )
+```{r}
 
-# #exposure at baseline stratified by year of entry
-#  no2.all.yrs <- dem1 %>%
-#   #1st year of enrollment 
-#   filter(enrollment_yr == 1,
-#          #pollutant == "no2"
-#          ) %>% 
-#   expo.distrib.fn(dt = ., years.description = "all") 
-# 
-# no2.yr1 <- dem1 %>%
-#   #1st year of enrollment 
-#   filter(enrollment_yr == 1,
-#          #pollutant == "no2",
-#          exposure_year < 2002) %>% 
-#   expo.distrib.fn(dt = ., years.description = "1994-2001") 
-# 
-# no2.yr2 <- dem1 %>%
-#   #1st year of enrollment 
-#   filter(enrollment_yr == 1,
-#          #pollutant == "no2",
-#          exposure_year >= 2002,
-#          exposure_year < 2010) %>% 
-#   expo.distrib.fn(dt = ., years.description = "2002-2009") 
-# 
-# no2.yr3 <- dem1 %>%
-#   #1st year of enrollment 
-#   filter(enrollment_yr == 1,
-#          #pollutant == "no2",
-#          exposure_year >= 2010) %>% 
-#   expo.distrib.fn(dt = ., years.description = "2010+") 
-# 
-# no2.by.yrs <- rbind(no2.all.yrs, no2.yr1, no2.yr2, no2.yr3) 
-# no2.by.yrs %>% kable(., digits = 0,
-#         caption = "Air Pollution Levels at Enrollment (N = subjects)")
-# 
-# 
-# # exposure over time for everyone in cohort 
-# no2.all.yrs.py <- dem1 %>%
-#   #1st year of enrollment 
-#   #filter(pollutant == "no2") %>% 
-#   expo.distrib.fn(dt = ., years.description = "all") 
-# 
-# no2.yr1.py <- dem1 %>%
-#   #1st year of enrollment 
-#   filter(#pollutant == "no2",
-#          exposure_year < 2002) %>% 
-#   expo.distrib.fn(dt = ., years.description = "1994-2001") 
-# 
-# no2.yr2.py <- dem1 %>%
-#   #1st year of enrollment 
-#   filter(#pollutant == "no2",
-#          exposure_year >= 2002,
-#          exposure_year < 2010) %>% 
-#   expo.distrib.fn(dt = ., years.description = "2002-2009") 
-# 
-# no2.yr3.py <- dem1 %>%
-#   #1st year of enrollment 
-#   filter(#pollutant == "no2",
-#          exposure_year >= 2010) %>% 
-#   expo.distrib.fn(dt = ., years.description = "2010+") 
-# 
-# no2.by.yrs.py <- rbind(no2.all.yrs.py, no2.yr1.py, no2.yr2.py, no2.yr3.py) 
-# no2.by.yrs.py %>% kable(., digits = 0,
-#         caption = "Air Pollution Levels Over Time for Everyone in Cohort (N = person-yrs)")
+```
+
+Table 2
+
+```{r}
+# exposure over time for everyone in cohort
+no2.all.yrs.py <- dem1 %>% expo.distrib.fn(dt = ., years.description = "All", var. = "exp_avg10_yr")
+
+no2.yr1.py <- dem1 %>%
+  filter(exposure_year <= 2000) %>%
+expo.distrib.fn(dt = ., years.description = "1994-2000", var. = "exp_avg10_yr")
+
+no2.yr2.py <- dem1 %>%
+  filter(exposure_year >= 2001, 
+         exposure_year <= 2009) %>%
+expo.distrib.fn(dt = ., years.description = "2001-2009", var. = "exp_avg10_yr")
+
+no2.yr3.py <- dem1 %>%
+  filter(exposure_year >= 2010) %>%
+  expo.distrib.fn(dt = ., years.description = "2010-2018", var. = "exp_avg10_yr")
+
+no2.by.yrs.py <- rbind(no2.all.yrs.py, no2.yr1.py, no2.yr2.py, no2.yr3.py)
+
+#no2
+no2.by.yrs.py %>% 
+  filter(pollutant == "no2") %>%
+  select(-pollutant) %>%
+  kable(., digits = 0,
+        caption = "10-yr average NO2 (ppb) exposure predictions over time for everyone in Cohort (N = person-years)")
+
+#pm2.5
+no2.by.yrs.py %>% 
+  filter(pollutant == "pm25") %>%
+  select(-pollutant) %>%
+  kable(., digits = 0,
+        caption = "10-yr average PM2.5 (ug/m3) exposure predictions over time for everyone in Cohort (N = person-years)")
 
 ```
 

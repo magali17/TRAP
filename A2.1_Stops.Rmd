@@ -1,14 +1,21 @@
+---
+title: 'Aim 2: Site Medians'
+author: "Magali Blanco"
+date: "12/19/2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+
+# to do
+# 1. drop very low UFP readings
+# 2. ONA BC correction
+
+##########################################################################################
 #script to: 
 ##1) summarize high temporal resolution mobile monitoring data into stop MEDIANS (reduce file size)
 ##2) clean up geocovariates. drop: a) AP predictions, which are based on other covariates & other models, b) variables w/ too little or too much variation 
 ##3) clean up overnight data from AQS sites, calculate median hourly concentrations
-
-############### to do 
-
-
- 
-
-
 ##########################################################################################
 # Clear workspace of all objects and unload all extra (non-base) packages
 rm(list = ls(all = TRUE))
@@ -23,30 +30,29 @@ pacman::p_load(dplyr, tidyverse, chron, lubridate, knitr)
 
 # source global variables & functions
 source("A2.0.1_Var&Fns.R")
-
+set.seed(1)
 ##########################################################################################
 ############################# 1. mobile monitoring #######################################
 ##########################################################################################
 
-############################ read in data ################################################
-
 #mobile monitoring 
-mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191112.rda")) %>%
-  #drop unwanted variable values to reduce data size
-  filter(
-    # !variable %in% c("gps_lat",
-    #                       "gps_long",
-    #                       #"ufp_pt_screen_ct_cm3",
-    #                       "ufp_disc_med_size_nm",
-    #                       "bc_uv375nm_ng_m3", #this is not total BC
-    #                       "ufp_scan_20_5_ct_cm3" #don't need this bin
-    #                       )
-    variable %in% c("bc_ir880nm_ng_m3", "ufp_pt_noscreen_ct_cm3", 
-                    "ufp_scan_11_5_ct_cm3", "ufp_scan_15_4_ct_cm3", "ufp_scan_ct_cm3")
-    )  %>%
+mm_full0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191218.rda"))  
+
+### --> error 
+mm_full <- mm_full0 %>%
+  select(-duration_sec) %>%
+  #drop gps readings
+  filter(!str_detect(variable, "gps")) %>%
+  
+# mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_191218.rda")) %>%
+#   #drop unwanted variable values to reduce data size
+#   filter(variable %in% c("bc_ir880nm_ng_m3", 
+#                          "ufp_pt_noscreen_ct_cm3", 
+#                     "ufp_scan_11_5_ct_cm3", "ufp_scan_15_4_ct_cm3", "ufp_scan_ct_cm3")
+#     )  %>%
   mutate(
     variable = recode_factor(factor(variable), 
-                              "bc_ir880nm_ng_m3" = "bc_880_ng_m3",
+                              #"bc_ir880nm_ng_m3" = "bc_880_ng_m3",
                               "ufp_pt_noscreen_ct_cm3" = "ptrak_ct_cm3"
                              )
     )
@@ -59,7 +65,7 @@ site_ids <- read.csv(file.path("Data", "Aim 2", "Mobile Monitoring", "locations_
   unique()
 
 #### --> update file later: there are 310 site_ids and in mm_full. There should be 309.           
-# We stopped sampling MS0398  and switched to MS0601 which is fairly close
+# We stopped sampling MS0398 and switched to MS0601 which is fairly close
 
 
 
@@ -93,11 +99,31 @@ mm_full <- mm_full %>%
                                               instrument_id)) 
   )
 
+############################ drop low UFP values ###################################################
+
+## --> check to see if need to drop UFP readings
+# Elena excluded UPF < 100 b/c: a) had very few samples that were less than 100 (less then 1%), b) they did not correlate to low measures on other particle measurement instruments, c) these values also resulted in extreme values on some the ratio metrics I used  
 
 
-# no observations < 100  # 370/907k
-#table(mm_full$value[mm_full$variable=="ptrak_ct_cm3"] < 100)
 
+
+
+
+
+
+
+
+
+############################ BC ONA correction ###################################################
+### --> ONA BC correction? 
+
+
+
+
+
+
+
+ 
 #take avg of each stop to REDUCE FILE SIZE
 mm <- mm_full %>%
   group_by(runname, site_id) %>%  #, instrument_id, variable
@@ -180,16 +206,6 @@ mm <- mm %>%
   rbind(ns_values) %>%
   arrange(arrival_time)  
 
-###################### 2. clean up geocovariates ######################
-mm.geo0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
-
-mm.geo <- mm.geo0 %>% 
-  #drop AP predictions, which are based on other covariates & other models
-  select(-contains("em_"),
-         -contains("no2_"),
-         -location_id,
-         site_id = native_id
-         )
 
 ############################ make wide format ############################################
 
@@ -207,7 +223,7 @@ mm.wide_means <- mm %>%
   ungroup() %>%
   spread(variable, mean) %>%
   rename(
-    bc_880_ng_m3_mean = bc_880_ng_m3,
+    bc_880_ng_m3_mean = ma200_ir_bc1,
     ptrak_ct_cm3_mean = ptrak_ct_cm3,
     scan_10_421_nm_ct_cm3_mean = ufp_scan_10_421_nm_ct_cm3,
     scan_20_421_nm_ct_cm3_mean = ufp_scan_20_421_nm_ct_cm3
@@ -224,7 +240,7 @@ mm.wide_medians <- mm %>%
   ungroup() %>%
   spread(variable, one_median) %>%
   rename(
-    bc_880_ng_m3_median = bc_880_ng_m3,
+    bc_880_ng_m3_median = ma200_ir_bc1,
     ptrak_ct_cm3_median = ptrak_ct_cm3,
     scan_10_421_nm_ct_cm3_median = ufp_scan_10_421_nm_ct_cm3,
     scan_20_421_nm_ct_cm3_median = ufp_scan_20_421_nm_ct_cm3
@@ -232,50 +248,12 @@ mm.wide_medians <- mm %>%
 
 mm.wide <- left_join(mm.wide_means, mm.wide_medians)
 
-
-
-###################### merge mm w/ geocovariates ######################
-
-mm <- left_join(mm, mm.geo)
-mm.wide <- left_join(mm.wide, mm.geo)
-
 ############################ save data for quicker access ################################
 # saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191112.rda"))
 # saveRDS(mm.wide, file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191112.rda"))
 # saveRDS(mm_full, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_full_191112.rda"))
 
-##########################################################################################
-########################### 3. overnight collocations ####################################
-##########################################################################################
 
-# folders with files to be uploaded. folder should only include ptraks w/o screens. new files added to folder will automatically be uploaded
-path_10w <- file.path("Data", "Aim 2", "Overnight Collocations", "10W_raw", "ptrak_noscreen")
-path_bh <- file.path("Data", "Aim 2", "Overnight Collocations", "BH_raw", "ptrak_noscreen")
 
-#all files for each AQS site in the ptrak folder are uploaded and combined   
-ptrak_10w <- ptrak.bind.fn(folder_path = path_10w)
-ptrak_bh <- ptrak.bind.fn(folder_path = path_bh)
-ptrak <- rbind(ptrak_10w, ptrak_bh)
-
-ptrak <- ptrak %>%
-  mutate(
-    #get rid of minutes & seconds
-    datetime = format(ptrak$datetime, "%Y-%m-%d %H:%M")
-  ) %>%
-  group_by(datetime, location) %>%
-  summarize(
-    #estimate hourly medians
-    Conc_pt_cm3 = round(median(Conc_pt_cm3))
-  ) %>%
-  ungroup() %>%
-  mutate(
-    #make datetime into POSIXct() format
-    datetime = ymd_hm(datetime)
-  ) %>%
-  #add temporal variables
-  add.temporal.variables(data = ., date.var = "datetime")  
-     
-############################ save data for quicker access ################################
-#saveRDS(ptrak, file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda"))
-
+```
  

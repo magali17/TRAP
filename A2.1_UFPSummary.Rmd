@@ -214,7 +214,7 @@ mm %>%
   filter(PMPT_93 <= quantile(PMPT_93, plot_quantile, na.rm = T),
          PMPT_4 <= quantile(PMPT_4, plot_quantile, na.rm = T)
          ) %>%
-  colo.plot.wide.data(data.wide = ., x.variable = "PMPT_93",
+  colo.plot(data.wide = ., x.variable = "PMPT_93",
                       y.variable = "PMPT_4",
                       mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"),
                       r2.digits = 3  
@@ -231,7 +231,7 @@ mm %>%
   filter(PMPT_94 <= quantile(PMPT_94, plot_quantile, na.rm = T),
          PMPT_4 <= quantile(PMPT_4, plot_quantile, na.rm = T)
          ) %>%
-  colo.plot.wide.data(data.wide = ., x.variable = "PMPT_94",
+  colo.plot(data.wide = ., x.variable = "PMPT_94",
                       y.variable = "PMPT_4",
                       mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"),
                       r2.digits = 3  
@@ -250,7 +250,7 @@ mm.wide %>%
   filter(scan_20_421_nm_ct_cm3_median <= quantile(scan_20_421_nm_ct_cm3_median, plot_quantile, na.rm = T),
          ptrak_ct_cm3_median <= quantile(ptrak_ct_cm3_median, plot_quantile, na.rm = T)
          ) %>%
-  colo.plot.wide.data(data.wide = ., x.variable = "scan_20_421_nm_ct_cm3_median",
+  colo.plot(data.wide = ., x.variable = "scan_20_421_nm_ct_cm3_median",
                       y.variable = "ptrak_ct_cm3_median", mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"))
 
 ```
@@ -269,8 +269,23 @@ colo.plot(primary.instrument = "PMSCAN_5",
 Fit is not great, but BC_63 has always/mostly been used.
 
 ```{r}
-colo.plot(primary.instrument = "BC_63", 
-          secondary.instrument = "BC_66")
+mm %>%
+#select only values from desired instruments
+    filter(instrument_id %in% c("BC_63", "BC_66")) %>%
+    #rename(value = value_mean_median) %>%
+    select(-mean_value) %>%
+    spread(instrument_id, median_value) %>%
+  #trim
+  filter(BC_63 >= quantile(BC_63, trim_quantile, na.rm = T),
+         BC_63 <= quantile(BC_63, (1-trim_quantile), na.rm = T),
+         BC_66 >= quantile(BC_66, trim_quantile, na.rm = T),
+         BC_66 <= quantile(BC_66, (1-trim_quantile), na.rm = T)) %>%
+  colo.plot(x.variable = "BC_63", 
+          y.variable = "BC_66",
+          mytitle = paste0("Comparison of collocated Aethelometer instrument readings" , 
+                                        "\ntop and bottom ", (trim_quantile)*100, "% of data trimmed"),
+          )
+
 
 ```
 

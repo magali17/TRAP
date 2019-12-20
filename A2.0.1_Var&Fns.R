@@ -26,6 +26,56 @@ night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
 #################################### functions ####################################
 ####################################################################################
 
+###################### geocovariate selection functions ######################
+
+no.missing.values <- function(var){
+  result <- sum(!is.na(var)) == length(var)
+  return(result)
+}
+
+varies.enough <- function(var, threshold = 0.2){
+  #don't use '<=' or '>=' b/c will result in "TRUE" for a constant (e.g., all 0s)
+  result <- min(var) < mean(var)*(1 - threshold) |
+    max(var) > mean(var)*(1 + threshold)
+  return(result)
+}
+
+### --> ? what to use as "outlier" definition 
+few.outliers <- function(var, 
+                         z_outlier = 5, 
+                         max_prop_outliers = 0.02
+){
+  
+  z_score <- (var - mean(var))/sd(var)
+  num_outliers <- sum(abs(z_score) > z_outlier)
+  prop_outliers <-  num_outliers/ length(var)
+  result <- prop_outliers <= max_prop_outliers
+  
+  return(result)
+}
+## --> ? increase lower max_prop_outliers so fewer variables dropped? 
+few.outliers.iqr <- function(var,
+                             max_prop_outliers = 0.02){
+  
+  normal.range <- iqr(var)*1.5
+  outliers <- var > (quantile(var, 0.75) + normal.range) | 
+    var < (quantile(var, 0.25) - normal.range) 
+  
+  result <- sum(outliers) /length(var) <= max_prop_outliers
+  
+  return(result)
+}
+
+
+
+
+
+
+
+
+
+
+
 ###################### table of distribution ######################
 #returns table of distribution of a variable
 
@@ -120,44 +170,47 @@ colo.plot <- function(data.wide=mm.wide,
                       int.digits = 0, 
                       r2.digits = 2, 
                       rmse.digits = 0) {
+  # x.variable = "mean_s_tow2" 
+  # y.variable = "LUR_mean_s_tow2"
+  # x.label = ""
+  # y.label = ""
+  # col.by = ""
+  # mytitle = ""
+  # int.digits = 0
+  # r2.digits = 2 
+  # rmse.digits = 0
   
   #if label is left blank, use variable name
   if(x.label == ""){x.label <- x.variable}
   if(y.label == ""){y.label <- y.variable}
   
-  data.wide <- data.wide %>% 
-             #only look at rows where have observations for both instruments
-             drop_na(x.variable, y.variable)  
+  #data.wide <- data.wide %>%drop_na(x.variable, y.variable)  
            
-           lm1 <- lm(formula(paste(y.variable, "~", x.variable)), 
-                     data = data.wide)
+           lm1 <- lm(formula(paste(y.variable, "~", x.variable)), data = data.wide)
            
            #rmse
            rmse <- (data.wide[[y.variable]] - data.wide[[x.variable]])^2 %>%
-             mean() %>%
-             sqrt() %>%
+             mean() %>% sqrt() %>%
              round(digits = rmse.digits)
            
            fit.info <- paste0("y = ", round(coef(lm1)[1], int.digits), " + ", round(coef(lm1)[2], 2), 
                               "x \nR2 = ", round(summary(lm1)$r.squared, r2.digits), 
                               "\nRMSE = ", rmse,
-                              "\nno. pairs = ", nrow(data.wide)
-           )
+                              "\nno. pairs = ", nrow(data.wide))
            #compare  
-           data.wide %>%
+           p <- data.wide %>%
              ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
              geom_point(alpha=0.3, aes(col = data.wide[[col.by]]
                                        )) + 
              geom_abline(intercept = 0, slope = 1) +
              geom_smooth(method = "lm", aes(fill="lm")) + 
              labs(title = mytitle,
-                  #subtitle = "",
                   x = x.label,
                   y = y.label,
-                  col = col.by
-             ) +
+                  col = col.by) +
              annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1)
            
+           return(p)
            
 }
   
@@ -280,45 +333,58 @@ ptrak.bind.fn <- function(folder_path) {
 #returns boxplots of UFP estimates for selected sites by method
 ufp_by_method <- function(dt,
                           .months.sampled = months.sampled,
-                          add.to.title = "") {
+                          add.to.title = "",
+                          methods.to.compare = c("mean_uw", "mean_s_tow2_tod2", "mean_s_tow2", "mean_s", "yhat_uw", "yhat_s", "yhat_s_tow2", "yhat_s_tow2_tod2", "yhat_m_day_hr")
+                          ) {
+  #dt = annual 
   
-  dt <- dt %>% 
-    drop_na()
+  dt <- dt %>%
+    drop_na() %>%
+    gather(key = "method_weight", value = "ufp", methods.to.compare) %>%
+    mutate(method = ifelse(grepl(method_weight , pattern = "yhat"), "regression", "site mean")) %>%
+    separate(method_weight, into=c("method", "weight"), sep = "_" , 
+             remove = F, extra = "merge") 
   
-  n <- length(unique(dt$site_id))
+  n <- length(unique(dt$site_no))
   
-  dt.l <- dt %>% gather(key = "method", value = "ufp", -site_id, -route) 
-  
-  ufp_by_site <- dt.l %>%
-    ggplot(aes(x=site_id, y= ufp, col=method, group=site_id)) + 
-    geom_boxplot(aes( fill = route), alpha=0.3) +
-    geom_point(aes(shape=method)) + 
+  ufp_by_site <- dt %>%
+    #mutate(site_no = factor(site_id)) %>%
+    ggplot(aes(x=factor(site_no), y= ufp, fill=method)) + 
+    geom_boxplot(aes(), alpha=0.6) + #position="dodge"
+    geom_point(position=position_dodge(width=0.75), aes(group=method, col=weight)) +
+    #geom_line(position=position_dodge(width=0.75), aes(group=method, col=weight)) +
     theme(axis.text.x = element_text(angle = 90)) + 
     labs(title = paste0("Site mean UFP for ", .months.sampled[1], " - ", .months.sampled[length(.months.sampled)], " (Spring - Winter), n = ", n, " sites ", add.to.title),
-         y = "UFP (pt/cm3)")
+         y = "UFP (pt/cm3)",
+         col = "weight"
+         )
    
+  #ufp_by_site
+  
   return(ufp_by_site)
   
 }
 
+# annual %>%
+#   select(-yhat_m_day_hr) %>%
+#   ufp_by_method()
+
+ 
 
 ####################################################################################################
 #returns dataset with yhat (predictions) column
 
 save.pred.fn <- function(dt, 
                          y_string,
-                         #x_string = "pop_s15000 + lu_comm_p15000 + lu_resi_p15000 + tl_s15000 +  lu_industrial_p15000 + ndvi_q50_a02500 + m_to_coast "
-                         x_string = "m_to_a1_a2 + m_to_airp + m_to_rr + elev_elevation + pop_s01000"
+                         x_string = "ll_a1_s01500 + m_to_airp  + elev_elevation + pop10_s15000"
                          ) {
   
-  my.formula <- formula(paste0(y_string, "~", x_string))
-  
-  lm1 <- lm(my.formula, data = dt)
+  lm1 <- lm(formula(paste0(y_string, "~", x_string)), data = dt)
   
   #save predictions (yhat)
   dt$yhat = predict(lm1) 
   
-  names(dt)[names(dt) == "yhat"] <- paste0("yhat_", y_string)
+  names(dt)[names(dt) == "yhat"] <- paste0("LUR_", y_string)
   
   return(dt)
   

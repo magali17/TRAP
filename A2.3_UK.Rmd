@@ -1,0 +1,293 @@
+---
+title: "Aim 2"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+editor_options:
+  chunk_output_type: console
+---
+
+### --> in CleanUp code: drop particles < 100 pt/cm3? see distribution
+### ---> ? drop BC lvls > 27k ng/m3 (1% of data) - MOVUP report
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      fig.height = 8, fig.width = 8
+                      )  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(dplyr, tidyverse, 
+               knitr, kableExtra, 
+               Hmisc, EnvStats, 
+               #descriptive statistics
+               qwraps2,  
+               ggpubr, VCA,
+               pls
+               )    
+#Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
+
+options(knitr.kable.NA = '')
+set.seed(1)
+source("A2.0.1_Var&Fns.R")
+
+#read in data
+annual <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda"))
+
+```
+
+
+ 
+# UK
+
+PLS to create summary features of geocovariates 
+
+#### --> use geocovariate code to update geocovariates, then see if this is still an issue:
+errors when variables aren't scaled:...In FUN(X[[i]], ...) : Scaling with (near) zero standard deviation
+
+#### --> see code to ID if there is scaling 
+# --> centering/scaling PLS: see “Regionalized national UK model using PLS regression sampson kaufman, 2013” for details 
+
+        
+```{r}
+set.seed(1)
+
+# 1. fit PLS using training set to ID # features to use
+# 2. calculate RMSE using test set w/ selected # features
+# 3. fit final model using all data
+
+# loadings()
+#coef(pls.fit), scores(), ? loading.weights()
+
+# 1. fit PLS using training set to ID # features to use
+pls.geo <- annual %>%
+  select(y = mean_uw, m_to_a1:ncol(annual)) %>%
+  mutate(train = sample(c(TRUE, FALSE), size = nrow(annual), replace = T)) 
+
+# --> ? issue: PLS only works when variables aren't scaled
+pls.train <- plsr(y~., 
+             data=pls.geo, subset = train,
+             #scale=T,
+             validation = "CV")
+
+#summary(pls.train)
+
+```
+
+```{r}
+# 2. calculate RMSE using test set w/ selected # features
+## plot to select no. of PLS features based on CV RMSE
+
+cv.rmse <- RMSEP(pls.train, estimate = "CV")
+cv.df <- data.frame(PLS_Components = cv.rmse$comps,
+                    CV_RMSE = as.numeric(cv.rmse$val))  
+
+min.cv.comp <- cv.df$PLS_Components[cv.df$CV_RMSE == min(cv.df$CV_RMSE)]
+min.cv.rmse <- cv.df$CV_RMSE[cv.df$CV_RMSE == min(cv.df$CV_RMSE)]
+
+cv.df %>%
+  ggplot(aes(x = PLS_Components, y = CV_RMSE)) + 
+  geom_line() + 
+  geom_point(aes(x= min.cv.comp, y = min.cv.rmse, col = "Min RMSE")) +
+  labs(col = "") + 
+  labs(
+    title = "CV RMSE for PLS components",
+    subtitle = "using training data",
+    x = "PLS Components",
+    y = "CV RMSE"
+    ) +
+  annotate("text", -Inf, Inf, label = paste0("Min RMSE\n-Components: ", min.cv.comp, 
+                                             "\n-RMSE: ", round(min.cv.rmse)), 
+           hjust = 0, vjust = 1)
+
+```
+
+### --> ? don't have to estimate RMSE or R2 until after fit UK model w/ modeled error term? If don't do it now, can fit the model right away on full dataset.
+
+Out-of sample/CV Test error (RMSE):
+* units are in pt/cm3
+
+### --> why is tehre an NA in error estimate? 
+
+```{r}
+pls.pred <- predict(pls.train, pls.geo[pls.geo$train==FALSE,], ncomp = min.cv.comp)
+
+(pls.pred - pls.geo$y[pls.geo$train==FALSE])^2 %>%
+  mean(na.rm=T) %>% sqrt() %>% round()
+
+```
+
+#### -> CV R2. see 556 notes.
+
+```{r}
+
+```
+
+Extract features 
+
+```{r}
+# 3. fit final model using all data
+# --> ? issue: PLS only works when variables aren't scaled
+pls1 <- plsr(y~., data = pls.geo, ncomp = min.cv.comp
+             #scale=T,
+             )
+#summary(pls1)
+
+# extract scores for LUR
+pls1.scores <- scores(pls1) [,c(1:min.cv.comp)]
+
+ 
+```
+
+### --> See if code is available to plot loadings
+
+Plot the loadings. 
+### --> ? why does loadings.weights() and loadings() produce diff results?
+
+```{r}
+  # what is this?
+#coef(pls1, ncomp = c(1:min.cv.comp))
+
+
+t1 <- loading.weights(pls1) 
+
+t2 <- pls1$loadings #%>% dim()
+
+```
+
+```{r}
+# # comparing predictions for the training data (in-sample)
+#? plot(pls1, ncomp=min.cv.comp, asp=1, line=T)
+
+```
+
+
+Model the error term   
+* check that exponential function models geostatistical structure appropriately
+
+```{r}
+
+
+```
+
+UK: UFP ~ PLS + E
+* ? use native or log-transformed UFP values? see distribution
+
+```{r}
+
+```
+
+
+### --> plot pedicted vs measured UFP
+
+```{r}
+#plot(pls1, line=T, asp=1)
+
+```
+
+prediction boxplots overall and by important TRAP indicators
+
+```{r}
+
+```
+
+
+Cross-validation   
+* exclude mobile monitoring observations at AQS sites
+
+RMSE
+```{r}
+
+```
+
+CV R2  -- see 556 notes
+
+```{r}
+
+```
+
+
+[add GIS map of predictions]
+
+```{r}
+
+```
+
+
+Amanda: "Compare distribution of PLS scores in monitoring vs cohort. See if combination of variables is unusual. Check predicted PLS values are not super large – suggests extrapolation. If have strange points, can look to see where they are on a map (e.g., a point is in middle of lake; or strange geographic area)."
+
+```{r}
+
+```
+
+
+# Sensitivity Analyses
+
+## Averaging of 1 sec data at each stop
+
+??? Use averages
+
+```{r}
+
+```
+
+## Annual averages 
+
+Trim 10% observations
+
+```{r}
+
+```
+
+Windosrize extreme stop readings 
+
+```{r}
+# #windosrized alternative 
+# ufp <- ufp %>%
+#   group_by(site_id) %>%
+#   mutate(
+#     ufp_wind = ifelse(ptrak_ct_cm3 > quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), 
+#                       ifelse(ptrak_ct_cm3 < quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), 
+#                              ptrak_ct_cm3)))
+
+
+```
+
+## UK Model
+
+Change TRAP indicator variable transformations (native to log-transformed or vise versa)
+
+```{r}
+
+
+```
+
+Use different annual averages
+
+```{r}
+
+```
+
+? [time permitting] Normalize to the Roosevelt garage 
+```{r}
+
+```
+

@@ -1,19 +1,8 @@
 ---
-title: "Aim 2"
+title: 'Aim 2: Annual Averages'
 author: "Magali Blanco"
-date: ' `r Sys.Date()` '
-output:
-  html_document:
-    number_sections: yes
-    df_print: paged
-    toc: yes
-    toc_depth: '3'
-  pdf_document:
-    number_sections: yes
-    toc: yes
-    toc_depth: 3
-editor_options:
-  chunk_output_type: console
+date: "12/19/2019"
+output: html_document
 ---
 
 ```{r setup, include=FALSE}
@@ -32,9 +21,9 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(dplyr, tidyverse, knitr, kableExtra, Himsc, EnvStats, lubridate, glmnet, ggpubr, VCA,
+pacman::p_load(dplyr, tidyverse, knitr, kableExtra, Hmisc, EnvStats, lubridate, glmnet, ggpubr, VCA,
                #descriptive statistics
-               qwraps2 #, magrittr 
+               qwraps2, #, magrittr
                )    
 #Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
@@ -42,13 +31,18 @@ options(knitr.kable.NA = '')
 
 source("A2.0.1_Var&Fns.R")
 
+set.seed(1)
 ```
 
+
 ```{r}
-#load stop average data 
+#load data
 mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191112.rda"))
 mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191112.rda"))
 mm_full <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_full_191112.rda"))
+geo.mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "geo.mm.rda")) 
+
+
 
 #includes means & medians, all data
 ufp0 <- mm.wide %>% 
@@ -58,9 +52,11 @@ ufp0 <- mm.wide %>%
   ) %>%
   #remove NAs
   drop_na(ptrak_ct_cm3_median, ptrak_ct_cm3_mean)  %>%
-  # New Hour Binning
+  
   mutate(
-    tod5 = factor(ifelse(hour %in% seq(3,8), "3_8",
+    site_id = factor(site_id),  
+    # New Hour Binning
+      tod5 = factor(ifelse(hour %in% seq(3,8), "3_8",
                                        ifelse(hour %in% seq(9,11), "9_11", 
                                               ifelse(hour %in% seq(12,15), "12_15",
                                                      ifelse(hour %in% seq(16,20), "16_20", "21_2")))),
@@ -86,20 +82,24 @@ ufp <- ufp0 %>%
   select(-ptrak_ct_cm3_mean) %>%
   rename(ptrak_ct_cm3 = ptrak_ct_cm3_median)
 
+#no. months sampled
+months.sampled <- month.abb[3:11]
+n.months.sampled <- length(months.sampled)
+
 ```
 
 ### -->	Combine 2 stops if they are “close”? We stopped sampling MS0398 and switched to MS0601 which is close
 
-```{r}
-geo <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) %>%
-  select("native_id", "latitude", "longitude", "m_to_a1", "m_to_a2", "m_to_coast", "m_to_l_port", "m_to_comm", "m_to_airp", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")
-#write.csv(geo, file.path("Data", "Aim 2", "Geocovariates", "geo_few.csv"))
-
-#"We stopped sampling MS0398 and switched to MS0601 which is close"
-#t <- geo %>% filter(native_id %in% c("MS0398", "MS0601"))
+```{r, ?delete?}
+# geo <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) %>%
+#   select("native_id", "latitude", "longitude", "m_to_a1", "m_to_a2", "ll_a1_s01500", "m_to_coast", "m_to_l_port", "m_to_comm", "m_to_airp", "m_to_rr", "m_to_truck", "elev_elevation", "pop10_s15000", "ndvi_q50_a07500")
+# #write.csv(geo, file.path("Data", "Aim 2", "Geocovariates", "geo_few.csv"))
+# 
+# #"We stopped sampling MS0398 and switched to MS0601 which is close"
+# #t <- geo %>% filter(native_id %in% c("MS0398", "MS0601"))
 
 ```
-
+ 
 # QAQC
 
 Instruments Used
@@ -215,6 +215,20 @@ mm.wide %>%
 
 
 ```
+
+### --> compare nanoscan readings to PTRAK when concentrations are low (< ~ 100 pt/cm3)
+### --> could look at a time series  - if runs out of alcohol, readings could be bad 
+
+```{r}
+
+```
+
+### --> ? apply a between method calibration (MOVUP report "Quality Control")
+
+```{r}
+
+```
+
 
 # Central tendency of stop data 
 
@@ -432,11 +446,9 @@ ggarrange(p.hour, p.day, p.season) %>%
 
 ```
 
-
-  
 ```{r, delete?, include=F, eval=F}
 
-# #counts at each location by quarter, DOW, hour bins - see how much missin data there are
+# #counts at each location by quarter, DOW, hour bins - see how much missin data there are 
 # #df w/ times that each stop Should have sampled
 # loc <- unique(ufp$site_id)
 # seasons <- unique(ufp$season)
@@ -554,28 +566,28 @@ Site-specific data averages
 #calc diff summary measures
 ## using within site information
 ufp <- ufp %>%
-  group_by(site_id) %>%
+  group_by(site_no) %>%
   mutate(mean_uw = mean(ptrak_ct_cm3, na.rm=T))
 
  #means by seaason-wk-tod5 (5 tods)
     #there are no sites w/ sampling during all 30/40 unique times (5 tod x 2 tow x 3 or 4 seasons)
  s_tow2_tod5 <- ufp %>%
-   group_by(site_id, season, time_of_week, tod5) %>%
+   group_by(site_no, season, time_of_week, tod5) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
    ungroup() %>%
    unite("swh", season:tod5, remove = F) %>%
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    mutate(unique_times = n_distinct(swh)) 
  rm(s_tow2_tod5)
 
  #means by seaason-wk-tod3 (3 tods)
     #there are no sites w/ sampling during all 18/24 unique times (3 tod x 2 tow x 3/4 seasons)
  s_tow2_tod3 <- ufp %>%
-   group_by(site_id, season, time_of_week, tod3) %>%
+   group_by(site_no, season, time_of_week, tod3) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
    ungroup() %>%
    unite("swh", season:tod3, remove = F) %>%
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    mutate(unique_times = n_distinct(swh)) 
  rm(s_tow2_tod3)
 
@@ -583,17 +595,17 @@ ufp <- ufp %>%
     #8 sites w/ sampling during all 12 unique times (2 tod x 2 tow x 3 seasons)
     #none when looking at all 4 seasons
  s_tow2_tod2 <- ufp %>%
-   group_by(site_id, season, time_of_week, tod2) %>%
+   group_by(site_no, season, time_of_week, tod2) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
    ungroup() %>%
    unite("swh", season:tod2, remove = F) %>%
    #calc number of unique sampling times 
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    mutate(unique_times = n_distinct(swh)) %>%
    #only incude locations with every season, TOW, TOD
    filter(unique_times ==12)
 
- #tod2_df %>% select(site_id) %>% n_distinct()
+ #tod2_df %>% select(site_no) %>% n_distinct()
 
  ## using tod2, caclulate weighted mean for sites w/ obs during all time combinations
  s_tow2_tod2 <- s_tow2_tod2 %>%
@@ -606,23 +618,23 @@ ufp <- ufp %>%
 
  # #check that weights for all sites = 1. #looks good
  # s_tow2_tod2 %>%
- #   group_by(site_id) %>%
+ #   group_by(site_no) %>%
  #   summarize(n = sum(wt))
    
    #calculate each site's weighted mean
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    dplyr::summarize(mean_wt = sum(wt_times_mean))
    
 
  #means by season-wk7 (2 tods)
     #no sites w/ sampling during all 42/56 unique times (2 tod x 7 tow x 3/4 seasons)
  s_tow7_tod2 <- ufp %>%
-   group_by(site_id, season, day, tod2) %>%
+   group_by(site_no, season, day, tod2) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
    ungroup() %>%
    unite("swh", season:tod2, remove = F) %>%
    #calc number of unique sampling times 
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    mutate(unique_times = n_distinct(swh))  
    #only incude locations with every season, TOW 
  rm(s_tow7_tod2)
@@ -630,22 +642,22 @@ ufp <- ufp %>%
  #no tod
     # no site w/ 21/28 unique times (3/4 seasons x 7 days)
  s_tow7 <- ufp %>%
-   group_by(site_id, season, day) %>%
+   group_by(site_no, season, day) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
    ungroup() %>%
    unite("swh", season:day, remove = F) %>%
    #calc number of unique sampling times 
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    mutate(unique_times = n_distinct(swh))
  rm(s_tow7)
 
  s_tow2 <- ufp %>%
-   group_by(site_id, season, time_of_week) %>%
+   group_by(site_no, season, time_of_week) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
    ungroup() %>%
    unite("swh", season:time_of_week, remove = F) %>%
    #calc number of unique sampling times 
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    mutate(unique_times = n_distinct(swh)) %>%
    #only incude locations with every season, TOW, TOD
    filter(unique_times ==6) %>%
@@ -656,89 +668,177 @@ ufp <- ufp %>%
      wt = season.wt * wk.wt,
      wt_times_mean = wt*mean) %>%
    #calculate each site's weighted mean
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    dplyr::summarize(mean_wt = sum(wt_times_mean))
 
  #season
     # 305 sites w/ sampling during all 3 seasons
  s <- ufp %>%
-   group_by(site_id, season) %>%
+   group_by(site_no, season) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
    #calc number of unique sampling times 
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    mutate(unique_times = n_distinct(season)) %>%
    #only incude locations with every season, TOW, TOD
    filter(unique_times ==3) %>%
- #no_tod_df %>% select(site_id) %>% n_distinct()
+ #no_tod_df %>% select(site_no) %>% n_distinct()
  #  caclulate weighted mean for sites w/ obs during all time combinations
    mutate(
      season.wt = 1/3,
      wt_times_mean = season.wt*mean) %>%
    #calculate each site's weighted mean
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    dplyr::summarize(mean_wt = sum(wt_times_mean))
 
  #month-weighted avg
  #locations w/ samples Mar - Nov
- months.sampled <- month.abb[3:11]
 
- m.same_months <- ufp %>%
-   group_by(site_id, month) %>%
+ m <- ufp %>%
+   group_by(site_no, month) %>%
    dplyr::summarize(mean = mean(ptrak_ct_cm3)) %>%
-   filter(month %in% months.sampled) %>%
-   #calc number of unique sampling times 
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(month)) %>% 
-   filter(unique_times == length(months.sampled)) %>%
+   group_by(site_no) %>%
+   filter(n_distinct(month) == n.months.sampled) %>%
  #  caclulate weighted mean for sites w/ obs during all time combinations
    mutate(
-     wt_times_mean = mean /length(months.sampled)) %>%
+     wt_times_mean = mean * 1/n.months.sampled) %>%
    #calculate each site's weighted mean
-   group_by(site_id) %>%
+   group_by(site_no) %>%
    dplyr::summarize(mean_wt = sum(wt_times_mean))
 
-#105 locations w/ samples each month #nrow(m.same_months)
+#105 locations w/ samples each month #nrow(m)
 
 ``` 
 
-### --> calculate new site averages by fitting model: Y ~ factor(site) + factor(tow) + factor(tod). could keep same bins we have now vs use finer bins. use spline for some? 
-- get estimates out for eac season-tow-tod, weigh appropriately to calculate site annual avg 
+### --> use spline for some? 
 
-Regression averages 
+Regression to calculate annual (9-month for now) averages.
 
 ```{r}
+#df for predictions - all unique variable combinations
+preds.uw <- data.frame(site_no = unique(ufp$site_no))
 
+preds.s <- expand.grid(site_no = unique(ufp$site_no), 
+                            season = unique(ufp$season))
+
+preds.s.tow <- expand.grid(site_no = unique(ufp$site_no), 
+                            season = unique(ufp$season),
+                            time_of_week = unique(ufp$time_of_week))
+
+preds.s.tow.tod2 <- expand.grid(site_no = unique(ufp$site_no), 
+                            season = unique(ufp$season), 
+                            time_of_week = unique(ufp$time_of_week), 
+                            tod2 = unique(ufp$tod2))
+
+preds.m.day.hr <- expand.grid(site_no = unique(ufp$site_no), 
+                            month = unique(ufp$month), 
+                            day = unique(ufp$day), 
+                            hour = unique(ufp$hour))
+
+
+#different fits
+fit.uw <- lm(ptrak_ct_cm3 ~ factor(site_no) , data = ufp)
+fit.s <-  update(fit.uw, ~. + season)
+fit.s.tow <- update(fit.s, ~. + time_of_week)
+fit.s.tow.tod2 <- update(fit.s.tow, ~. + tod2)
+fit.m.day.hr <- lm(ptrak_ct_cm3 ~ factor(month, ordered = F) + factor(day, ordered = F) + factor(hour) + site_no , data = ufp)
+#summary(fit.m.day.hr)
+
+#predictions
+preds.uw$yhat_uw <- predict(fit.uw, preds.uw)
+preds.s$yhat <- predict(fit.s, preds.s) 
+preds.s.tow$yhat <- predict(fit.s.tow, preds.s.tow) 
+preds.s.tow.tod2$yhat <- predict(fit.s.tow.tod2, preds.s.tow.tod2) 
+preds.m.day.hr$yhat <- predict(fit.m.day.hr, preds.m.day.hr) 
+
+#calculate weighted avgs based on predictions
+
+## --> CHANGE season wt later to 1/4
+season.wt <- 1/3
+
+preds.s <- preds.s %>%
+  mutate(
+    season_wt = season.wt,
+    yhat = yhat*season_wt
+  ) %>%
+  group_by(site_no) %>%
+  dplyr::summarize(yhat_s = sum(yhat))
+
+preds.s.tow <- preds.s.tow %>%
+  mutate(
+    season_wt = season.wt,
+    tow_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+    yhat = yhat*season_wt*tow_wt
+  ) %>%
+  group_by(site_no) %>%
+  dplyr::summarize(yhat_s_tow2 = sum(yhat))
+ 
+preds.s.tow.tod2 <- preds.s.tow.tod2 %>%
+  mutate(
+    season_wt = season.wt,
+    tow_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+    tod_wt = ifelse(tod2 == "9_17", 9/24, (1- 9/24)),
+    yhat = yhat*season_wt*tow_wt*tod_wt
+  ) %>%
+  group_by(site_no) %>%
+  dplyr::summarize(yhat_s_tow2_tod2 = sum(yhat))
+  
+
+# --> update weights if end up sampling btwn 1-4
+preds.m.day.hr <- preds.m.day.hr %>%
+  mutate(
+    #double the weight of the 4 hrs neighboring the 4 night hrs w/o sampling (1-4 AM)
+    hr_wt = ifelse(hour %in% c(7:22), 1/24, 2/24),
+    yhat = yhat * (1/n.months.sampled)*1/7*hr_wt
+    ) %>%
+  #check that hr weights add up to 1. looks good
+  # preds.m.day.hr %>% select(hour, hr_wt) %>% unique() %>%
+  #   dplyr::summarize(wt_sum = sum(hr_wt))
+
+  group_by(site_no) %>%
+  dplyr::summarize(yhat_m_day_hr = sum(yhat))
+
+#merge all predictions to 1 df
+yhats <- left_join(preds.uw, preds.s) %>%
+  left_join(preds.s.tow) %>%
+  left_join(preds.s.tow.tod2) %>%
+  left_join(preds.m.day.hr)
 
 ```
 
-
-Plots of UFP vs method
+Save annual averages from all methods with geocovariates.
 
 ```{r, include=T}
 #join all estimates
 annual <- ufp %>% 
   ungroup() %>%
-  select(site_id, route, mean_uw) %>%
+  select(site_no, site_id, mean_uw) %>%
+  #rename(mean_uw = mean_uw) %>%
   unique() %>%
   left_join(s_tow2_tod2) %>%
-  rename(mean_sea_tow2_tod2 = mean_wt) %>%
+  rename(mean_s_tow2_tod2 = mean_wt) %>%
   left_join(s_tow2) %>%
-  rename(mean_sea_tow2 = mean_wt) %>%
+  rename(mean_s_tow2 = mean_wt) %>%
   left_join(s) %>%
-  rename(mean_sea = mean_wt) #%>%
-  # ---> ADD REGRESSION ESTIMATES HERE 
-  # left_join(reg_) %>%
-  # rename(____ = ____) #%>%
+  rename(mean_s = mean_wt) %>%
+  left_join(yhats) %>%
+  left_join(geo.mm)
 
+```
 
+Plots of UFP vs method
 
-annual.l <- annual %>%
-  gather(key = "method", value = "ufp", -site_id, -route) %>%
-  drop_na()
-
-#plot site samples if use diff avg methods. 
-annual.l %>%
-  ggplot(aes(x=method)) + 
+```{r}
+annual %>%
+    gather(key = "method_weight", value = "ufp", c(mean_uw:yhat_m_day_hr)) %>%
+  #gather(key = "method_weight", value = "ufp", -site_no, -site_id) %>%
+  drop_na() %>%
+  mutate(method = ifelse(grepl(method_weight , pattern = "yhat"), "regression", "site mean")) %>% 
+  separate(method_weight, into=c("method", "weight"), 
+                     sep = "_" , remove = F, extra = "merge") %>%
+ 
+  #plot site samples if use diff avg methods. 
+#annual.l %>%
+  ggplot(aes(x=method_weight)) + 
   geom_bar() + 
   labs(title = "no. sites with estimates using various methods")
 
@@ -748,98 +848,61 @@ annual.l %>%
 
 ```{r, fig.height = 8}
 #estimates for locations with all estimation methods
-annual %>% ufp_by_method(dt = .)
-
-  ## compare to a ref method
-comp_to_tod2 <- annual %>%
-  mutate(
-    #look at difference in estimates from "best" estimate
-    mean_uw = mean_uw - mean_sea_tow2_tod2,
-    mean_sea_tow2 = mean_sea_tow2 - mean_sea_tow2_tod2,
-    mean_sea = mean_sea - mean_sea_tow2_tod2,
-    #mean_mo = mean_mo - mean_sea_tow2_tod2,
-  ) %>%
-  select(-mean_sea_tow2_tod2) 
-
-comp_to_tod2 %>% ufp_by_method(., 
-                add.to.title = "relative to mean_sea_tow2_tod2")
-
-```
-
-### --> fn for rank order of sites
-
-```{r}
-# rank order 
+annual %>% 
+  ## --> ? drop m_day_hr since can't compare? 
+  #select(-yhat_m_day_hr) %>%
+  ufp_by_method()
 
 
 ```
 
+## --> issue splotting  ?? too many geocovariates
+## --> ? why are m_day_hr predictions so different? see ls coefficients?
+## --> change boxplots to horiz line for mean/median
 
 ```{r}
 #S_TOW2
-annual %>% select(-mean_sea_tow2_tod2) %>%
-  ufp_by_method(dt=.)
+annual %>% 
+  # select(-mean_s_tow2_tod2,
+  #        -yhat_m_day_hr
+  #        ) %>%
+  ufp_by_method() #+ facet_wrap(~method, ncol = 1)
  
-  ## compare to ref mean_sea_tow2
-comp_to_tow2 <- annual %>%
-  mutate(
-    #look at difference in estimates from "best" estimate
-    mean_uw = mean_uw - mean_sea_tow2,
-    mean_sea = mean_sea - mean_sea_tow2,
-    #mean_mo = mean_mo - mean_sea_tow2,
-  ) %>%
-  select(-mean_sea_tow2_tod2, 
-         -mean_sea_tow2,
-         # -mean_uw,
-         ) 
-
-comp_to_tow2 %>% ufp_by_method(., add.to.title = "relative to mean_sea_tow2")
 
 ```
 
-```{r}
-# rank order 
-
-```
-
+ 
 ### Characterize sites w/ smallerst & largest inter-method differences 
 
 - sites w/ high inter-method variabiitly have high extreme values, while those w/ low inter-method variability have either: a) no or b) both high and low extreme values
 
 ```{r}
 # TOD2
-tod2 <- annual %>%
-  drop_na()
+tod2 <- annual %>% drop_na()
 
-tod2$min <- apply(tod2[,c(3:ncol(tod2))], 1, function(x)  range(x)[1])  
-tod2$max <- apply(tod2[,c(3:ncol(tod2))], 1, function(x)  range(x)[2])  
-tod2$diff <- apply(tod2[,c(3:ncol(tod2))], 1, function(x)  diff(range(x)))  
+# not including yhat_m_day_hr b/c only available for regression method
+tod2$min <- apply(tod2[,c(3:10)], 1, function(x)  range(x)[1])  
+tod2$max <- apply(tod2[,c(3:10)], 1, function(x)  range(x)[2])  
+tod2$diff <- apply(tod2[,c(3:10)], 1, function(x)  diff(range(x)))  
 
-tod2 <- tod2 %>%
-  left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")]))
-
-tod2$m_to_a1_a2 <- apply(tod2[c("m_to_a1", "m_to_a2")], 1, min)
+#tod2$m_to_a1_a2 <- apply(tod2[c("m_to_a1", "m_to_a2")], 1, min)
 
 ```
 
 ```{r}
 # TOW2
-tow2 <- annual %>%
-  select(-mean_sea_tow2_tod2) %>%
+tow2 <- annual %>% select(-mean_s_tow2_tod2) %>%
   drop_na()  
 
-tow2$min <- apply(tow2[,c(3:5)], 1, function(x)  range(x)[1])  
-tow2$max <- apply(tow2[,c(3:5)], 1, function(x)  range(x)[2])  
-tow2$diff <- apply(tow2[,c(3:5)], 1, function(x)  diff(range(x)))  
+tow2$min <- apply(tow2[,c(3:9)], 1, function(x)  range(x)[1])  
+tow2$max <- apply(tow2[,c(3:9)], 1, function(x)  range(x)[2])  
+tow2$diff <- apply(tow2[,c(3:9)], 1, function(x)  diff(range(x)))  
 
-tow2 <- tow2 %>%
-  left_join(unique(mm[c("site_id", "m_to_a1", "m_to_a2", "m_to_airp", "m_to_l_port", "m_to_rr", "m_to_truck", "elev_elevation", "pop_s01000")]))
-
-tow2$m_to_a1_a2 <- apply(tow2[c("m_to_a1", "m_to_a2")], 1, min)
+#tow2$m_to_a1_a2 <- apply(tow2[c("m_to_a1", "m_to_a2")], 1, min)
 
 ```
 
-```{r, include=F}
+```{r, include=T}
 #plots looking at which sites have largest diff btwn estimates
 extremes <- 0.25
 
@@ -865,16 +928,15 @@ h.l.tow2 %>%
   geom_density(aes(fill = diff_lvl), alpha=0.5) +
   labs(subtitle = paste("Sea_TOW2, n =", length(unique(h.l.tow2$site_id))))
 
-
 ```
 
 ```{r, fig.height=8}
 h.l.tow2 %>%
-  ggplot(aes(x=site_no, y= ptrak_ct_cm3, fill=factor(diff_lvl), group=site_no)) + 
+  ggplot(aes(x=site_no, y= ptrak_ct_cm3, fill=diff_lvl, group=site_no)) + 
   geom_boxplot() +
-  scale_x_continuous(breaks=h.l.tow2$site_no, labels=h.l.tow2$site_id) + 
+  #scale_x_continuous(breaks=h.l.tow2$site_no, labels=h.l.tow2$site_id) + 
   theme(axis.text.x = element_text(angle = 90)) +
-  facet_wrap(~route, scales="free_x") +
+  facet_wrap(~diff_lvl, scales="free_x") +
   labs(title = "Sites with 'high' and 'low' inter-method variability. \nX-asis is arranged by stop order.",
        subtitle = paste("Sea_TOW2, n =", length(unique(h.l.tow2$site_id))))
 
@@ -891,7 +953,7 @@ tow.2.low$diff_lvl <- "low"
 tow.2.high.low <- rbind(tow.2.high, tow.2.low) 
 
 tow.2.high.low %>%
-  gather("geocov", "value", m_to_airp:m_to_a1_a2) %>%
+  gather("geocov", "value", c("ll_a1_s01500", "m_to_coast", "m_to_airp", "m_to_l_port",  "m_to_rr", "m_to_truck", "elev_elevation", "pop10_s15000", "ndvi_q50_a07500", "imp_a01000", "lu_resi_p15000")) %>%
   ggplot(aes(x = value, fill = factor(diff_lvl))) +
   geom_density(alpha=0.5) +
   facet_wrap(~geocov, scales="free") +
@@ -935,8 +997,8 @@ tow.2.high.low %>%
 ```{r, eval=T}
 #ANOVA for TOW2
 tow2.anova <- tow2 %>%
-  select(site_id:mean_sea) %>%
-  gather("method", "value", -site_id, -route) %>%
+  select(site_id:yhat_s_tow2_tod2) %>%
+  gather("method", "value", -site_id) %>%
   ungroup() %>%
   mutate(
     method = as.factor(method),
@@ -946,14 +1008,14 @@ tow2.anova <- tow2 %>%
 anovaVCA(value ~ method + site_id, Data = tow2.anova)
  
 
-tow2.lm1a <- tow2.anova %>% #mean_sea_tow2
-  mutate(method = relevel(factor(method, ordered = F), ref = "mean_sea_tow2")) %>% 
+tow2.lm1a <- tow2.anova %>%  
+  mutate(method = relevel(factor(method, ordered = F), ref = "mean_s_tow2")) %>% 
   lm(value ~ method + site_id, data = .)
 
 anova(tow2.lm1a) %>% kable()
 summary(tow2.lm1a)
 #CI
-confint(tow2.lm1a)[c(1:3),]
+confint(tow2.lm1a)[c(1:7),]
 
 ```
 
@@ -1008,13 +1070,16 @@ summary(tow2_lm1) #$coef #[c(1:6),]
 
 Fitting LUR using different averaging methods for UFP; plotting observed averages vs model predictions.
 
-Correlations. Using season-TOW2 estimates (n = `nrow(tow2)`).
+Correlations. Using season-TOW2 estimates (n = `r nrow(tow2)`).
+
 
 ```{r}
 #find highest correlations
-ufp.geo <- mm %>%
+### --> check 28:ncol(mm) - correct?
+ufp.geo <- mm %>% 
+  left_join(geo.mm) %>%
   select(site_id, 
-         28:ncol(mm)) %>%
+         28:ncol(.)) %>%
   unique() 
 
 ufp.geo <- ufp.geo %>%
@@ -1025,174 +1090,94 @@ geo.cor <- ufp.geo %>%
   cor(use = "complete.obs") %>%
   as.data.frame() %>%
   rownames_to_column() %>%
-  filter(rowname %in% c("mean_uw", "mean_sea", "mean_sea_tow2", "mean_sea_tow2_tod2"))
+  filter(rowname %in% c("mean_uw", "mean_s", "mean_s_tow2", "mean_s_tow2_tod2",
+                         "yhat_uw", "yhat_s", "yhat_s_tow2", "yhat_s_tow2_tod2"
+                         ))
 
 geo.cor <- geo.cor %>% column_to_rownames() 
 
 geo.cor <- t(geo.cor) %>%
   as.data.frame() %>%
   rownames_to_column() %>%
-  filter(!rowname %in% c("mean_uw", "mean_sea", "mean_sea_tow2", "mean_sea_tow2_tod2"),
-         #only keep valriables w/ high corr
-         mean_sea > 0.8 | mean_uw < -0.8
-         ) 
+  filter(!rowname %in% c("mean_uw", "mean_s", "mean_s_tow2", "mean_s_tow2_tod2",
+                         "yhat_uw", "yhat_s", "yhat_s_tow2", "yhat_s_tow2_tod2"
+                         ))
 
-geo.cor %>% 
+#only keep valriables w/ high corr
+geo.cor %>% filter(abs(mean_uw) > 0.85) %>% 
   arrange(desc(mean_uw)) %>%
   kable(caption = "Geocovariates most correlated (R) with site annual averages")
 
 
 ```
 
+Evaluate LUR predictions using different methods.
 
-Evaluate predictions using different methods.
+note: regression estimates are more similar than site avg methods 
 
-#### --> add regression method  
+## --> why are some site underpredicted by LUR? where are these? e.g. could look at distance from 1-1 line
+## --> ? fit interction term & then plot to see if predictions are closer to the 1-1 line?
 
 ```{r}
-#save lm predictions when use different averaging methods as Y outcome
-tow2 <- tow2 %>%
-  save.pred.fn(y = "mean_sea_tow2") %>%
-  save.pred.fn(y = "mean_sea") %>%
-  save.pred.fn(y = "mean_uw") #%>% 
-  #save.pred.fn(y = "____")
-
-#compare predictsion vs observations
-yhat_mean_sea_tow2_plot <- colo.plot(data.wide = tow2, 
-                    x.variable = "mean_sea_tow2", 
-                    y.variable = "yhat_mean_sea_tow2"
-                    )
-
-yhat_mean_sea_plot <- colo.plot(data.wide = tow2, 
-                    x.variable = "mean_sea", 
-                    y.variable = "yhat_mean_sea"
-                    )
-
-yhat_mean_uw <- colo.plot(data.wide = tow2, 
-                    x.variable = "mean_uw", 
-                    y.variable = "yhat_mean_uw"
-                    )
-
-ggarrange(yhat_mean_sea_tow2_plot, 
-          yhat_mean_sea_plot,
-          yhat_mean_uw, 
-          common.legend = T, legend = "bottom"
-          ) %>%
-  annotate_figure(top = "Site UFP: Mean calculation vs LUR predictions (in-sample) 
-                  \nLUR fit: mean UFP ~ m_to_a1_a2 + m_to_airp + m_to_rr + elev_elevation + pop_s01000")
-
-```
+#save lm predictions for dataset
+tow2.pred <- tow2 %>%
+  save.pred.fn(y_string = "mean_s_tow2") %>%
+  save.pred.fn(y_string = "mean_s") %>%
+  save.pred.fn(y_string = "mean_uw") %>% 
+  save.pred.fn(y_string = "yhat_s_tow2") %>%
+  save.pred.fn(y_string = "yhat_s") %>%
+  save.pred.fn(y_string = "yhat_uw")  
 
  
-# UK
+#compare predictsion vs observations
+LUR_mean_s_tow2_plot <- colo.plot(data.wide = tow2.pred, 
+                    x.variable = "mean_s_tow2", 
+                    y.variable = "LUR_mean_s_tow2")
 
-Drop the following geocovariates:
-* AP predictions
-* those with little variation 
-* those with extreme values  
+LUR_mean_s_plot <- colo.plot(data.wide = tow2.pred, 
+                    x.variable = "mean_s", 
+                    y.variable = "LUR_mean_s")
 
-[code, Keller 2015] (https://github.com/kaufman-lab/STmodel/blob/master/functions_covariate_preprocess_regional.R)
+LUR_mean_uw_plot <- colo.plot(data.wide = tow2.pred, 
+                    x.variable = "mean_uw", 
+                    y.variable = "LUR_mean_uw")
 
-```{r}
-#drop AP predictions
+LUR_yhat_s_tow2_plot <- colo.plot(data.wide = tow2.pred, 
+                    x.variable = "yhat_s_tow2", 
+                    y.variable = "LUR_yhat_s_tow2")
 
+LUR_yhat_s_plot <- colo.plot(data.wide = tow2.pred, 
+                    x.variable = "yhat_s", 
+                    y.variable = "LUR_yhat_s")
 
-#drop little cov w/ little variation
-#?? var(mm.geo)
-
-
-#drop extreme values
-
-
-```
-
-PLS to create summary features of geocovariates 
-
-```{r}
-
-```
-
-Model the error term   
-* check that exponential function models geostatistical structure appropriately
-
-```{r}
-
-```
-
-
-UFP ~ PLS + E
-* ? use native or log-transformed UFP values? see distribution
-
-```{r}
+LUR_yhat_uw_plot <- colo.plot(data.wide = tow2.pred, 
+                    x.variable = "yhat_uw", 
+                    y.variable = "LUR_yhat_uw")
+ 
+ggarrange(LUR_mean_s_tow2_plot, 
+          LUR_mean_s_plot ,
+          LUR_mean_uw_plot, 
+          LUR_yhat_s_tow2_plot,
+          LUR_yhat_s_plot,
+          LUR_yhat_uw_plot,
+           common.legend = T, legend = "bottom"
+           #nrow = 2
+          ) %>%
+  annotate_figure(fig.lab = "Site UFP: Method estimates vs LUR predictions (in-sample) \nLUR fit: 9-month avg UFP ~ ll_a1_s01500 + m_to_airp  + elev_elevation + pop10_s15000")
 
 ```
 
-Cross-validation   
-* exclude mobile monitoring observations at AQS sites
-
-```{r}
-#R2, RMSE
-
-
-```
-
-prediction boxplots overall and by important TRAP indicators
-
-```{r}
-
-```
-
-[add GIS map of predictions]
+#### ---> ? could subtract a constant from regression estimates if they are constantly higher
 
 ```{r}
 
 ```
 
 
-# Sensitivity Analyses
-
-## Averaging of 1 sec data at each stop
-
-??? Use averages
-
-```{r}
-
-```
-
-## Annual averages 
-
-Trim 10% observations
-
-```{r}
-
-```
-
-Windosrize extreme stop readings 
-
-```{r}
-# #windosrized alternative 
-# ufp <- ufp %>%
-#   group_by(site_id) %>%
-#   mutate(
-#     ufp_wind = ifelse(ptrak_ct_cm3 > quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), 
-#                       ifelse(ptrak_ct_cm3 < quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), 
-#                              ptrak_ct_cm3)))
-
-
-```
-
-## UK Model
-
-Change TRAP indicator variable transformations (native to log-transformed or vise versa)
-
+Select an estimate to use
 ```{r}
 
 
-```
-
-Use different annual averages
-
-```{r}
+#saveRDS(annual, file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda"))
 
 ```
-

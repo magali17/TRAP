@@ -41,7 +41,8 @@ pacman::p_load(dplyr, tidyverse,
                #descriptive statistics
                qwraps2,  
                ggpubr, VCA,
-               pls
+               pls,
+               geoR #UK
                )    
 #Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
@@ -50,7 +51,10 @@ set.seed(1)
 source("A2.0.1_Var&Fns.R")
 
 #read in data
-annual <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda"))
+annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda")) %>%
+  drop_na(m_to_a1)
+geo.mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "geo.mm.rda")) %>%
+  select(site_id, contains("lambert"), latitude, longitude)
 
 ```
 
@@ -74,29 +78,34 @@ set.seed(1)
 # 2. calculate RMSE using test set w/ selected # features
 # 3. fit final model using all data
 
-# loadings()
-#coef(pls.fit), scores(), ? loading.weights()
+# loadings(), coef(pls.fit), scores(), ? loading.weights()
 
 # 1. fit PLS using training set to ID # features to use
-pls.geo <- annual %>%
-  select(y = mean_uw, m_to_a1:ncol(annual)) %>%
-  mutate(train = sample(c(TRUE, FALSE), size = nrow(annual), replace = T)) 
+annual <- annual0 %>%
+  select(#site_id,
+         y = yhat_s_tow2, 
+         m_to_a1:ncol(annual0)) %>%
+  mutate(
+    #log-transform UFP
+    y = log(y)
+    #train = sample(c(TRUE, FALSE), size = nrow(annual), replace = T)
+    ) %>%
+  drop_na()
 
 # --> ? issue: PLS only works when variables aren't scaled
-pls.train <- plsr(y~., 
-             data=pls.geo, subset = train,
+ pls1 <- plsr(y~., 
+             data=annual,
              #scale=T,
              validation = "CV")
 
-#summary(pls.train)
+#summary(pls1)
 
 ```
 
 ```{r}
-# 2. calculate RMSE using test set w/ selected # features
 ## plot to select no. of PLS features based on CV RMSE
 
-cv.rmse <- RMSEP(pls.train, estimate = "CV")
+cv.rmse <- RMSEP(pls1, estimate = "CV")
 cv.df <- data.frame(PLS_Components = cv.rmse$comps,
                     CV_RMSE = as.numeric(cv.rmse$val))  
 
@@ -110,7 +119,7 @@ cv.df %>%
   labs(col = "") + 
   labs(
     title = "CV RMSE for PLS components",
-    subtitle = "using training data",
+    #subtitle = "using training data",
     x = "PLS Components",
     y = "CV RMSE"
     ) +
@@ -120,87 +129,283 @@ cv.df %>%
 
 ```
 
-### --> ? don't have to estimate RMSE or R2 until after fit UK model w/ modeled error term? If don't do it now, can fit the model right away on full dataset.
-
-Out-of sample/CV Test error (RMSE):
-* units are in pt/cm3
-
-### --> why is tehre an NA in error estimate? 
+Extract features/scores
 
 ```{r}
-pls.pred <- predict(pls.train, pls.geo[pls.geo$train==FALSE,], ncomp = min.cv.comp)
-
-(pls.pred - pls.geo$y[pls.geo$train==FALSE])^2 %>%
-  mean(na.rm=T) %>% sqrt() %>% round()
-
-```
-
-#### -> CV R2. see 556 notes.
-
-```{r}
-
-```
-
-Extract features 
-
-```{r}
-# 3. fit final model using all data
 # --> ? issue: PLS only works when variables aren't scaled
-pls1 <- plsr(y~., data = pls.geo, ncomp = min.cv.comp
+
+pls1 <- plsr(y~., data = annual, 
+             ncomp = min.cv.comp
              #scale=T,
              )
 #summary(pls1)
 
-# extract scores for LUR
-pls1.scores <- scores(pls1) [,c(1:min.cv.comp)]
+# extract scores for UK
+pls1.scores <- scores(pls1) [,c(1:min.cv.comp)] %>%
+  as.data.frame()
 
- 
-```
+# take out spaces
 
-### --> See if code is available to plot loadings
+# error 
+#pls1.scores %>% rename(gsub(" ", "", .) )
 
-Plot the loadings. 
-### --> ? why does loadings.weights() and loadings() produce diff results?
-
-```{r}
-  # what is this?
-#coef(pls1, ncomp = c(1:min.cv.comp))
-
-
-t1 <- loading.weights(pls1) 
-
-t2 <- pls1$loadings #%>% dim()
+names(pls1.scores) <- gsub(" ", "", names(pls1.scores))
 
 ```
+
+Predicted vs Measured
 
 ```{r}
 # # comparing predictions for the training data (in-sample)
-#? plot(pls1, ncomp=min.cv.comp, asp=1, line=T)
+plot(pls1, ncomp=min.cv.comp, asp=1, line=T, 
+     main = paste0("PLS using", min.cv.comp, " components") )
+ 
+```
+
+Plot the loadings. 
+
+### --> ? why does loadings.weights() and loadings() produce diff results?
+
+### --> only keep absolute elevation? 
+### --> relabel covariates in plot
+
+```{r}
+pls.loadings <- pls1$loadings[] %>%
+  as.data.frame() %>%
+  rownames_to_column(var = "cov")
+
+# rename variables if buffers
+pls.loadings <- pls.loadings %>%
+  mutate(
+    buffer = substr(cov, nchar(cov)-4, nchar(cov)),
+    buffer = as.numeric(ifelse(!is.na(as.integer(buffer)), buffer, NA)),
+    cov2 = ifelse(is.na(buffer), cov, substr(cov, 1, nchar(cov)-5) )
+    ) %>%
+  select(contains("cov"), buffer, everything())
+
+my.alpha=0.3
+smallest.buffer <- min(pls.loadings$buffer, na.rm = T)
+largest.buffer <- max(pls.loadings$buffer, na.rm = T)
+
+pls.loadings.l  <- pls.loadings %>%
+  #make long format for faceting 
+  gather(key = "Component", value = "Loading", contains("Comp")) %>%
+  mutate(Component = as.numeric(substr(Component, 6, nchar(Component)))
+         ) %>%
+  #only show first 3 components for now
+  filter(Component <=3)   
+
+pls.loadings.l  %>%
+  #drop these in first points
+  drop_na(buffer) %>%
+  ggplot(aes(x = Loading, y = cov2)) + 
+  geom_point(aes(size=buffer),
+             shape=1,
+             alpha=my.alpha) +  
+  scale_size(breaks = c(smallest.buffer,  largest.buffer)) + #500, 5000, 10000,
+  
+  geom_point(data = pls.loadings.l[is.na(pls.loadings.l$buffer),], 
+           alpha=my.alpha,
+           aes(shape="")) + 
+  geom_vline(xintercept=0, 
+             linetype="solid", 
+             alpha=my.alpha) +
+    facet_wrap(~Component, scales = "free",
+               labeller = "label_both") +
+  labs(#x = paste0("Loading"),
+       y = "Geocovariate", 
+       shape= "non-buffer", #"proximity,\nelevation",
+       title = "PLS Geocovariate Component Loadings")
+ 
 
 ```
 
+Create a geodataset.
+
+```{r}
+pls.df <- cbind(site_id = annual0$site_id,
+                y=annual$y, 
+                pls1.scores) %>%
+  left_join(geo.mm) #%>%
+
+pls_geo <- as.geodata(pls.df, 
+                      coords.col = 15:16, 
+                      data.col = 2, 
+                      covar.col = 3:(3+min.cv.comp-1), covar.names = names(pls.df)[3:(3+min.cv.comp-1)]
+                      )
+
+geo.s <- summary(pls_geo)
+max.dist <- geo.s$distances.summary[["max"]]
+ 
+plot(pls_geo)
+#points(pls_geo, pt.divide = "quintile")
+
+```
 
 Model the error term   
 * check that exponential function models geostatistical structure appropriately
 
+### --> ? why does wls_ests=variofit(...model="exp") produce diff parameter estimates than likfit(pls_geo, ini=wls_ests)? what is likfit() doing??
+
+-Empirical Variograms
+
 ```{r}
+#trend
+cov.trend <-  as.formula(paste0("~ ", paste0(names(pls1.scores), collapse = " + " )))
+
+# cloud1 <- variog(pls_geo, max.dist=max.dist/2,
+#                  option="cloud")
+          
+              #uvec = seq(0, max.dist/2, length=20))
+#common practice - set max distance to half max dist
+bin_variog <- variog(pls_geo, max.dist=max.dist*1/2,
+                     #UK
+                     trend =  cov.trend
+                     )
+
+plot(bin_variog)
+ 
+
+# cloud1[c("u", "v")] %>% as.data.frame() %>%
+#   ggplot(aes(x=u, y=v)) + 
+#   geom_point(alpha=0.1) + 
+#   geom_smooth() +
+#   labs(x = "distance (m)",
+#        y = "semivariance",
+#        title = "Empirical variogram: cloud"
+#        )
+# 
+# bin_variog[c("u", "v")] %>% as.data.frame() %>%
+#   ggplot(aes(x=u, y=v)) + 
+#   geom_point() + 
+#   geom_line() +
+#   labs(x = "distance (m)",
+#        y = "semivariance",
+#        title = "Empirical variogram: bin"
+#        )
+
+```
+
+# --> ? error: flat semivariance 
+# --> ? variofit() vs likefit() ?
+# --> ? for other parametric fits, use wls_estimates for ini ??
+
+estimating geostatistical model parameters using various estimation methods. 
+
+```{r}
+#The two basic options are likfit which uses maximum likelihood to do the estimation (with options for ML vs REML), and variofit which uses a parametric model fit using either ordinary or weighted least squares. 
+
+#partial sill: sigma sq; range: phi, nugget: tau sq
+
+# uses weighted least squares and an exponential variogram
+wls_ests <- variofit(bin_variog, cov.model = "exp")
+ 
+# try various estimatio methods
+ml <- likfit(pls_geo, ini=wls_ests, cov.model = "exp",
+             trend = cov.trend,
+             lik.method = "ML") 
+reml <- likfit(pls_geo, ini=wls_ests, cov.model = "exp",
+               trend = cov.trend,
+               lik.method="REML")
+ols <- variofit(bin_variog, ini=wls_ests, cov.model = "exp", 
+                weights="equal")
+wls <- variofit(bin_variog, ini=wls_ests, cov.model = "exp",
+                weights = "npairs")
+
+# summary(ml)
+# summary(reml)
+# summary(ols)
+# summary(wls)
+
+#plot potential exponential fits
+par(mfrow = c(1, 1))
+plot(bin_variog, main = "Binned empirical (dots) and modeled (lines) variograms", )
+lines(bin_variog, lty=1)
+lines(ml, lty=2, col=2) 
+lines(reml, lty=3, col=3) 
+lines(ols, lty=4, col=4)
+lines(wls, lty=5, col=5)
+legend("bottomright", 
+       legend = c("ML","REML","OLS","WLS"), 
+       lty=c(2:5), col = c(2:5)
+       )
 
 
 ```
+
+use LOOCV to select variogram model
+
+## --> ? why is worse looking model have better RMSE, R2?
+## --> ? what R2 estimate is this? data-based...?
+
+```{r}
+xv.ml <- xvalid(pls_geo, model = ml)
+xv.reml <- xvalid(pls_geo, model = reml)
+xv.ols <- xvalid(pls_geo, model = ols)
+xv.wls <- xvalid(pls_geo, model = wls)
+
+print("ML LOOCV")
+par(mfrow = c(5, 2))
+plot(xv.ml) #caption = "ML LOOCV")
+
+print("REML LOOCV")
+plot(xv.reml)
+
+print("OLS LOOCV")
+plot(xv.ols)
+
+print("WLS LOOCV")
+plot(xv.wls)
+
+
+#calculate MSE and R2
+mse.ml <- mean((xv.ml$data - xv.ml$predicted)^2)
+mse.reml <- mean((xv.reml$data - xv.reml$predicted)^2)
+mse.ols <- mean((xv.ols$data - xv.ols$predicted)^2)
+mse.wls <- mean((xv.wls$data - xv.wls$predicted)^2)
+
+r2.ml <- 1 - mse.ml/mean((xv.ml$data - mean(xv.ml$data))^2)
+r2.reml <- 1 - mse.reml/mean((xv.reml$data - mean(xv.reml$data))^2)
+r2.ols <- 1 - mse.ols/mean((xv.ols$data - mean(xv.ols$data))^2)
+r2.wls <- 1 - mse.wls/mean((xv.wls$data - mean(xv.wls$data))^2)
+
+loocv.results <- data.frame(
+  method = c("ML", "REML", "OLS", "WLS"),
+  RMSE = sqrt(c(mse.ml, mse.reml, mse.ols, mse.wls)),
+  R2 = c(r2.ml, r2.reml, r2.ols, r2.wls)
+  )
+
+loocv.results %>% 
+  kable(caption = "LOOCV RMSE and R2 for various model parameter estimation methods",
+        digits = 4) %>%
+  kable_styling()
+  
+  
+```
+
 
 UK: UFP ~ PLS + E
 * ? use native or log-transformed UFP values? see distribution
 
+### --> use subset=Train
+
+```{r}
+ 
+
+
+```
+
+? CV RMSE, R2 ?
+
 ```{r}
 
 ```
 
 
-### --> plot pedicted vs measured UFP
+Predict at participant homes
 
 ```{r}
-#plot(pls1, line=T, asp=1)
-
+ 
 ```
 
 prediction boxplots overall and by important TRAP indicators
@@ -213,12 +418,31 @@ prediction boxplots overall and by important TRAP indicators
 Cross-validation   
 * exclude mobile monitoring observations at AQS sites
 
+Out-of sample/CV Test error (RMSE):
+* units are in pt/cm3
+
+### --> why is tehre an NA in error estimate? 
+
+```{r}
+# pls.pred <- predict(pls1, annual[annual$train==FALSE,], ncomp = min.cv.comp)
+# 
+# (pls.pred - annual$y[annual$train==FALSE])^2 %>%
+#   mean(na.rm=T) %>% sqrt() %>% round()
+
+```
+
 RMSE
 ```{r}
 
 ```
 
 CV R2  -- see 556 notes
+
+```{r}
+
+```
+
+plot of predicted vs measured
 
 ```{r}
 

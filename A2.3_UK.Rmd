@@ -1,5 +1,5 @@
 ---
-title: "Aim 2"
+title: "Aim 2: UK"
 author: "Magali Blanco"
 date: ' `r Sys.Date()` '
 output:
@@ -53,88 +53,76 @@ annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda")
   drop_na(m_to_a1)
 geo.mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "geo.mm.rda")) %>%
   select(site_id, contains("lambert"), latitude, longitude)
+geo.act <- read.csv(file.path("Data", "Aim 2", "ACT", "ACT_selected.csv"))  
 
 ```
 
-# PLS 
+# PLS to create summary features of geocovariates. 
 
-Create summary features of geocovariates 
+#### --> use geocovariate code to update geocovariates, 
+### --> issue: PLS only works when variables aren't scaled
+  "errors when variables aren't scaled:...In FUN(X[[i]], ...) : Scaling with (near) zero standard deviation"
 
-#### --> use geocovariate code to update geocovariates, then see if this is still an issue:
-errors when variables aren't scaled:...In FUN(X[[i]], ...) : Scaling with (near) zero standard deviation
+Create training,  test and AQS set.
 
 ```{r}
-set.seed(1)
-
-# 1. fit PLS using training set to ID # features to use
-# 2. calculate RMSE using test set w/ selected # features
-# 3. fit final model using all data
-
 # loadings(), coef(pls.fit), scores(), ? loading.weights()
 
 # 1. fit PLS using training set to ID # features to use
-annual <- annual0 %>%
+annual.all <- annual0 %>%
   select(site_id,
          ufp = yhat_s_tow2, 
          m_to_a1:ncol(annual0)) %>%
+  drop_na() %>%
   mutate(
     #log-transform UFP
-    log_ufp = log(ufp)
-    ) %>%
-  drop_na()
+    log_ufp = log(ufp),
+      #create test, train, aqs data set
+    set = ifelse(grepl("MC", site_id), "aqs",
+                 sample(c("train", "test"), size = sum(grepl("MS", site_id)), replace = T)
+                 )
+         )
 
-train.index <- sample(c(TRUE, FALSE), size = nrow(annual), replace = T)
-sites.train <- annual$site_id[train.index]
-sites.test <- annual$site_id[!train.index]
+# save site_ids for later
+train.site_id <- annual.all$site_id[annual.all$set== "train"]
+test.site_id <- annual.all$site_id[annual.all$set== "test"]
+aqs.site_ids <- annual.all$site_id[annual.all$set== "aqs"]
 
-annual.train <- annual %>% filter(train.index) %>%
-  select(-site_id)
-annual.test <- annual %>% filter(!train.index) %>%
-  select(-site_id)
+annual <- annual.all %>%
+  #drop aqs sites
+  filter(set %in% c("train", "test"))  
 
+annual.train <- annual.all %>%
+  filter(set == "train")  
+
+annual.test <- annual.all %>%
+  filter(set == "test")  
+
+annual.aqs <- annual.all %>%
+  #only keep aqs sites
+  filter(set == "aqs")  
+ 
+```
+
+fit PLS with training data 
+
+```{r}
 # --> ? issue: PLS only works when variables aren't scaled
- pls.train <- plsr(log_ufp~., 
-             data=annual.train,
+pls.train <- plsr(log_ufp ~.,
+             data=annual.train[,!(names(annual.train) %in% c('site_id','set'))],
              #scale=T,
              validation = "CV")
 
 #summary(pls.train)
+#plot(pls.train)
 
 ```
 
-```{r, d??}
-# ## plot to select no. of PLS features based on CV RMSE
-# RMSEP(pls.train, estimate = "CV",  )
-# 
-# cv.rmse <- RMSEP(pls.train, estimate = "CV")
-# cv.df <- data.frame(PLS_Components = cv.rmse$comps,
-#                     CV_RMSE = as.numeric(cv.rmse$val))  
-# 
-# min.cv.comp <- cv.df$PLS_Components[cv.df$CV_RMSE == min(cv.df$CV_RMSE)]
-# min.cv.rmse <- cv.df$CV_RMSE[cv.df$CV_RMSE == min(cv.df$CV_RMSE)]
-# 
-# cv.df %>%
-#   ggplot(aes(x = PLS_Components, y = CV_RMSE)) + 
-#   geom_line() + 
-#   geom_point(aes(x= min.cv.comp, y = min.cv.rmse, 
-#                  col = "Min RMSE")) +
-#   labs(col = "") + 
-#   labs(
-#     title = "CV RMSE for PLS components",
-#     #subtitle = "using training data",
-#     x = "PLS Components",
-#     y = "CV RMSE"
-#     ) +
-#   annotate("text", -Inf, Inf, label = paste0("Min RMSE\n-Components: ", min.cv.comp, 
-#                                              "\n-RMSE: ", round(min.cv.rmse, 2)), 
-#            hjust = 0, vjust = 1)
+Calculate test RMSE and R2 for training models with a different number of components.
 
-```
-
-Manually calculate test RMSE and R2 for various components.
+### --> fn for 10FCV instead of split set (test/train)
 
 ```{r}
-# --> ? issue: PLS only works when variables aren't scaled
 n.comp <- 30
 
 pls.comp.fit <- data.frame(
@@ -144,12 +132,12 @@ pls.comp.fit <- data.frame(
 
 for (i in 1:n.comp) {
   pls.train <- plsr(log_ufp ~., 
-             data = annual.train, 
+             data = annual.train[,!(names(annual.train) %in% c('site_id','set'))], 
              ncomp = i,
              #scale=T
              )
 
-  #predict test set
+  #predict test set using training model
   pls.pred <- predict(pls.train, annual.test, ncomp = i)
   
   pls.mse <- mean((pls.pred - annual.test$log_ufp)^2, na.rm=T)  
@@ -167,15 +155,13 @@ r2.at.min.rmse <- pls.comp.fit$R2[pls.comp.fit$RMSE == min.rmse]
 fit.info <- paste0("Min RMSE: ", round(min.rmse, 3),
                    "\nComponents: ", min.comp, 
                    "\nR2: ", round(r2.at.min.rmse, 2)
-                                             )
+                   )
 
 pls.comp.fit %>%
   gather("eval", "value", RMSE:R2) %>%
   ggplot(aes(x=pls_comp, y = value, col = eval)) + 
   geom_point() + 
   geom_line() +
-  # annotate("text", -Inf, Inf, label = fit.info, 
-  #          hjust = 0, vjust = 1) + 
   geom_vline(xintercept = min.comp, 
              linetype = "dashed",
              alpha=0.5) +
@@ -190,48 +176,99 @@ pls.comp.fit %>%
   
 ```
 
+Plot of out-of-sample predictions at other stops (using stop test set).
+
+### --> ? fn to calculate 10FCV predictions? 
+
 ```{r}
-pls.plots.list <- list()
+no.pls.comp <- min.comp #12 
 
-#plot
-# # comparing predictions for the training data (in-sample)
-p <- plot(pls.train, ncomp = i, asp=1, line=T, 
-     main = paste0("PLS using ", i, " components") )
+#predict at out-of-sample stop sites, using selected number of components 
+annual.test$pred_log_ufp <- predict(pls.train, annual.test, ncomp = no.pls.comp) %>% as.vector()
 
+colo.plot(data.wide = annual.test, 
+            x.variable = "log_ufp", 
+            x.label = "Measured log UFP (log pt/cm3)",
+            y.variable = "pred_log_ufp", 
+            y.label = "Predicted log UFP (log pt/cm3)",
+            rmse.digits = 2, 
+            mytitle = paste0("Out of sample measured vs predicted UFP concentrations at stops", 
+                             "\nnumber of PLS components: ", 
+                             no.pls.comp
+                             )
+            )
 ```
 
+Plot of out-of-sample predictions at co-located AQS sites (using AQS test set).
 
-Fit PLS using entire dataset.
+```{r}
+
+#predict at out-of-sample co-location AQS sites 
+annual.aqs$pred_log_ufp <- predict(pls.train, annual.aqs, ncomp = no.pls.comp) %>% as.vector()
+
+lm1 <- lm(formula(paste("pred_log_ufp", "~", "log_ufp")), data = annual.aqs)
+           
+#rmse
+rmse <- (annual.aqs$pred_log_ufp - annual.aqs$log_ufp)^2 %>%
+ mean() %>% sqrt() %>%
+ round(digits = 2)
+
+fit.info <- paste0("y = ", round(coef(lm1)[1], 2), " + ", round(coef(lm1)[2], 2), 
+                  "x \nR2 = ", round(summary(lm1)$r.squared, 2), 
+                  "\nRMSE = ", rmse,
+                  "\nno. pairs = ", nrow(annual.aqs))
+#compare  
+annual.aqs %>%
+ ggplot(aes(x= log_ufp, y= pred_log_ufp)) + 
+ geom_point(alpha=0.3) + 
+ geom_abline(intercept = 0, slope = 1) +
+ #geom_smooth(aes(fill="loess")) + 
+ #geom_smooth(method = "lm", aes(fill="LS")) + 
+ labs(title = paste0("Out of sample measured vs predicted UFP \nconcentration at AQS co-location sites"),
+      subtitle = paste0("\nnumber of PLS components: ", 
+                 no.pls.comp),
+      x = "Measured log UFP (log pt/cm3)",
+      y = "Predicted log UFP (log pt/cm3)"
+      ) +
+ annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1) + 
+     geom_smooth(method = "lm") 
+
+           
+```
+
+Fit PLS using all data and selected PLS components.    
+
 
 ```{r}
 pls1 <- plsr(log_ufp ~., 
-             data = annual, 
-             ncomp = min.cv.comp,
+             #annual.all: aqs, train & test; annual: train & test
+             data = annual.all[ ,!names(annual.all) %in% c("site_id", "set")], #annual, 
+             ncomp = no.pls.comp,
              #scale=T
              )
+
+
 ```
 
 Extract composite scores
 
 ```{r}
 # extract scores for UK
-pls1.scores <- scores(pls1) [,c(1:min.cv.comp)] %>%
+pls1.scores <- scores(pls1) [,c(1:no.pls.comp)] %>%
   as.data.frame()
+#same as above
+#predict(pls1, type = "score", ncomp = 30)
+
 
 # take out spaces in names
 names(pls1.scores) <- gsub(" ", "", names(pls1.scores))
 
+#wrong:
+#scores(pls1, data=annual.aqs)
+
 ```
 
-Predicted vs Measured
-
-```{r}
-# # comparing predictions for the training data (in-sample)
-plot(pls1, ncomp = min.cv.comp, asp=1, line=T, 
-     main = paste0("PLS using ", min.cv.comp, " components") )
  
-```
-
 Plot the loadings. 
 
 ### --> ? why does loadings.weights() and loadings() produce diff results?
@@ -293,50 +330,51 @@ pls.loadings.l  %>%
 
 ```
 
-Create geodatasets.  
+# Create geodatasets  
 
 ```{r}
-pls.df.all <- cbind(site_id = annual$site_id,
-                log_ufp=annual$log_ufp, 
-                pls1.scores
-                ) %>%
+pls.all <- cbind(
+  annual.all[c("site_id", "log_ufp")],
+  pls1.scores
+) %>%
   left_join(geo.mm) 
 
-pls.df <- pls.df.all %>%
-  #drop AQS sites from primary dataset
-  filter(!grepl("MC", site_id))
+pls.train.test <- pls.all %>%
+  filter(annual.all$set %in% c("train", "test"))
+pls.test <- pls.all %>%
+  filter(annual.all$set == "test")
+pls.train <- pls.all %>%
+  filter(annual.all$set == "train")
 
-pls.df.aqs <- pls.df.all %>%
-  #drop AQS sites (use for out-of-sample validation later)
-  filter(grepl("MC", site_id))
-
-
-pls.df.train <- pls.df %>% 
-  filter(train.index)
-pls.df.test <- pls.df %>% 
-  filter(!train.index)
+pls.aqs <- pls.all %>%
+  filter(annual.all$set == "aqs")
 
 #training data (? need??)
-pls_geo_train <- as.geodata(pls.df.train, 
+geo_train <- as.geodata(pls.train, 
                       coords.col = c("lambert_x", "lambert_y"), 
                       data.col = "log_ufp", 
                       covar.col = names(pls1.scores))
 #stops 
-pls_geo <- as.geodata(pls.df, 
+geo_train_test <- as.geodata(pls.train.test, 
                       coords.col = c("lambert_x", "lambert_y"), 
                       data.col = "log_ufp", 
                       covar.col = names(pls1.scores))
 #AQS sites
-aqs_geo <- as.geodata(pls.df.aqs, 
+geo_aqs <- as.geodata(pls.aqs, 
                       coords.col = c("lambert_x", "lambert_y"), 
                       data.col = "log_ufp", 
                       covar.col = names(pls1.scores))
 
-geo.s <- summary(pls_geo_train)
+geo.s <- summary(geo_train)
 max.dist <- geo.s$distances.summary[["max"]]
- 
-plot(pls_geo_train)
-#points(pls_geo_train, pt.divide = "quintile")
+
+```
+
+Training data 
+
+```{r}
+plot(geo_train)
+#points(geo_train, pt.divide = "quintile")
 
 ```
 
@@ -352,7 +390,7 @@ Model the error term
 cov.trend <-  as.formula(paste0("~ ", paste0(names(pls1.scores), collapse = " + " )))
 max.plot.dist <- max.dist*.1
 
-variog_train <- variog(pls_geo_train, 
+variog_train <- variog(geo_train, 
                      #common practice - set max distance to half max dist
                      max.dist=max.plot.dist,
                      #UK
@@ -361,7 +399,7 @@ variog_train <- variog(pls_geo_train,
 #plot(variog_train)
 
 
-# cloud1 <- variog(pls_geo_train, max.dist=max.plot.dist,
+# cloud1 <- variog(geo_train, max.dist=max.plot.dist,
 #                  option="cloud")
               #uvec = seq(0, max.dist/2, length=20))
 #plot(cloud1)
@@ -380,10 +418,10 @@ wls_ests_train <- variofit(variog_train, cov.model = "exp")
  
 # try various estimatio methods. The two basic options are likfit which uses maximum likelihood to do the estimation (with options for ML vs REML), and variofit which uses a parametric model fit using either ordinary or weighted least squares. 
 
-ml_train <- likfit(pls_geo_train, ini=wls_ests_train, cov.model = "exp",
+ml_train <- likfit(geo_train, ini=wls_ests_train, cov.model = "exp",
              trend = cov.trend,
              lik.method = "ML") 
-reml_train <- likfit(pls_geo_train, ini=wls_ests_train, cov.model = "exp",
+reml_train <- likfit(geo_train, ini=wls_ests_train, cov.model = "exp",
                trend = cov.trend,
                lik.method="REML")
 ols_train <- variofit(variog_train, ini=wls_ests_train, cov.model = "exp", 
@@ -420,34 +458,30 @@ legend("bottomright",
 use LOOCV to select variogram model
 
 ```{r, results='hide'}
-xv.ml <- xvalid(pls_geo_train, model = ml_train)
-xv.reml <- xvalid(pls_geo_train, model = reml_train)
-xv.ols <- xvalid(pls_geo_train, model = ols_train)
-xv.wls <- xvalid(pls_geo_train, model = wls_train)
+xv.ml <- xvalid(geo_train, model = ml_train)
+xv.reml <- xvalid(geo_train, model = reml_train)
+xv.ols <- xvalid(geo_train, model = ols_train)
+xv.wls <- xvalid(geo_train, model = wls_train)
 
 ```
 
-### --> Knitr error - plotting. "plot.window(xlim, ylim, ...) need finite "xlim" values...
+```{r, ? delete.chunk?, eval=F}
 
-```{r, eval=F}
-# ????
-# max.dist = max.dist
-
-print("ML LOOCV")
-par(mfrow = c(5, 2))
-plot(xv.ml) 
-
-print("REML LOOCV")
-#par(mfrow = c(3, 4))
-plot(xv.reml)
-
-print("OLS LOOCV")
-#par(mfrow = c(3, 4))
-plot(xv.ols)
-
-print("WLS LOOCV")
-#par(mfrow = c(3, 4))
-plot(xv.wls)
+# print("ML LOOCV")
+# par(mfrow = c(5, 2))
+# plot(xv.ml) 
+# 
+# print("REML LOOCV")
+# #par(mfrow = c(3, 4))
+# plot(xv.reml)
+# 
+# print("OLS LOOCV")
+# #par(mfrow = c(3, 4))
+# plot(xv.ols)
+# 
+# print("WLS LOOCV")
+# #par(mfrow = c(3, 4))
+# plot(xv.wls)
 
 ```
 
@@ -470,7 +504,7 @@ data.frame(
   RMSE = sqrt(c(mse.ml, mse.reml, mse.ols, mse.wls)),
   R2 = c(r2.ml, r2.reml, r2.ols, r2.wls)
   ) %>% 
-  kable(caption = paste0("LOOCV RMSE and R2 for various model parameter estimation methods. Using training data (n = ", length(train.index[train.index==T]), " site annual averages)" ),
+  kable(caption = paste0("LOOCV RMSE and R2 for various model parameter estimation methods. Using training data (n = ",  nrow(pls.train), " site annual averages)" ),
         digits = 3) %>%
   kable_styling() %>%
   add_footnote(c("R2 = 1 – MSE / Var(Y)"))
@@ -479,16 +513,20 @@ data.frame(
 
 ### --> ?? need to use training dataset above this if use xvald() ??
 
-Select error model and fit final model to entire dataset.
+Fit final model to all stops (train & test set)
 
 ```{r}
+plot(geo_train_test)
 
-max.dist <- summary(pls_geo)$distances.summary[["max"]]
+```
+
+variogram with all stop data
+
+```{r, results= "hide"}
+max.dist <- summary(geo_train_test)$distances.summary[["max"]]
 max.plot.dist <- max.dist*.1
 
-plot(pls_geo)
-
-variog <- variog(pls_geo,
+variog <- variog(geo_train_test,
                      max.dist = max.plot.dist,
                      trend =  cov.trend)
 
@@ -496,7 +534,7 @@ variog <- variog(pls_geo,
 wls_ests <- variofit(variog, cov.model = "exp")
 
 #use selected error model (from training data above)
-reml <- likfit(pls_geo, ini=wls_ests, cov.model = "exp",
+reml <- likfit(geo_train_test, ini=wls_ests, cov.model = "exp",
                trend = cov.trend,
                lik.method="REML")
 
@@ -521,7 +559,7 @@ data.frame(
   range_m = c(reml.range),
   nugget = c(reml.nugget)
 ) %>%
-  kable(caption = "Variogram parameters",
+  kable(caption = paste0("Variogram parameters (n = ", nrow(pls.train.test), " sites)" ),
         digits = 3
         ) %>%
   kable_styling()
@@ -529,10 +567,10 @@ data.frame(
 ```
 
 Model Validation
-- CV RMSE, R2 (all mobile monitoring sites, excluding AQS sites)
+- LOOCV RMSE, R2 at all stops (excluding AQS sites)
 
 ```{r, results="hide"}
-xv.reml <- xvalid(pls_geo, model = reml)
+xv.reml <- xvalid(geo_train_test, model = reml)
 
 ```
 
@@ -544,23 +582,53 @@ plot(xv.reml)
 mse.reml <- mean((xv.reml$data - xv.reml$predicted)^2)
 r2.reml <- 1 - mse.reml/mean((xv.reml$data - mean(xv.reml$data))^2)
 
+data.frame(
+  no_sites = length(xv.reml$data),
+  RMSE = sqrt(mse.reml),
+  R2 = r2.reml
+) %>%
+  kable(caption = paste0("LOOCV using REML variogram parameters (n = ", nrow(pls.train.test), " sites)"), 
+        digits = 2) %>%
+  kable_styling()
+
 ```
 
-- Out-of-sample RMSE, R2 (AQS sites)
+- Out-of-sample RMSE, R2 at AQS sites
 
-### --> predict at these locations & calculate RMSE, R2 / ? how to do out of sample validation
+```{r}
+# #error, doesn't work
+# xvalid(geodata= geo_train_test, model = reml,
+#        locations.xvalid = geo_aqs$coords,
+#        data.xvalid = geo_aqs$data,
+#        #trend = cov.trend
+#        )
 
-"Error in trend.spatial(trend = krige$trend.l, geodata = list(coords = locations)): trend elements not found"
+train_test_trend <- trend.spatial(trend = cov.trend, 
+                                  geodata = geo_train_test)
+aqs_trend <- trend.spatial(trend = cov.trend,
+                           geodata = geo_aqs)
 
-```{r, results="hide"}
-# xv.reml.aqs <- xvalid(pls_geo, model = reml,
-#                       data.xvalid = aqs_geo$data,
-#                       locations.xvalid = aqs_geo$coords, 
-#                       trend = trend.spatial(trend = cov.trend, aqs_geo)
-#                       )
-# summary(xv.reml.aqs)
+uk_aqs <- krige.conv(coords = geo_train_test$coords,
+                            data = geo_train_test$data,
+                            locations = geo_aqs$coords,
+                            krige=krige.control(type = "ok",
+                                                obj.model = reml,
+                                                trend.d= train_test_trend,
+                                                trend.l= aqs_trend))
+#save UK predictions
+geo_aqs$pred  <- uk_aqs$predict
+ 
+#calculate out-of-sample RMSE and R2
+mse.oos.aqs <- mean((geo_aqs$data - geo_aqs$pred)^2)
+r2.oos.aqs <- 1 - mse.oos.aqs/mean((geo_aqs$data - mean(geo_aqs$data))^2)
 
-
+data.frame(
+  RMSE = sqrt(mse.oos.aqs),
+  R2 = r2.oos.aqs
+) %>%
+  kable(caption = paste0("Out-of sample RMSE and R2 for AQS sites using UK model fit to stops (n = ", length(geo_aqs$data), " AQS sites)"), 
+        digits = 2) %>%
+  kable_styling()
 
 ```
 
@@ -583,10 +651,51 @@ plot of predicted vs measured
 ```
 
 use UK to predict at participant homes 
-### --> "step 3"
-### --> load participant geocovariates 
+### --> convert act locations to composite scores. multiply by loadings and betas???
+### --> create geo dataset
 
-```{r}
+```{r, eval=F}
+# View(pls1)
+# str(pls1)
+# pls1$fitted.values
+
+t <- predict(object = pls.train, #newdata = geo.act, 
+             type="scores",
+             ncomp = no.pls.comp)
+
+ 
+
+###--> make geo.act geocovariates into scores
+
+
+#create geodataset
+geo_act <- as.geodata(pls.train, 
+                      coords.col = c("lambert_x", "lambert_y"), 
+                      data.col = "log_ufp", 
+                      covar.col = names(pls1.scores))
+
+
+#geo_act <- 
+
+
+
+
+
+#trend
+act_trend <- trend.spatial(trend = cov.trend,
+                           geodata = geo_act)
+#uk
+uk_act <- krige.conv(coords = geo_train_test$coords,
+                            data = geo_train_test$data,
+                            locations = geo_act$coords,
+                            krige=krige.control(type = "ok",
+                                                obj.model = reml,
+                                                trend.d= train_test_trend,
+                                                trend.l= act_trend))
+#save UK predictions
+geo_act$pred  <- uk_act$predict
+ 
+ 
 
 
 ```
@@ -599,6 +708,8 @@ prediction boxplots overall and by important TRAP indicators
 
 
 Map predictions
+
+### --> see 2.4.5
 
 ```{r}
 

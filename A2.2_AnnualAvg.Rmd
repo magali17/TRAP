@@ -7,6 +7,13 @@ editor_options:
   chunk_output_type: console
 ---
 
+```{r, incldue=F}
+#notes
+# refs:
+## Sampson 2013 National UK Model using PLS for PM2.5
+
+```
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
@@ -37,8 +44,19 @@ source("A2.0.1_Var&Fns.R")
 #load data
 mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_2019-12-22.rda"))
 mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.w_2019-12-22.rda"))
-geo.mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "geo.mm.rda")) %>%
-  select(-contains("lambert"), -latitude, -longitude)
+
+cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda")) %>%
+  select(#-contains("lambert"), -latitude, -longitude,
+         -contains("pop_"), -contains("pop90_")
+         )
+site_locations <- cov_mm %>% 
+  select(
+    site_id, 
+    contains("lambert"), latitude, longitude)
+
+cov_mm <- cov_mm %>% select(-contains("lambert"), -latitude, -longitude)
+cov_names <- names(cov_mm)[!names(cov_mm) %in% c("site_id")]
+
 
 ufp0 <- mm.wide %>% 
   select(date:site_no,
@@ -69,7 +87,7 @@ ufp0 <- ufp0 %>% select(-ptrak_pt_cm3_mean) %>%
   rename(ptrak = ptrak_pt_cm3_median) %>%
   #remove NAs
   drop_na(ptrak) %>%
-  left_join(geo.mm)
+  left_join(cov_mm)
 
 #trim data 
 ufp <- ufp0 %>%
@@ -252,43 +270,47 @@ ggarrange(p.hour, p.day, p.season) %>%
 
 # Concentrations by correlated geocovariates
 
+### --> use PLS plot here 
+
 ```{r}
-select.cov <- 10
+#select.cov <- #20
+
 geo.cor <- ufp %>%
   #select_if(is.numeric) %>%
   select(ptrak,
-         m_to_a1:tl_s15000) %>%
+         cov_names) %>%
   cor(use = "complete.obs") %>%
   as.data.frame() %>%
   select(ptrak) %>%
   rownames_to_column() %>%
-  arrange(desc(ptrak)) %>%
-  filter(row_number() %in% c(1:select.cov, (n()-select.cov):n()),
+  arrange(desc(abs(ptrak))) %>%
+  filter(#row_number() %in% c(1:select.cov, (n()-select.cov):n()),
          rowname != "ptrak"
          )  %>%
-  rename(geocovariate = rowname) 
+  rename(geocovariate = rowname,
+         cor_with_ptrak = ptrak) 
  
-geo.cor %>% kable() %>%
-   kable_styling()
+# geocov vs correlation
+geo.cor %>%
+  ggplot(aes(x=cor_with_ptrak, y=geocovariate)) + 
+  geom_point() + 
+  geom_vline(xintercept = 0, alpha=0.5, linetype = "dashed") + 
+  labs(x = "Correlation (R) with PTRAK stop readings",
+       title = "Correlation (R) between stop covariates and PTRAK readings"
+       )
 
-cov.list <- c("lu_transport_p05000", 
-         "ll_a1_s05000",
-         "rlu_dev_hi_p05000", "rlu_evergreen_p03000",
-         "imp_a05000",
-         "intersect_a1_a3_s03000",
-         "m_to_l_airp",
-         "ndvi_summer_a01000")
-
-#plot UFPs based on strongest variable correlations
-
-ufp %>%
-  select(ptrak, 
-         cov.list) %>%
-  gather("geo", "value", -ptrak) %>%
-  ggplot(aes(x=value, y=ptrak)) + 
-  geom_point(alpha=0.1) + 
-  geom_smooth() +
-  facet_wrap(~geo, scales = "free_x")
+# DELETE? 
+# #select covariates most correlated w/ UFP stop readings
+# cov.list <- geo.cor$geocovariate[1:40]
+# #plot UFPs based on strongest variable correlations
+# ufp %>%
+#   select(ptrak, 
+#          cov.list) %>%
+#   gather("geo", "value", -ptrak) %>%
+#   ggplot(aes(x=value, y=ptrak)) + 
+#   geom_point(alpha=0.1) + 
+#   geom_smooth(se = T) +
+#   facet_wrap(~geo, scales = "free")
   
 ```
 
@@ -563,7 +585,7 @@ Save annual averages from all methods with geocovariates.
 annual <- ufp %>% 
   ungroup() %>%
   select(site_no, site_id, 
-         m_to_a1:tl_s15000,
+         cov_names,
          mean_uw,
          ) %>%
   unique() %>%
@@ -577,8 +599,16 @@ annual <- ufp %>%
   select(site_no, site_id, 
          mean_uw:yhat_m_day_hr, everything())
 
+method_names_all <- annual %>%
+  select(contains("mean_"), contains("yhat_")) %>%
+  names()
+
+#drop estimate/s that can only be calculated w/ regression
+method_names <- setdiff(method_names_all, c("yhat_m_day_hr"))
+
+
 annual.l <- annual %>%
-  gather(key = "method_weight", value = "ufp", c(mean_uw:yhat_m_day_hr)) %>%
+  gather(key = "method_weight", value = "ufp", method_names_all) %>%
   drop_na() %>%
   separate(method_weight, into=c("method", "weight"), 
                      sep = "_" , remove = F, extra = "merge")  
@@ -606,6 +636,8 @@ annual.l %>%
 
 ```
 
+### --> add log UFP to dataset; adjust rest of code to ?only include log-transformed variables
+
 ```{r, fig.height = 8}
 #TOD2
 annual.l.tod2 <- annual.l %>%
@@ -621,7 +653,7 @@ annual.l.tod2.rage <- annual.l.tod2 %>%
     mean = mean(ufp))
 
 ufp_by_method (dt = annual.l.tod2, 
-               dt.range = annual.l.tod2.rage)
+               dt.range = annual.l.tod2.rage) 
 
 #TOW2
 annual.l.tow2 <- annual.l %>%
@@ -656,20 +688,27 @@ ufp_by_method (dt = annual.l.tow2,
 tod2 <- annual %>% drop_na()
 
 # not including yhat_m_day_hr b/c only available for regression method
-tod2$min <- apply(tod2[,c(3:10)], 1, function(x)  range(x)[1])  
-tod2$max <- apply(tod2[,c(3:10)], 1, function(x)  range(x)[2])  
-tod2$diff <- tod2$max - tod2$min #apply(tod2[,c(3:10)], 1, function(x)  diff(range(x)))  
+tod2$min <- apply(tod2[,method_names], 1, function(x)  range(x)[1])  
+tod2$max <- apply(tod2[,method_names], 1, function(x)  range(x)[2])  
+
+tod2$diff <- tod2$max - tod2$min  
 
 ```
 
 ```{r}
 # TOW2
-tow2 <- annual %>% select(-mean_s_tow2_tod2) %>%
+tow2 <- annual %>% 
+  select(-mean_s_tow2_tod2,
+         -yhat_s_tow2_tod2,
+         -yhat_m_day_hr
+         ) %>%
   drop_na()  
 
-tow2$min <- apply(tow2[,c(3:8)], 1, function(x)  range(x)[1])  
-tow2$max <- apply(tow2[,c(3:8)], 1, function(x)  range(x)[2])  
-tow2$diff <- tow2$max - tow2$min  #apply(tow2[,c(3:8)], 1, function(x)  diff(range(x)))  
+method_names_tow2 <- method_names[!grepl("s_tow2_tod2",method_names)]
+
+tow2$min <- apply(tow2[,method_names_tow2], 1, function(x)  range(x)[1])  
+tow2$max <- apply(tow2[,method_names_tow2], 1, function(x)  range(x)[2])  
+tow2$diff <- tow2$max - tow2$min 
 
 ```
 
@@ -723,10 +762,11 @@ tow.2.high$diff_lvl <- "high"
 tow.2.low$diff_lvl <- "low"
 tow.2.high.low <- rbind(tow.2.high, tow.2.low) 
 
-cov.list2 <- c("ll_a1_s01500", "m_to_coast", "m_to_airp", "m_to_l_port",  "m_to_rr", "m_to_truck", "elev_elevation", "pop10_s15000", "ndvi_q50_a07500", "imp_a01000", "lu_resi_p15000")
+# cov.list2 <- c("ll_a1_s01500", "m_to_coast", "m_to_airp", "m_to_l_port",  "m_to_rr", "m_to_truck", "elev_elevation", "pop10_s15000", "ndvi_q50_a07500", "imp_a01000", "lu_resi_p15000")
 
+#plot 20 most correlated covariates
 tow.2.high.low %>%
-  gather("geocov", "value", c(cov.list2)) %>%
+  gather("geocov", "value", c(geo.cor$geocovariate[1:20])) %>%
   ggplot(aes(x = value, fill = factor(diff_lvl))) +
   geom_density(alpha=0.5) +
   facet_wrap(~geocov, scales="free") +
@@ -766,8 +806,8 @@ tow.2.high.low %>%
 
 ```{r, eval=T}
 #ANOVA for TOW2
-tow2.anova <- tow2 %>%
-  select(site_id:yhat_s_tow2_tod2) %>%
+ tow2.anova <- tow2 %>%
+  select(site_id, method_names_tow2) %>%
   gather("method", "value", -site_id) %>%
   ungroup() %>%
   mutate(
@@ -795,6 +835,8 @@ Y ~ season + tow + tod + site_id
 How do the seasonal/TOW/TOD effects impact annual mean UFP estimates relative to the method effects (~100-200 pt/cm3)
 
 Using sites w/ season-TOW2-TOD2 estimates.
+
+### --> ? make time_of_week --> day of week? tod2...?
 
 ```{r, include=T}
 tod.sites <- tod2$site_id
@@ -826,55 +868,17 @@ summary(tow2_lm1) #$coef #[c(1:6),]
 
 anovaVCA(ptrak ~ season + day + hour + site_id,  Data = as.data.frame(ufp))
 tow2_lm2 <- lm(ptrak ~ season + factor(day, ordered = F) + factor(hour) + site_id, data = ufp)
-anova(tow2_lm2) #%>% kable()
+anova(tow2_lm2) %>% 
+  kable() %>% kable_styling()
 summary(tow2_lm2) #$coef #[c(1:6),]
 
 ```
 
-#### Compare impacts on LUR    
+#### Compare impacts on LUR (log-transformed values)   
 
 Fitting LUR using different averaging methods for UFP; plotting observed averages vs model predictions.
 
 Correlations. Using season-TOW2 estimates (n = `r nrow(tow2)`).
-
-
-```{r}
-# #find highest correlations 
-# ### --> check 28:ncol(mm) - correct?
-# ufp.geo <- mm %>% 
-#   left_join(geo.mm) %>%
-#   select(site_id, 
-#          28:ncol(.)) %>%
-#   unique() 
-# 
-# ufp.geo <- ufp.geo %>%
-#   right_join(annual)
-# 
-# geo.cor <- ufp.geo %>%
-#   select_if(is.numeric) %>%
-#   cor(use = "complete.obs") %>%
-#   as.data.frame() %>%
-#   rownames_to_column() %>%
-#   filter(rowname %in% c("mean_uw", "mean_s", "mean_s_tow2", "mean_s_tow2_tod2",
-#                          "yhat_uw", "yhat_s", "yhat_s_tow2", "yhat_s_tow2_tod2"
-#                          ))
-# 
-# geo.cor <- geo.cor %>% column_to_rownames() 
-# 
-# geo.cor <- t(geo.cor) %>%
-#   as.data.frame() %>%
-#   rownames_to_column() %>%
-#   filter(!rowname %in% c("mean_uw", "mean_s", "mean_s_tow2", "mean_s_tow2_tod2",
-#                          "yhat_uw", "yhat_s", "yhat_s_tow2", "yhat_s_tow2_tod2"
-#                          ))
-# 
-# #only keep valriables w/ high corr
-# geo.cor %>% filter(abs(mean_uw) > 0.85) %>% 
-#   arrange(desc(mean_uw)) %>%
-#   kable(caption = "Geocovariates most correlated (R) with site annual averages")
-
-
-```
 
 Evaluate LUR predictions using different methods.
 
@@ -882,49 +886,49 @@ note: regression estimates are more similar than site avg methods
 
 ```{r}
 #-sites w/ TOW2
+tow2.copy <- tow2
+#tow2 <-  tow2.copy
+
+reg_predictors <- paste0(geo.cor$geocovariate[1:5], collapse = " + ")
 
 #save lm predictions for dataset
 tow2 <- tow2 %>%
-  #?? fit separate models for high vs low values of ll_a1_s01500 / rlu_evergreen_p01000
-  # rename(var = ll_a1_s01500) %>%
-  # filter(var < quantile(var, 0.6)) %>%
+  # log transform estimates
+  mutate_at(vars(contains("mean_"), contains("yhat_")), ~log(.)) %>%
+  save.pred.fn(y_string = "mean_s_tow2", x_string = reg_predictors) %>%
+  save.pred.fn(y_string = "mean_s", x_string = reg_predictors) %>%
+  save.pred.fn(y_string = "mean_uw", x_string = reg_predictors) %>%
+  save.pred.fn(y_string = "yhat_s_tow2", x_string = reg_predictors) %>%
+  save.pred.fn(y_string = "yhat_s", x_string = reg_predictors) %>%
+  save.pred.fn(y_string = "yhat_uw", x_string = reg_predictors) 
+  # transform back to native scale
+  #mutate_at(vars(contains("mean_"), contains("yhat_")), ~exp(.)) 
 
-  save.pred.fn(y_string = "mean_s_tow2") %>%
-  save.pred.fn(y_string = "mean_s") %>%
-  save.pred.fn(y_string = "mean_uw") %>%
-  save.pred.fn(y_string = "yhat_s_tow2") %>%
-  save.pred.fn(y_string = "yhat_s") %>%
-  save.pred.fn(y_string = "yhat_uw")
-
- # # quick plot view
- # colo.plot(data.wide = tow2,
- #                    x.variable = "mean_uw",
- #                    y.variable = "LUR_mean_uw")
-
+rmse.digits. <- 0
 #compare predictsion vs observations
 LUR_mean_s_tow2_plot <- colo.plot(data.wide = tow2,
                     x.variable = "mean_s_tow2",
-                    y.variable = "LUR_mean_s_tow2")
+                    y.variable = "LUR_mean_s_tow2", rmse.digits = rmse.digits.)
 
 LUR_mean_s_plot <- colo.plot(data.wide = tow2,
                     x.variable = "mean_s",
-                    y.variable = "LUR_mean_s")
+                    y.variable = "LUR_mean_s", rmse.digits = rmse.digits.)
 
 LUR_mean_uw_plot <- colo.plot(data.wide = tow2,
                     x.variable = "mean_uw",
-                    y.variable = "LUR_mean_uw")
+                    y.variable = "LUR_mean_uw", rmse.digits = rmse.digits.)
 
 LUR_yhat_s_tow2_plot <- colo.plot(data.wide = tow2,
                     x.variable = "yhat_s_tow2",
-                    y.variable = "LUR_yhat_s_tow2")
+                    y.variable = "LUR_yhat_s_tow2", rmse.digits = rmse.digits.)
 
 LUR_yhat_s_plot <- colo.plot(data.wide = tow2,
                     x.variable = "yhat_s",
-                    y.variable = "LUR_yhat_s")
+                    y.variable = "LUR_yhat_s", rmse.digits = rmse.digits.)
 
 LUR_yhat_uw_plot <- colo.plot(data.wide = tow2,
                     x.variable = "yhat_uw",
-                    y.variable = "LUR_yhat_uw")
+                    y.variable = "LUR_yhat_uw", rmse.digits = rmse.digits.)
 
 ggarrange(LUR_mean_s_tow2_plot,
           LUR_mean_s_plot ,
@@ -934,151 +938,70 @@ ggarrange(LUR_mean_s_tow2_plot,
           LUR_yhat_uw_plot,
            common.legend = T, legend = "bottom"
           ) %>%
-  annotate_figure(fig.lab = "Site UFP: Method estimates vs LUR predictions (in-sample) \nLUR fit: 10-month avg UFP ~ ll_a1_s01500 + m_to_airp  + elev_elevation + pop10_s15000")
+  annotate_figure(fig.lab = paste0("Site UFP: Method estimates vs LUR predictions (in-sample)",
+                                   "\nlog 10-month avg UFP ~", reg_predictors)
+                  )
 
-```
-
-```{r, delete1?}
- 
-# # cov.list <- c("ll_a1_s01500", "m_to_l_airp", "elev_elevation", "pop10_s15000")
-# 
-# ###################################
-# # Lasso: logit(residual <0) ~ geocovariates
-# library(glmnet)
-# set.seed(1)
-# #create categorical dummy variables
-# df <- tow2 %>%
-#   select(resid_mean_uw,
-#          m_to_a1:tl_s15000)  
-# 
-# x <- model.matrix(resid_mean_uw~., df)[,-1]
-# y <- as.numeric(tow2$resid_mean_uw <0)
-# 
-# ### --> Error: x and y not same length
-# #select lambda through CV
-# cv.out <- cv.glmnet(x = x, 
-#                     y = y, 
-#                     alpha=1, 
-#                     #family= "gaussian"
-#                     family= "binomial"
-#                     )
-# 
-# bestlam <- cv.out$lambda.min
-# 
-# lasso.m <- glmnet(x = x, 
-#                   y = y, 
-#                  alpha = 1, 
-#                  #family= "gaussian",
-#                  family= "binomial"
-#                  )
-# 
-# lasso.coef <- predict(lasso.m, 
-#                       type= "coefficients", 
-#                       s= bestlam)[1:(ncol(x)+1),]
-# 
-# #coefficients chosen by Lasso w/ bestlam that are not 0
-# lasso.vars <- lasso.coef[lasso.coef != 0] %>%
-#   as.data.frame() %>%
-#   rownames_to_column()
-# 
-# names(lasso.vars) <- c("cov", "coef")
-# 
-# lasso.vars <- lasso.vars %>%
-#   filter(#coef < 0,
-#          cov != "(Intercept)"
-#          ) %>%
-#   arrange(desc(coef))
-# 
-# #intersect_a1_a1_s00500, lu_reservior_p00400, rlu_evergreen_p03000, rlu_woody_wetland_p01000, rlu_dev_med_p00750
-#   
-# ############################################
-# #variables predictive of residuals <0
-# lasso.results <- tow2 %>%
-#   #scale geocovariate predictors
-#   mutate_at(vars(m_to_a1:tl_s15000), ~scale(.)) %>%
-#   lm(formula(paste("resid_mean_uw<0", "~", paste(lasso.vars$cov, collapse = " + " ))), 
-#    data = .) %>% 
-#   summary() %>%
-#   broom::tidy() %>% 
-#   filter(p.value < 0.05,
-#          term != "(Intercept)"
-#          ) 
-# 
-# lasso.results %>%
-#   kable(caption = "Lasso-selected covariates (centered and scaled) predictive of residuals < 0 (below 1-1 line)\nonly showing p < 0.05") %>%
-#   kable_styling()
-# 
-# #ll_a1_s01500
-#  
-# ############################################
-# #plot most predictive covariates
-# 
-# #? m_to_truck, m_to_l_airp
-# # ? pop10_s15000
-# 
-# covs <- lasso.results$term
-# 
-# t <- tow2 %>%
-#   select(mean_uw, LUR_mean_uw, #resid_mean_uw,
-#          covs
-#          ) %>%
-#   mutate_at(vars(covs), ~scale(.)) %>%
-#   gather("cov", "value", covs)  
-# 
-# t %>%
-#   #drop some extremely high covariate values
-#   filter(value < quantile(value, 0.99)) %>%
-#   ggplot(aes(x=mean_uw, y= LUR_mean_uw)) + 
-#   geom_point(aes(col = value)) +
-#   scale_color_distiller("centered & scaled value", palette = "Spectral") +
-#   geom_abline(intercept = 0, slope = 1) +
-#   geom_smooth(method = "lm", aes(fill="LS"))  +
-#   facet_wrap(~cov)  
- 
-```
-
-```{r, delete2?}
-# #ll_a1_s01500
-# tow2 <- tow2 %>%
-#   mutate(weird_mean_uw = mean_uw >13000) %>%
-#   select(weird_mean_uw, everything())
-# 
-#  tow2 %>%
-#    mutate_at(vars(covs), ~scale(.)) %>%
-#   gather("cov", "value", covs) %>%
-#    ggplot(aes(x =value, fill = weird_mean_uw)) + 
-#      geom_density(position="dodge", alpha=0.4) + 
-#      facet_wrap(~cov)
-     
 ```
 
 Identify sites that are underpredicted by LUR. 
  -all sites
+  - using yhat_s_tow2
+
+### --> edit & make annual_final for export 
+
+```{r log-transform fn exp}
+# log_transform_var <- function(all.data, removeOrig=FALSE)
+# {
+#   em.vars <- grep("^em_", colnames(all.data))
+#   new.varnames <- c()
+#   for (i in em.vars)
+#   {
+#     newcol.index <- 1 + length(colnames(all.data))
+#     all.data[, newcol.index] <- log(all.data[, i] + 0.1)
+#     colnames(all.data)[newcol.index] <- paste('log_', colnames(all.data)[i], sep='')
+#   }
+#   if (removeOrig) all.data <- all.data[, -em.vars]
+#   return (all.data)
+# }
+
+```
 
 ```{r}
-#annual.copy <- annual
+annual.copy <- annual
 #annual <- annual.copy
 
 high.quantile <- 0.95
 
 #save lm predictions & residuals for dataset
 annual <- annual %>%
-  select(-c(mean_s, mean_s_tow2, mean_s_tow2_tod2,
-            yhat_s, yhat_s_tow2, yhat_s_tow2_tod2, 
-            yhat_m_day_hr)) %>%
-  drop_na() %>%
-  save.pred.fn(y_string = "mean_uw") %>%
+  # log transform estimates
+  mutate_at(vars(contains("mean_"), contains("yhat_")), ~log(.)) %>%
+  #select(-c(mean_s, mean_s_tow2, mean_s_tow2_tod2,
+            # yhat_s, yhat_s_tow2_tod2, 
+            # yhat_m_day_hr
+            #)
+         #) %>%
+  #select(-mean_s_tow2_tod2) %>%
+  #drop stop_id 309, which has no geocovariates, using elev_elevation as example
+  drop_na(elev_elevation) %>%
+  save.pred.fn(y_string = "yhat_s_tow2", x_string = reg_predictors) %>%
   mutate(
-    residual_lvl = ifelse(resid_mean_uw >quantile(resid_mean_uw, high.quantile), "high",
-                          ifelse(resid_mean_uw < quantile(resid_mean_uw, (1-high.quantile)), "low", "normal")
+    residual_lvl = ifelse(resid_yhat_s_tow2 >quantile(resid_yhat_s_tow2, high.quantile), "high",
+                          ifelse(resid_yhat_s_tow2 < quantile(resid_yhat_s_tow2, (1-high.quantile)), "low", "normal")
                           )
-  )
+    ) # %>%
+  ## transform back to native scale
+  #mutate_at(vars(contains("mean_"), contains("yhat_")), ~exp(.)) 
   
  #compare predictsion vs observations
 colo.plot(data.wide = annual,
-                    x.variable = "mean_uw",
-                    y.variable = "LUR_mean_uw", 
-          mytitle = "Site UFP: Method estimates vs LUR predictions (in-sample) \nLUR fit: 10-month avg UFP ~ ll_a1_s01500 + m_to_airp  + elev_elevation + pop10_s15000", col.by = "residual_lvl")
+          x.variable = "yhat_s_tow2",
+          y.variable = "LUR_yhat_s_tow2", 
+          rmse.digits = 2,
+          mytitle =paste0("Site UFP: Method estimates vs LUR predictions (in-sample)",
+                                   "\n10-month avg log UFP ~", reg_predictors),
+          col.by = "residual_lvl")
 
 ```
 
@@ -1089,11 +1012,11 @@ colo.plot(data.wide = annual,
 set.seed(1)
 #create categorical dummy variables
 df <- annual %>%
-  select(resid_mean_uw,
-         m_to_a1:tl_s15000)  
+  select(resid_yhat_s_tow2,
+         cov_names)  
 
-x <- model.matrix(resid_mean_uw~., df)[,-1]
-y <- as.numeric(annual$resid_mean_uw)# <0)
+x <- model.matrix(resid_yhat_s_tow2~., df)[,-1]
+y <- as.numeric(annual$resid_yhat_s_tow2)# <0)
 
 ### --> Error: x and y not same length
 #select lambda through CV
@@ -1134,8 +1057,8 @@ lasso.vars <- lasso.vars %>%
 #variables predictive of residuals <0
 lasso.results <- annual %>%
   #scale geocovariate predictors
-  mutate_at(vars(m_to_a1:tl_s15000), ~scale(.)) %>%
-  lm(formula(paste("resid_mean_uw<0", "~", paste(lasso.vars$cov, collapse = " + " ))), 
+  mutate_at(vars(cov_names), ~scale(.)) %>%
+  lm(formula(paste("resid_yhat_s_tow2", "~", paste(lasso.vars$cov, collapse = " + " ))), 
    data = .) %>% 
   summary() %>%
   broom::tidy() %>% 
@@ -1143,12 +1066,6 @@ lasso.results <- annual %>%
          term != "(Intercept)"
          ) 
 
-lasso.results %>%
-  kable(caption = "Lasso-selected covariates (centered and scaled) predictive of residuals \nonly showing p < 0.05") %>%
-  kable_styling()
-
-#ll_a1_s01500
- 
 ############################################
 #plot most predictive covariates
 
@@ -1158,7 +1075,7 @@ lasso.results %>%
 covs <- lasso.results$term
 
 annual.scaled <- annual %>%
-  select(site_id, mean_uw, LUR_mean_uw, resid_mean_uw, residual_lvl,
+  select(site_id, yhat_s_tow2, LUR_yhat_s_tow2, resid_yhat_s_tow2, residual_lvl,
          covs) %>%
   mutate_at(vars(covs), ~scale(.)) %>%
   as.data.frame()
@@ -1171,67 +1088,81 @@ annual.scaled <- annual %>%
 #        x = "residual")
 
 p <- annual.scaled %>%
-  ggplot(aes(x=mean_uw, 
+  ggplot(aes(x=yhat_s_tow2, 
              fill=residual_lvl)) + 
   geom_histogram() + 
-  labs(title = "10-month site average (mean UW), colored by LUR residual level",
+  labs(title = "10-month site average (yhat_s_tow2), colored by LUR residual level",
        x = "Mean UW 10-month site concentration (pt/cm3) "
        )
     
 p
+ 
+#table of lasso-selected variables
+lasso.results %>%
+  kable(caption = "Lasso-selected covariates (centered and scaled) predictive of residuals \nonly showing p < 0.05") %>%
+  kable_styling()
 
-#log x scale - annual avgs are log-normally distributed
-p + scale_x_log10() + 
-  labs(subtitle = "log x scale")
+lasso.results %>%
+  ggplot(aes(x=estimate, y = term)) + 
+  geom_point() + 
+  geom_vline(xintercept = 0, alpha=0.5, linetype= "dashed") + 
+  labs(
+    x = "coefficient estimate",
+    y = "geocovariate",
+    title = "Lasso-selected covariates (centered and scaled) predictive of residuals \nonly showing p < 0.05"
+         
+         )
 
+
+#distribution of UFP values by lasso variables
 annual.scaled %>%
   gather("cov", "value", covs) %>%
   ggplot(aes(x=value, fill=residual_lvl)) +
   geom_density(alpha=0.3) + 
   facet_wrap(~cov, scales = "free")
 
-annual.scaled %>%
-  ggplot(aes(x=mean_uw, y= LUR_mean_uw)) + 
-  geom_point(aes(
-    col = residual_lvl
-    # col = resid_mean_uw, size = resid_mean_uw>quantile(resid_mean_uw, high.quantile) 
-    #              | resid_mean_uw < quantile(resid_mean_uw, (1-high.quantile))
-                )) +
-  #scale_color_distiller("residual", palette = "Spectral") +
-  geom_abline(intercept = 0, slope = 1) +
-  geom_smooth(method = "lm", aes(fill="LS")) + 
-    theme(legend.position = "bottom") + 
-  labs(size = paste0("high residual (", 1-high.quantile, ")"),
-       title = "Comparison of 10-month site averages: 'UW mean' vs LUR prediction"
-       )  
+# ? delete? already have this up above
+# annual.scaled %>%
+#   ggplot(aes(x=mean_uw, y= LUR_mean_uw)) + 
+#   geom_point(aes(
+#     col = residual_lvl
+#     # col = resid_mean_uw, size = resid_mean_uw>quantile(resid_mean_uw, high.quantile) 
+#     #              | resid_mean_uw < quantile(resid_mean_uw, (1-high.quantile))
+#                 )) +
+#   #scale_color_distiller("residual", palette = "Spectral") +
+#   geom_abline(intercept = 0, slope = 1) +
+#   geom_smooth(method = "lm", aes(fill="LS")) + 
+#     theme(legend.position = "bottom") + 
+#   labs(size = paste0("high residual (", 1-high.quantile, ")"),
+#        title = "Comparison of 10-month site averages: 'UW mean' vs LUR prediction"
+#        )  
 
 ```
 
-LUR residuals mapped
+10-month yhat_s_tow2 estimates mapped
 
 ```{r}
-#Export csv w/ site lat/long
-# site_averages <- left_join(annual.scaled, unique(ufp[c("site_id", "site_lat", "site_long")])) %>%
+# # #Export csv w/ site lat/long
+# site_averages <- annual.scaled %>% 
+#   left_join(unique(ufp[c("site_id", "site_lat", "site_long")])) %>%
 #   select(contains("site"), everything()) %>%
 #   rename(latitude = site_lat,
 #          longitude = site_long)
 # 
-# write.csv(site_averages, 
+# write.csv(site_averages,
 #           file =  file.path("Data", "Aim 2", "Mobile Monitoring", "site_averages.csv"),
 #           row.names = F)
 
 ```
 
-![UFP concentrations. darker red = higher concentration](../Write Up/1. Proposal/Aim 2. 2019 UFP/Images/site averages 191223.png)
+![UFP concentrations. darker red = higher concentration](../Write Up/1. Proposal/Aim 2. 2019 UFP/Images/yhat_s_tow2 site averages 191223.png)
 
 
 ```{r}
-stops <- ufp %>%
-  left_join(annual.scaled[c("site_id", "residual_lvl", "mean_uw")]) %>%
-  drop_na(residual_lvl)
-
 #boxplots of stop readings
-stops %>%
+ufp %>%
+  left_join(annual.scaled[c("site_id", "residual_lvl", "yhat_s_tow2")]) %>%
+  drop_na(residual_lvl) %>%
   ggplot(aes(x=site_id, y=ptrak)) + 
   geom_boxplot(aes()) +
   geom_point(aes(y=mean_uw, col="mean uw")) +
@@ -1245,8 +1176,6 @@ stops %>%
 
  
 ```
-
-### --> ? ANOVA?
 
 ## --> ? how to fit interction term & then plot to see if predictions are closer to the 1-1 line?
 
@@ -1269,14 +1198,34 @@ stops %>%
 
 
 
-Select an estimate to use
+Select an estimate to use.
+
+#### --> upate w/ selected annual estimate method
+
+```{r}
+annual_final <- site_locations %>%
+  right_join(annual) %>%
+  select(
+    #site_id, lat/long
+    names(site_locations), 
+    # --> select method & add log-transformed
+    yhat_s_tow2, #log_yhat_s_tow2,
+    cov_names
+    
+  )
+
+#saveRDS(annual_final, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_geocov.rda"))
+
+```
+
+Boxplots of annual averages: 
+* overall
+* by geographic covariate
 
 ```{r}
 
-
-#saveRDS(annual, file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda"))
-
 ```
+
 
 
 notes:

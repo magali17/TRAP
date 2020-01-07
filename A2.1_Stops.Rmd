@@ -265,7 +265,9 @@ ufp.w %>%
 
 ```
 
-Drop bad UFP readings from low alcohol wick issues.
+Drop bad UFP readings:
+* from low alcohol wick issues.
+* < 100 pt/cm3
 
 ```{r}
 #PMPT_93
@@ -282,12 +284,17 @@ tz(bad.times2) <- "PST8PDT"
 
 ufp <- ufp %>%
   filter(!(time %in% bad.times1 & instrument_id == "PMPT_93"),
-         !(time %in% bad.times2 & instrument_id == "PMPT_94")
+         !(time %in% bad.times2 & instrument_id == "PMPT_94"),
+         
+          #drop UFP < 100  
+         !(grepl("ptrak", variable) &  value < 100)
          ) 
   # check that it looks good
   # %>% filter(time %in% c(bad.times1, bad.times2))
 
 ```
+
+ 
 
 Final 1-second PTRAK readings. They are log normal.
 
@@ -348,6 +355,18 @@ bc <- bc.w %>%
   select(site_id:instrument_id, contains("ona")) %>%
   gather("variable", "value", contains("ona"))
   
+```
+
+Distribution of BC readings (log-normal?)
+
+```{r}
+
+```
+
+### ---> ? drop BC lvls > 27k ng/m3 (1% of data) - MOVUP report
+
+```{r}
+
 ```
 
 Estimate BC from wavelength ratios.

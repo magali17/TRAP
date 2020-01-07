@@ -16,6 +16,8 @@ editor_options:
   chunk_output_type: console
 ---
 
+### --> update act geocovariates
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
@@ -32,7 +34,7 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(dplyr, tidyverse, 
+pacman::p_load(tidyverse,  #dplyr, 
                knitr, kableExtra, 
                Hmisc, EnvStats, 
                #descriptive statistics
@@ -49,10 +51,16 @@ set.seed(1)
 source("A2.0.1_Var&Fns.R")
 
 #read in data
-annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda")) %>%
-  drop_na(m_to_a1)
-geo_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "geo.mm.rda")) %>%
-  select(site_id, contains("lambert"), latitude, longitude)
+annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_geocov.rda")) 
+          
+site_locations <- annual0 %>%
+  select(site_id, contains("lambert")) #latitude, longitude
+
+cov_names <- annual0 %>%
+  select(elev_elevation:log_m_to_a23) %>%
+  names()
+
+## --> needs to be updated & geocovariates cleaned up
 geo_act <- read.csv(file.path("Data", "Aim 2", "ACT", "ACT_selected.csv"))  
 
 ```
@@ -78,30 +86,23 @@ geo_act <- read.csv(file.path("Data", "Aim 2", "ACT", "ACT_selected.csv"))
 
 # PLS to create summary features of geocovariates. 
 
-#### --> use geocovariate code to update geocovariates, 
-### --> issue: PLS only works when variables aren't scaled. "errors when variables aren't scaled:...In FUN(X[[i]], ...) : Scaling with (near) zero standard deviation"
+# --> CV RMSE looks too good?  
 
 Create training,  test and AQS set.
 
-### --> CHECK VARIOG DISTNACEs now that ufp isn't being included in PLS. add to variog_dist_to_plot 
-
-# --> CV R2 and RMSE look too good?  
-
-```{r}
+```{r, results="hide"}
 # 1. fit PLS using training set to ID # features to use
 annual_all <- annual0 %>%
   select(site_id,
-         ufp = yhat_s_tow2, 
-         m_to_a1:ncol(annual0)) %>%
+         log_ufp = yhat_s_tow2, 
+         cov_names) %>%
   drop_na() %>%
   mutate(
     #log-transform UFP
-    log_ufp = log(ufp),
+    #log_ufp = log(ufp),
       #create test, train, aqs data set
     set = ifelse(grepl("MC", site_id), "aqs",
-                 #sample(c("train", "test"), size = sum(grepl("MS", site_id)), replace = T)
                  sample(c(1:10), size = sum(grepl("MS", site_id)), replace = T)
-                  
                  ),
     cv_prediction = NA
          )
@@ -116,20 +117,18 @@ annual_train_test <- annual_all %>%
 
 ################# variables for later ###############
 # CV folds
-k <- 10
+k <- 10 #5
 
 # max PLS components to use in UK
-use_n_scores <- 10
+use_n_scores <- 20 #10
 
-exclude_from_pls <- c("site_id", "ufp", "set", "cv_prediction")
+#exclude_from_pls <- c("site_id", "ufp", "set", "cv_prediction")
 
 #distances to plot for different PLS components
-variog_dist_to_plot <- data.frame(pls_comp = c(c(1:10) #,
-                                               #c(11:20)
+variog_dist_to_plot <- data.frame(pls_comp = c(c(1:use_n_scores)
                                                ),
-                                  dist_fraction = c(0.74, 0.3, 0.25, 0.13, 0.13, 
-                                                    rep(0.11, 5) #,
-                                                    #rep(0.09, 10) #??
+                                  dist_fraction = c(0.7, 0.3, #0.25, 0.13, 0.13,
+                                                    rep(0.1, use_n_scores-2) 
                                                     )
                                   )
 
@@ -146,7 +145,7 @@ cv.eval <- cv.eval %>% left_join(variog_dist_to_plot)
 ################## CV loops ##################################
 #estimate CV RMSE and r2 for diff number of PLS component combinations 
 for(i in seq_len(use_n_scores)) {
-  #i=9
+  #i=1
   score_n_names <- paste0("Comp", 1:i)
   
   #10FCV for each PLS component combination
@@ -161,12 +160,13 @@ for(i in seq_len(use_n_scores)) {
     filter(!train_grp)   
   
   #fit PLS to training data
-  ### --> ? SCALE isue? 
   pls_train <- plsr(log_ufp ~.,
-               data=annual_train[,!(names(annual_train) %in% exclude_from_pls)], 
+               data=annual_train[,c("log_ufp", cov_names)], 
                ncomp = i,
-               #scale=T
+               scale=T
                   )
+  
+  #pls_train$scores
   
   # extract scores for UK
   scores_train <- scores(pls_train)[,c(1:i)] %>%
@@ -187,13 +187,13 @@ for(i in seq_len(use_n_scores)) {
     annual_train[c("site_id", "log_ufp")],
     scores_train
   ) %>%
-    left_join(geo_mm) 
+    left_join(site_locations) 
   
   pls_df_test <- cbind(
     annual_test[c("site_id", "log_ufp")],
     scores_test
   ) %>%
-    left_join(geo_mm) 
+    left_join(site_locations) 
 
   ################################ UK ################################
    geo_train <- as.geodata(pls_df_train, 
@@ -209,7 +209,7 @@ for(i in seq_len(use_n_scores)) {
   cov_trend <-  as.formula(paste0("~ ", paste0(score_n_names, collapse = " + " )))
   
   max.dist <- summary(geo_train)$distances.summary[["max"]]
-  max.plot.dist <- max.dist* cv.eval$dist_fraction[cv.eval$pls_comp==i] #[1] 
+  max.plot.dist <- max.dist* cv.eval$dist_fraction[cv.eval$pls_comp==i] 
 
   ############################ model residuals ###################################### 
   ##Empirical Variogram
@@ -219,8 +219,7 @@ for(i in seq_len(use_n_scores)) {
                         #UK
                         trend = cov_trend  
                         )
-  #plot(variog_train)
-  
+
   #use geoR try to estimate intitial range & sill values. using WLS and an exponential fit
   wls_ests_train <- variofit(variog_train, cov.model = "exp")
    
@@ -238,13 +237,19 @@ for(i in seq_len(use_n_scores)) {
                       #weights = "equal") #ols
                       weights = "npairs") #wls
 
-    #trend
+  # plot(variog_train)
+  # lines(variog_train)
+  # lines(resid_model_train, col=2)
+
+  
+  
+  
+  #trend
     train_trend <- trend.spatial(trend = cov_trend, geo_train)
     test_trend <- trend.spatial(trend = cov_trend, geo_test)
     
     ############################# Predict #############################
     
-    ####--- > error ?
     kc_cv <- krige.conv(coords = geo_train$coords,
                         data = geo_train$data,
                         locations = geo_test$coords,
@@ -268,7 +273,6 @@ for(i in seq_len(use_n_scores)) {
 
 ```
 
-### --> ? select fewer PLS components? 
 
 ```{r}
 ######################### select CV parameters #########################
@@ -317,9 +321,9 @@ cv.eval %>%
 ############################# PLS #############################
 # fit model to all data
 pls_train_test <- plsr(log_ufp ~.,
-             data=annual_train_test[,!(names(annual_train_test) %in% exclude_from_pls)], 
+             data=annual_train_test[,c("log_ufp", cov_names)], 
              ncomp = cv_comp,
-             #scale=T
+             scale=T
                 )
 
 # extract scores for UK
@@ -336,7 +340,7 @@ Plot of PLS loadings.
 ### --> only keep absolute elevation? 
 ### --> relabel covariates in plot
 
-```{r}
+```{r, fig.height=15}
 pls.loadings <- pls_train_test$loadings[] %>%
   as.data.frame() %>%
   rownames_to_column(var = "cov")
@@ -357,9 +361,11 @@ pls.loadings.l  <- pls.loadings %>%
   gather(key = "Component", value = "Loading", contains("Comp")) %>%
   mutate(Component = as.numeric(substr(Component, 6, nchar(Component)))
          )  #%>%
-#only show first few components for now
-#filter(Component <= 6)
+  #only show first few components for now
+  #filter(Component <= 6) 
 
+
+#first 4 components 
 pls.loadings.l  %>%
   #drop these in first points
   drop_na(buffer) %>%
@@ -380,6 +386,7 @@ pls.loadings.l  %>%
              alpha=my.alpha) +
     facet_wrap(~Component,
                labeller = "label_both",
+               ncol = 2
                ) +
   labs(#x = paste0("Loading"),
        y = "Geocovariate",
@@ -400,7 +407,7 @@ pls_df_train_test <- cbind(
   annual_train_test[c("site_id", "log_ufp")],
   scores_train_test
 ) %>%
-  left_join(geo_mm) 
+  left_join(site_locations) 
 
 # create geodata for test set
 geo_train_test <- as.geodata(pls_df_train_test , 
@@ -419,11 +426,9 @@ max.dist <- summary(geo_train_test)$distances.summary[["max"]]
 
 Residual model.   
 
-### -- > ? max plot distanace? 
+### --> redo: variog_dist_to_plot
 
-### --> add variogram parameters: nugget, partial sill, range (m).
-
-```{r}
+```{r, results="hide"}
 max.plot.dist <- max.dist*#.2
   variog_dist_to_plot$dist_fraction[variog_dist_to_plot$pls_comp==cv_comp]
 
@@ -461,7 +466,10 @@ model_partial_sill <- resid_model.s$estimated.pars[["sigmasq"]]
 model_range <- resid_model.s$estimated.pars[["phi"]]
 model_nugget <- resid_model.s$estimated.pars[["tausq"]]
 
-par(mfrow = c(1, 1))
+```
+
+```{r}
+#par(mfrow = c(1, 1))
 plot(variog_train_test,
      main = paste0("Binned empirical and modeled variogram\nfor all stop data (excldues AQS sites). Using ", cv_comp, " PLS components"),
      xlab = "Distance (m)",
@@ -470,7 +478,7 @@ plot(variog_train_test,
 lines(variog_train_test, lty=1)
 lines(resid_model, lty=2, col=2)
 legend("bottomright",
-       legend = c("Empirical", paste0("Residual Model (", "REML", ")")),
+       legend = c("Empirical", paste0("Residual Model (", "WLS", ")")),
        lty=c(1:2), col = c(1:2),
        #cex = 0.7
        )
@@ -495,7 +503,7 @@ data.frame(
 
 # Out-of-sample RMSE and R2 for AQS sites 
 
-```{r}
+```{r,results="hide"}
 #AQS test set
 #estimate scores for test set
 scores_test_aqs <- predict(object = pls_train_test,
@@ -513,7 +521,7 @@ pls_df_test_aqs <- cbind(
   annual_aqs[c("site_id", "log_ufp")],
   scores_test_aqs
 ) %>%
-  left_join(geo_mm) 
+  left_join(site_locations) 
 
 #create geodata for test set
 geo_test_aqs <- as.geodata(pls_df_test_aqs , 
@@ -578,7 +586,7 @@ pls_df_test_aqs %>%
 
 Predict at participant homes
 
-### --> need to clean up ACT covariates; various covariates are labeled are differently in old act dataset  
+### --> need new dataset w/ same variable names. rename all variables to match training data?   
 
 ```{r, eval=F}
 # geo_act %>%

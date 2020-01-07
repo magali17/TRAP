@@ -31,7 +31,15 @@
 #       * include:      list of final variables after preprocessing 2
 # * vars.count: numbers of excluded variables for each preprocessing step
 #==============================================================================================================================================================================
-
+# covars.mon = cov_mm0
+# covars.sub = cov_act_fake0
+# region = "NW"
+# common=T
+# exclude.cat.canyon = TRUE
+# exclude.cityhall = TRUE
+# exclude.census = TRUE
+# exclude.old.LUR = TRUE
+# exclude.relative.elevation = FALSE
 
 covariate.preprocess <- function( covars.mon, covars.sub, region,common=T,
                                   exclude.cat.canyon = TRUE, exclude.cityhall = TRUE, exclude.census = TRUE,
@@ -59,7 +67,7 @@ covariate.preprocess <- function( covars.mon, covars.sub, region,common=T,
     covars.sub <- covars.sub[,!caline.alt]
   } 
   
-  # [make sure cohort covariates are same as the monitoring sites covariates being used]
+  # [make sure cohort covariates are same as the monitoring sites covariates being used; combine datasets]
   covars.sub <- covars.sub[,names(covars.mon)]
   covars.all <- rbind(covars.mon, covars.sub)
   
@@ -75,25 +83,38 @@ covariate.preprocess <- function( covars.mon, covars.sub, region,common=T,
   # 1.4. natural log transform CALINE, emission, and distance to sources (roads, any & large airports, coast, SML ports, commercial area, railrod/yard, oil, and cityhall)
   #      truncate distance variables at 10 m
   #      remove original variables
-  #covars.cal      <- log_transform_caline(covars.a23L, removeOrig=TRUE)
+  covars.cal      <- log_transform_caline(covars.a23L, removeOrig=TRUE) #don't include
   covars.em       <- log_transform_emission(covars.a23L, removeOrig=TRUE)
   covars.process1 <- log_transform_distance(covars.em, lowerBound=10, removeOrig=TRUE)
   
   # 2. Preprocessing 2: variable exclusion 
+  
+  ## [ -----> don't include this if already properly labeled site_type? includes/excludes site_types. don't need "site_type" column if don't use this]
   covars.process1.mon <- covars.process1[covars.process1$site_type!="P",]
   covars.process1.sub <- covars.process1[covars.process1$site_type=="P",]
-  
+
   # 2.0. exclude distances to road types for street canyons, city halls, old LUR, census, or relative elevation variables
+  ## [ -----> don't include this? WHAT IS THIS DOING?? ..something w/ NAs in columns?...]
   covars.process2<-covars.process1
+  # [---> (?) table of counts for non-missing & missing values in each column ]
   a<-apply(as.data.frame(!is.na(covars.process1)),2,table)
-  if (common==F){
-    for (i in 1:dim(covars.process1)[2]){if (a[[i]]==0 ){
-      covars.process2<-covars.process2[,setdiff(colnames(covars.process2),names(a[i]))]
-    }}}
-  if (common==T){
-    for (i in 1:dim(covars.process1)[2]){if (names(a[[i]])[1]==F ){
-      covars.process2<-covars.process2[,setdiff(colnames(covars.process2),names(a[i]))]
-    }}}
+  
+  # [--> ADD CODE BACK IN??]
+  
+  # if (common==F){
+  #   for (i in 1:dim(covars.process1)[2]){
+  #     if (a[[i]]==0 ){
+  #     # [?? use only 1 set of bracket??]
+  #     #if (a[i]==0 ){
+  #     covars.process2<-covars.process2[,setdiff(colnames(covars.process2),names(a[i]))]
+  #   }}}
+  # if (common==T){
+  #   for (i in 1:dim(covars.process1)[2]){
+  #     if (names(a[[i]])[1]==F){
+  #     # [?? use only 1 set of bracket??]
+  #     #if (names(a[i])[1]==F){
+  #       covars.process2<-covars.process2[,setdiff(colnames(covars.process2),names(a[i]))]
+  #     }}}
   covars.process1<-covars.process2
   gis.vars <- c('m_to|pop|ll|ndvi|imp|em|calinemod|rlu|lu|elev|tl|intersect|oil|canyon|no2')
   initial.vars <- names(covars.process1)[grepl(gis.vars, names(covars.process1))] 
@@ -267,15 +288,23 @@ fail_low_landuse <- function(mon.data, vars.all, lowValue=10)
   return (fail)
 }
 
+# mon.data = covars.process1.mon
+# cohort.data= covars.process1.sub
+# vars.all = initial.vars
+# thres=5
 
+# [ probably dont need this since monitoring stops are similar to the cohort ]
 fail_sd_ratio <- function(mon.data, cohort.data, vars.all, thres=5) 
 {
   fail <- c()
   for (i in vars.all)  {
+    #i=vars.all[1]
     mon.sd <- sd(mon.data[, i], na.rm=TRUE)
     cohort.sd <- sd(cohort.data[, i], na.rm=TRUE)
-    if (cohort.sd > thres * mon.sd | all(is.na(mon.sd)))
+        if (cohort.sd > thres * mon.sd | all(is.na(mon.sd))) 
+      # [ vector of variables where cohort sites are more variable than monitoring sites ]
       fail <- c(fail, i)
+    
   }
   return (fail)
 }

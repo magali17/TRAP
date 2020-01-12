@@ -13,6 +13,13 @@ output:
 editor_options:
   chunk_output_type: console
 ---
+
+```{r}
+# --> to do
+# use FSS for IPWs? 
+
+```
+
 ```{r, echo=F}
 #NOTES
 ##4. merge with github. always do these 4 steps all together. enter the following into the Terminal (does not work any other way for some reason)
@@ -43,7 +50,7 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats, lubridate, glmnet,
+pacman::p_load(survival, tidyverse, knitr, Hmisc, EnvStats, lubridate, glmnet,
                survminer, kableExtra
                )  #Himsc: describe(); EnvStats: summaryFull(); survminer: ggflexsurvplot()  
 
@@ -52,7 +59,7 @@ pacman::p_load(survival, haven, tidyverse, knitr, Hmisc, EnvStats, lubridate, gl
 
 source("A1.0.2_Var&Fns.R")
 
-dem0.0 <- read_sas(file.path("Data", "Aim 1", "issue_001.sas7bdat"), NULL)
+dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "issue_001.sas7bdat"), NULL)
 
 #remove SAS labels
 labelled::var_label(dem0.0) <- NULL
@@ -146,8 +153,9 @@ dem0.1 <- dem0.0 %>%
                                              ifelse(tr_med_inc_hshld >= 50000 & tr_med_inc_hshld < 75000, 3, 4)
                                              )), #),
     race_white = ifelse(race == 1, 1, 0),
-    # make unknown degree=9 an "other" to avoid creating more NAs
-    degree = ifelse(degree != 9, degree, 6),
+    # make unknown degree=9 an 6 ("other") to avoid creating more NAs; 
+    # Rachel/Lianne - change 9 to none? 
+    degree = ifelse(degree != 9, degree, 0),
     # combine GED and HS. Note, there is now no degree==2, but shoudn't matter since this is treated as a categorical variable
     degree = ifelse(degree %in% c(1:2), 1, degree)
     ) %>%
@@ -208,14 +216,21 @@ dem0.1 <-  dem0.1 %>%
 # #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
 # prop.table(table(dem0.1$exp_mos_coverage10_yr>0.95)) %>% round(2)
 
+#obs after dropping ppl w/ just baseline
+#dim(dem0.1 %>% filter(fu_yrs>1))
+
+
+ 
+
 #data for primary and some secondary analyses 
 dem1 <- dem0.1 %>% 
   filter(
+    #drop ppl with only a baseline observation
+    #fu_yrs > 1, #don't use this b/c 1/7 extra ppl who are dropped was followed for 10 months. all others have last_visit dates a few days after their intakedt
+    intakedt != last_visit,
     #drop exposure predictions after the last visit when individuals are no longer "at risk" of the terminating event. 
     ## --> note: when using act_age, have to change last_visit to onsetdate
-    exposure_year <= as.numeric(format(last_visit, "%Y")),
-    #drop ppl with only a baseline observation
-    fu_yrs > 1
+    exposure_year <= as.numeric(format(last_visit, "%Y")),  
     ) %>%
   mutate(
     #copy all original predictions (for sensitivity analysis using min.pct = 0.75 vs 0.95)
@@ -292,7 +307,9 @@ pm25 <- dem1 %>%
 dem.w <- full_join(no2, pm25)
 
 #add variables for alternative analysis using age at onset (cases) or age at last visit (noncases)
-dem.w <- dem.w %>%
+#dem.w <- dem.w 
+
+dem.w2 <- dem.w %>%
   mutate(
     last_act_fu_yr = ifelse(!is.na(onsetdate), year(onsetdate),
                              year(last_visit)),
@@ -301,43 +318,91 @@ dem.w <- dem.w %>%
                                 as.numeric(as.Date(paste0(exposure_year, "-12-31")) - birthdt)/365), 3),
     dementia_now2 = ifelse(age_end_exposure2 < age_act, 0, anydementia),
     ad_now2 = ifelse(age_end_exposure2 < age_act, 0, ad_nincds),
-  )
-
-dem.w2 <- dem.w %>%
+  ) %>%
   #drop exposure predictions after individuals are no longer "at risk"  
   filter(exposure_year <= last_act_fu_yr)
 
 ```
 
-### --> hsit of # of missing apoe by enrollment date/yr
+ 
+```{r, eval=F}
+length(unique(dem.w$study_id))
+
+dim(dem.w)
+
+table(dem.w$dementia_now)
+table(dem.w$ad_now)
+
+dim(dem.w2)
+table(dem.w2$dementia_now2)
+table(dem.w2$ad_now2)
+
+summary(dem.w$age_last_visit)
+
+summary(dem.w$onsetdate)
+
+summary(dem.w2$age_act)
+
+# TESTING code against Rachel's results
+
+# Rachel's numbers are 7 higher than mine
+# dem0.1 %>%
+#   filter(pollutant == "no2",
+#          fu_yrs==1,
+#          intakedt != last_visit
+#          ) %>% 
+#   View()
+
+ 
+
+  
+```
+
+Missing apoe by enrollment year
 
 Have a cut off since most recent enrollees: 
 *	tend to be those w/o apoe
 * wont contribute much to survival analysis
 * may have not-yet geocoded addresses 
 
-#### --> error w/ missing_apoe variable?
-
 ```{r}
-t <- dem.w %>%
-  filter(enrollment_yr==1) %>%
-  mutate(missing_apoe = (is.na(apoe))) #%>%
-  
-ggplot(aes(x=exposure_year, y = missing_apoe)) + 
-  geom_bar(aes(stat_count()))
+apoe_avail_ct_p <- dem.w %>%
+  filter(enrollment_yr==1,
+         ) %>%
+  mutate(exposure_year = factor(exposure_year)) %>%
+  ggplot(aes(x=exposure_year, fill = is.na(apoe))) + 
+  geom_bar() + 
+  theme(axis.text.x = element_text( angle = 90)) + 
+  labs(x = "Exposure year",
+       y = "Count",
+      fill = "APOE available"
+       )
 
+apoe_avail_prop_p <- dem.w %>%
+  filter(enrollment_yr==1,
+         ) %>%
+  mutate(exposure_year = factor(exposure_year)) %>%
+  ggplot(aes(x=exposure_year, fill = is.na(apoe))) + 
+  geom_bar(position = "fill") + 
+  theme(axis.text.x = element_text( angle = 90)) + 
+  labs(x = "Exposure year",
+       y = "proportion",
+       fill = "APOE available"
+       )
+
+ggarrange(apoe_avail_ct_p,
+          apoe_avail_prop_p, 
+          ncol=1,   
+          common.legend = T, legend = "bottom",
+          heights = c(1,1), 
+          labels = "Enrolless by APOE availability"
+          )
 ```
 
 
 note: there > dem & AD cases when using ACT FU age definition b/c missing no2 exposure estimates differ for different incident years. 
 
-number_events:
-dem_now: 802
-dem_now2: 858
-
-ad_now: 653
-ad_now2: 701 
-
+ 
 coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  birth_cohort
 
 ```{r}
@@ -402,8 +467,12 @@ fixed.covariates <- dem.w %>%
 
 ## IPW since there is a lot of missing APOE values 
 
+#### --> also/change forward stepwsise selection
+### --> use same variables Rachel uses & check models
+
 ```{r}
 # see B540 L7-8
+# Approach:
 #1. fill in missing values with their most likely option (mean for continuous, mode for categorical variables)
 #2. use selection model (e.g. lasso for glm) to select predictors of whether or not we have APOE values for people: apoe_available (in apoe.w)
 # 3. fit logistic model to determine probability of observing an observation given predictors: glm(apoe_available ~ [predictors]). use model w/ dataset to get predicted values (probability of being observed), 
@@ -460,14 +529,18 @@ y <- as.numeric(apoe$apoe_available)
 cv.out <- cv.glmnet(x = x, 
                     y = y, 
                     alpha=1, 
-                    family= "binomial")
+                    family= "binomial",
+                    standardize = T
+                    )
 
 bestlam <- cv.out$lambda.min
 
 lasso.m <- glmnet(x = x, 
                   y = y, 
                  alpha = 1, 
-                 family= "binomial")
+                 family= "binomial",
+                 standardize = T
+                 )
 
 lasso.coef <- predict(lasso.m, 
                       type= "coefficients", 
@@ -475,35 +548,39 @@ lasso.coef <- predict(lasso.m,
 
 #coefficients chosen by Lasso w/ bestlam that are not 0
 lasso.vars <- lasso.coef[lasso.coef != 0]
-print("variables selected via Lasso")
-names(lasso.vars)[names(lasso.vars) != "(Intercept)"]
  
+#select selected variables if they are in main dataset as is or if the name is prior to a number. prevents similarly-named variables (e.g. exercise vs exercise_reg) from being selected
+
+#save names & relabel categorized bmi4 variable for now (has issues in loop below b/c of #4 - selects both "bmi" & "bmi4") 
+lasso_names <- names(lasso.vars) %>%
+  str_replace(pattern = "bmi4", replacement = "bmi_cat" )
+apoe_names <- names(apoe)%>%
+  str_replace(pattern = "bmi4", replacement = "bmi_cat" )
+
+selected_cov <- vector()
+
+for (i in seq_len(length(apoe_names))) {
+  #i=19
+  find_pattern <- paste0("^", apoe_names[i], "$", "|", "^", apoe_names[i], "\\d")
+  if(any(grepl(find_pattern, lasso_names)  )) {
+    
+    selected_cov <- append(selected_cov, apoe_names[i])
+    }
+}
+
+selected_cov <- selected_cov %>%
+  #change back to orinal name
+  str_replace(pattern = "bmi_cat", replacement = "bmi4" )
+
+#paste0(selected_cov, collapse = ", ")
+
 apoe <- apoe %>%
   select(
     study_id,
      #y
     apoe_available,
     #categories selected via Lasso 
-    #x's
-    birth_cohort,
-    age_intake, 
-    age_last_visit,   
-    dsmivdx, 
-    nindx, 
-    #ad_nincds, 
-    male, 
-    education,
-    degree,
-    tr_med_inc_hshld,
-    race_white, #race,
-    smoke,
-    exercise_reg,
-    Diabetes,
-    Heart_Dis,
-    bmi4,
-    casi_irt,
-    intake_yr,
-    onset_yr
+    selected_cov
     )  
 
 #3. model to predict APOE variable being present
@@ -530,7 +607,9 @@ apoe_male_prob <- predict(apoe.male.m, type = "response")
 apoe.wts <- apoe %>% 
   select(study_id) %>%
   mutate(model_wt = apoe_male_prob/apoe_available_prob)
-  
+
+#summary(apoe.wts$model_wt)
+
 # 4. take the inverse of probabilities to calculate "weights", use these weights in coxph(, weights = c()) 
 dem.w <- dem.w %>% 
   #add stabilized weights  
@@ -543,7 +622,7 @@ dem.w2 <- dem.w2 %>%
 
 ```
 
-Summary of stabilized weights used in coxph()
+Summary of Lasso-selected stabilized weights used in coxph()
 
 ```{r}
 summary(dem.w$model_wt)
@@ -551,7 +630,41 @@ summary(dem.w$model_wt)
 
 ```
 
-### --> fn to automatically select lasso-selected variables 
+
+```{r}
+#Rachel uses FSS & variables: cohort, race, diabetes, gender, degree, CV_Dis, birth cohort, intake age
+# see 556 wk 4 lab; machine learning hw 5 
+
+#library(leaps)
+# fss = regsubsets(Y~., data=df, method = "forward", )
+# reg.fwd.summary= summary(fss)
+
+library(MASS)
+
+
+
+
+# par(mfrow=c(2,2))
+# which.max(reg.fwd.summary$adjr2) #max r2 @ p=3
+# plot(reg.fwd.summary$adjr2, xlab="Number of Variables", ylab="Adjusted Rsq", type = "l")
+# points(3,reg.fwd.summary$adjr2[3], col="red", cex=2, pch=20)
+# 
+# p = which.min(reg.fwd.summary$cp) #find min cp  
+# plot(reg.fwd.summary$cp, xlab="Number of Variables", ylab="Cp", type = "l")
+# points(p,reg.fwd.summary$cp[p], col="red", cex=2, pch=20)
+# 
+# p = which.min(reg.fwd.summary$bic) #find min bic  
+# plot(reg.fwd.summary$bic, xlab="Number of Variables", ylab="BIC", type = "l")
+# points(p,reg.fwd.summary$bic[p], col="red", cex=2, pch=20)
+
+
+
+
+```
+
+
+
+
 
 # Quality Control
 
@@ -610,10 +723,8 @@ summary(dem.w$age_end_exposure)
 summary(dem.w$age_act) 
 #summary(dem.w$age_act[dem.w$anydementia==1]) 
 
-summary(dem.w$last_act_fu_yr)
-table(dem.w$last_act_fu_yr)
-table(dem.w$last_act_fu_yr)
-
+summary(dem.w2$last_act_fu_yr)
+ 
 
 summary(fixed.covariates$age_last_visit)
 
@@ -641,7 +752,7 @@ cohort_ids <- dem.w %>%
 
 n_cohort <- length(cohort_ids$study_id)
 
-##no of cases
+##no. of cases
 cases_ids <- dem.w %>%
   filter(anydementia==1) %>%
   select(study_id) %>%
@@ -1557,17 +1668,25 @@ ad_all_hrs <- rbind(
 
 ```
 
-### --> add table/list of HRs to plots? add 2nd axis? 
-
 Dementia
 
 ```{r}
 #plot HRs
 
-# M1-6 
-# dem_all_hrs %>%
-#   filter(Model != "2" |
-#            (Model == "2" & Description == "Primary")) %>%
+dem_all_hrs %>%
+  select(
+    Model, Description, exposure,
+    hr_ci,
+    person_years, number_events
+    ) %>%
+  rename(
+    Exposure = exposure,
+    "HR (CI)" = hr_ci,
+    "Person-years" = person_years,
+    "No. events" = number_events,
+    ) %>%
+  kable() %>%
+  kable_styling()
 
 dem_all_hrs %>% hr.plot.m1_m6(dt = ., outcome.var = "dementia")
 
@@ -1616,7 +1735,7 @@ m2 <- dem_10yr$raw_model_output$m2
 
 ```
 
-```{r}
+```{r, results="hide"}
 ## ?? interpretation of schenresid matrix?
 schoenresid = residuals(m2, type = "scaledsch")
 
@@ -1636,7 +1755,7 @@ cbind(resid=schoenresid[,1], time) %>%
 b. formally test. using cox.zph(). if global p-val is significant, assumption is violated   
 -assumption is not violated 
 
-```{r}
+```{r, results="hide"}
 cox.zph(m2)
 
 ```
@@ -1647,7 +1766,7 @@ If a correct model is used, these residuals are uncorrelated and have mean nearl
 
 Martingale residuals are used to check if the functional form of the covariate is okay (eg. linear vs quadratic terms). 
 
-```{r, eval=T}
+```{r, results="hide"}
 ##??
 martingalesid = residuals(m2, type = "martingale", data = dem.w) %>%
   as.data.frame() %>%
@@ -1678,7 +1797,7 @@ sd(plot.martingaleresid$resid)
 
 3. no outliers or influential observations, $\triangle \beta$
  
-```{r, eval=T, fig.height=8}
+```{r, fig.height=8, eval=T}
 # B537 L3, slide 125
 
 dfbetas <- residuals(m2, type="dfbeta") 

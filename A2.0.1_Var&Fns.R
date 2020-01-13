@@ -137,19 +137,16 @@ r2_mse_based <- function(obs, pred) {
 distribution.table <- function(dt,
                                var.string = "ptrak_pt_cm3",
                                round.int = 0) {
-  #dt=ufp %>% ungroup()
-  #round.int = 1
-  
+ 
   t <- dt %>%
     dplyr::rename(var = var.string) %>%
     dplyr::summarize(
       N = n(),
-      mean_sd =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
-      median_iqr =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
-      min = round(min(var), round.int),
-      max = round(max(var), round.int)
-      ) #%>%
-    #select(-round.int)
+      "Mean (SD)" =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
+      "Median (IQR)" =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
+      Min = round(min(var), round.int),
+      Max = round(max(var), round.int)
+      )  
   
   return(t)
 }

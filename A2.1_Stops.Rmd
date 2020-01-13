@@ -1,5 +1,5 @@
 ---
-title: 'Aim 2: Site Medians'
+title: 'Aim 2: Stop Medians'
 author: "Magali Blanco"
 date: "12/19/2019"
 output: html_document
@@ -14,13 +14,22 @@ editor_options:
 
 ```
 
-```{r}
+```{r, echo=F}
 #notes
 #BC = 880 nm (IR); 625 nm (Red); 528 nm (Green); 470 nm (Blue); and 375 nm (UV);  
 
 ```
 
+#### --> update file later: there are 310 site_ids and in mm_full. There should be 309. We stopped sampling MS0398 and switched to MS0601 which is fairly close
+
 ```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      fig.height = 8, fig.width = 8
+                      )  
+
 # Clear workspace of all objects and unload all extra (non-base) packages
 rm(list = ls(all = TRUE))
 if (!is.null(sessionInfo()$otherPkgs)) {
@@ -30,7 +39,12 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 }
 
 # load packages 
-pacman::p_load(dplyr, tidyverse, chron, lubridate, knitr)   
+pacman::p_load(tidyverse, 
+               # table
+               knitr, kableExtra,
+               # dates
+               chron, lubridate
+               )   
 
 # source global variables & functions
 source("A2.0.1_Var&Fns.R")
@@ -42,9 +56,6 @@ mm_full0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_20
 #unique(mm_full0$variable)
 
 ### --> why do these runs have missing variable/value? 2019-05-14_R03, 2019-07-17_R07	
-
-#### --> update file later: there are 310 site_ids and in mm_full. There should be 309.           
-# We stopped sampling MS0398 and switched to MS0601 which is fairly close
 
 site_ids <- read.csv(file.path("Data", "Aim 2", "Mobile Monitoring", "locations_190715.csv")) %>%
   select(site_id) %>%
@@ -113,19 +124,6 @@ bc <- mm_full %>%
 
 ```
 
-### -->	Combine 2 stops if they are “close”? We stopped sampling MS0398 and switched to MS0601 which is close
-
-```{r, ?delete?}
-# geo <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) %>%
-#   select("native_id", "latitude", "longitude", "m_to_a1", "m_to_a2", "ll_a1_s01500", "m_to_coast", "m_to_l_port", "m_to_comm", "m_to_airp", "m_to_rr", "m_to_truck", "elev_elevation", "pop10_s15000", "ndvi_q50_a07500")
-# #write.csv(geo, file.path("Data", "Aim 2", "Geocovariates", "geo_few.csv"))
-# 
-# #"We stopped sampling MS0398 and switched to MS0601 which is close"
-# #t <- geo %>% filter(native_id %in% c("MS0398", "MS0601"))
-
-```
-
-
 # Drop erroneous UFP instrument readings. 
 -identify very low/high concentrations
 -compare to PTRAK (20-1000 nm) to Nanoscan (20-421 nm) readings.
@@ -135,10 +133,13 @@ very low concentrations: Elena (MOVUP Study) excluded UPF < 100 b/c: a) had very
 very high concentrations: don't do anything to high concentrations (PTRAK max is 50k ufp/cm3 b/c associated with both very low and high NanoScan concentrations (it's unclear whether it is the nanoscan or the PTRAK that is innacurate).
 
 ```{r}
-print("summary of 1 sec PTRAK distribution (all data):") 
+ 
 ufp %>% filter(grepl("ptrak", variable)) %>%
   group_by(instrument_id) %>%
-distribution.table(., var.string = "value")
+  #rename("Instrument ID" = instrument_id) %>%
+distribution.table(., var.string = "value") %>%
+  kable(caption = "summary of 1 sec PTRAK distribution (all data)") %>%
+  kable_styling()
 
 ns <- ufp %>%
   filter(grepl("scan", variable)) %>%
@@ -172,13 +173,15 @@ ptrak %>%
   labs(title = paste0("Time series plot to identify low PTRAK concentration times"),
   subtitle = paste0("only showing PTRAK conc <",
                       very.low.ptrak.conc,
-                      " ufp/cm3)"))
+                      " ufp/cm3)"),
+  y = "PTRAK (pt/cm3)"
+  
+  )
 
 ufp.w <- ptrak %>% select(-instrument_id) %>%
   left_join(ns)
 
 ####### very low concentrations  #######
-
 
 # compare PTRAK to NS
 ufp.w %>%
@@ -189,9 +192,13 @@ ufp.w %>%
   geom_abline(intercept = 0, slope = 1) + 
   geom_smooth(aes(group=ptrak_low_conc)) + 
   labs(title = paste0("Low PTRAK concentrations (< ", low.ptrak.conc, " ufp/cm3) relative to \ncomparable NanoScan (20-421 nm) concentrations"),
-       col = paste0("PTRAK < ",very.low.ptrak.conc, " ufp/cm3" ))
+       col = paste0("PTRAK < ",very.low.ptrak.conc, " ufp/cm3" ),
+       x = "NanoScan (20-421 nm pt/cm3)",
+       y = "PTRAK (20-1000 nm pt/cm3)"
+       )
 
 
+# [keep this code chunk for upating in future]
 # #plot to ID when low PTRAKs readings occurred
 # ufp.w %>%
 #   filter(ptrak_pt_cm3 < very.low.ptrak.conc) %>%
@@ -219,10 +226,17 @@ ufp.w %>%
          time < paste0(date.with.issue1, " 17:15")
          ) %>%
   gather("variable", "value", ptrak_pt_cm3, scan_20_421_pt_cm3) %>%
+  mutate(variable = recode(variable, 
+                       "ptrak_pt_cm3" = "PTRAK_20_1000_nm_pt", 
+                      "scan_20_421_pt_cm3" = "NanoScan_20_421_pt")
+         ) %>%
   ggplot(aes(x=time, y = value, col = variable)) + 
   geom_point(alpha=0.3, aes(shape=)) +
   labs(title = paste0("Time series of when very low PTRAK concentrations \n(< ", very.low.ptrak.conc, " ufp/cm3) were observed"),
-       subtitle = paste0(run.with.issue1, ", instruments used: ", paste0(run2019_03_22_R07.instruments, collapse = ", ")))
+       subtitle = paste0(run.with.issue1, ", instruments used: ", paste0(run2019_03_22_R07.instruments, collapse = ", ")),
+       y = "Concentration (pt/cm3)",
+       variable = "Instrument"
+       )
 
 ufp.w %>%
   filter(runname == run.with.issue2,
@@ -230,9 +244,13 @@ ufp.w %>%
          time < paste0(date.with.issue2, " 05:41:40")
          ) %>%
   gather("variable", "value", ptrak_pt_cm3, scan_20_421_pt_cm3) %>%
+  mutate(variable = recode(variable, 
+                       "ptrak_pt_cm3" = "PTRAK_20_1000_nm_pt", 
+                      "scan_20_421_pt_cm3" = "NanoScan_20_421_pt")
+         ) %>%
   ggplot(aes(x=time, y = value, col = variable)) + 
   geom_point(alpha=0.3, aes(shape=site_id)) + 
-  labs(title = paste0("Time series of when very low PTRAK concentrations \n(< ", very.low.ptrak.conc, " ufp/cm3) were observed"),
+  labs(title = paste0("Time series of when very low PTRAK concentrations \n(< ", very.low.ptrak.conc, " pt/cm3) were observed"),
        subtitle = paste0(run.with.issue2, ", instruments used: ", paste0(run2019_07_13_R03.instruments, collapse = ", ")))
 
 ####### very high concentrations  #######
@@ -250,7 +268,9 @@ ufp.w %>%
   labs(title = paste0("distribution of PTRAK concentrations >", 
                       myquantile,
                       " quantile (",
-                      very.high.ptrak.conc," ufp/cm3)"))
+                      very.high.ptrak.conc," pt/cm3)"),
+       x = "PTRAK (pt/cm3)"
+       )
 
 #ptrak vs NS
 # #unclear what instrument is faulty when looking at very high concentrations
@@ -260,8 +280,11 @@ ufp.w %>%
   ggplot(aes(x=scan_20_421_pt_cm3, y = ptrak_pt_cm3)) + 
   geom_point(aes(col = (ptrak_pt_cm3 == ptrak.max.limit)), alpha=0.4) +
   geom_abline(intercept = 0, slope = 1) + 
-  labs(title = paste0("High PTRAK concentrations (> ", myquantile, " quantile, ", very.high.ptrak.conc, " ufp/cm3) relative to \ncomparable NanoScan (20-421 nm) concentrations"),
-       col = paste0("PTRAK = max limit \n(", ptrak.max.limit, " ufp/cm3)" ))
+  labs(title = paste0("High PTRAK concentrations (> ", myquantile, " quantile, ", very.high.ptrak.conc, " ufp/cm3) relative to \ncomparable NanoScan concentrations"),
+       col = paste0("PTRAK = max limit \n(", ptrak.max.limit, " pt/cm3)" ),
+       x = "NanoScan (20-421 nm pt/cm3)",
+       y = "PTRAK (20-1000 nm pt/cm3)"
+       )
 
 ```
 
@@ -294,8 +317,6 @@ ufp <- ufp %>%
 
 ```
 
- 
-
 Final 1-second PTRAK readings. They are log normal.
 
 ```{r}
@@ -303,21 +324,22 @@ ufp %>%
   filter(grepl("ptrak", variable)) %>%
   ggplot(aes(x=value)) + 
   geom_histogram() + 
-  labs(title = paste0("ptrak", " concentrations after dropping erroneous readings \ndue to alcohol wick isues"),
+  labs(title = paste0("PTRAK concentrations after dropping erroneous readings \ndue to alcohol wick isues"),
        subtitle = "on log x scale",
        x = "Concentration (pt/cm3)"
        ) + 
   scale_x_log10()
-
  
 num.ptrak.seconds.dropped <- length(bad.times1) + length(bad.times2)
 
-print(paste0("number of PTRAK seconds dropped: ", num.ptrak.seconds.dropped))
+paste0("number of PTRAK seconds dropped: ", num.ptrak.seconds.dropped)
 
-print("summary of 1 sec PTRAK distribution after dropping poor instrument readings:") 
 ufp %>% filter(grepl("ptrak", variable)) %>%
   group_by(instrument_id) %>%
-distribution.table(., var.string = "value")
+distribution.table(., var.string = "value") %>%
+  kable(caption = "summary of 1 sec PTRAK distribution after dropping poor instrument readings", 
+         ) %>%
+  kable_styling()
  
 ```
  
@@ -340,7 +362,10 @@ bc.w %>%
   geom_point() + 
   geom_abline(intercept = 0, slope = 1) + 
   geom_smooth() + 
-  labs(title = "IR (~black carbon) concentrations before and after ONA correction")
+  labs(title = "IR (880 nm, black carbon) concentrations before and after ONA correction",
+      x = "Aethelometer (ng/m3)",
+      y = "ONA-corrected (ng/m3)"
+       )
 
 #UV
 bc.w %>%
@@ -348,7 +373,10 @@ bc.w %>%
   geom_point() + 
   geom_abline(intercept = 0, slope = 1) + 
   geom_smooth() + 
-  labs(title = "UV concentrations before and after ONA correction")
+  labs(title = "UV (375 nm) concentrations before and after ONA correction",
+      x = "Aethelometer (ng/m3)",
+      y = "ONA-corrected (ng/m3)"
+      )
 
 bc <- bc.w %>%
   #only keep ONA-corrected values
@@ -397,17 +425,20 @@ mm_full <- rbind(ufp, bc) %>%
 
 Instruments Used
 
+### --> reduce df size to make this plot load faster
+
 ```{r}
 #instrument used each day
 mm_full %>%
-  #select(date, instrument_id, variable) %>%
-  #grepl("ptrak|scan", variable) %>%
-  filter(variable %in% c("ptrak_pt_cm3", "scan_20_421_pt_cm3")) %>%
+  #variable %in% c("ptrak_pt_cm3", "scan_20_421_pt_cm3")
+  filter(variable == "ptrak_pt_cm3" | variable == "scan_20_421_pt_cm3") %>%
   unique() %>%
   ggplot(aes(x=date, y=instrument_id, colour = instrument_id)) + 
   geom_point(alpha=0.5) + 
   theme(legend.position = "none") + 
-  labs(title = "Instruments used") 
+  labs(title = "Instruments used",
+       x = "Date"
+       ) 
  
 ```
 
@@ -424,8 +455,9 @@ mm_full %>%
                       x.variable = "PMPT_93", x.label = "PTRAK ID 93",
                       y.variable = "PMPT_4",  y.label = "PTRAK ID 94",
                       mytitle = paste0("Comparison of collocated PTRAK instrument readings\n1-sec data"),
-
-                      r2.digits = 2)
+            r2.digits = 2,
+            coef_digits = 2
+            )
 
 ```
 
@@ -437,14 +469,15 @@ ns_trim <- 0.01
 mm_full %>%  
     #select only values from desired instruments
     filter(instrument_id %in% c("PMSCAN_5", "PMSCAN_3"),
-           value > quantile(value, ns_trim),
-           value < quantile(value, (1-ns_trim))
+           value > quantile(value, ns_trim, na.rm = T),
+           value < quantile(value, (1-ns_trim), na.rm = T)
            ) %>%
     spread(instrument_id, value) %>%
   colo.plot(x.variable = "PMSCAN_5", x.label = "NanoScan ID 5",
           y.variable = "PMSCAN_3", y.label = "NanoScan ID 3",
           mytitle = paste0("Comparison of collocated NanoScan instrument readings" , 
                                         "\ndropped top and bottom ", (ns_trim)*100, "% of data"),
+                      coef_digits = 2
           )
 
 ```
@@ -466,11 +499,13 @@ filter(instrument_id %in% c("PMSCAN_5", "PMPT_94"),
   select(-instrument_id) %>%
   spread(variable, value) %>%
   drop_na(ptrak_pt_cm3, scan_20_421_pt_cm3) %>%
-  colo.plot(x.variable = "scan_20_421_pt_cm3", x.label = "NanoScan 5 (pt/cm3; 20-421 nm)",
-                      y.variable = "ptrak_pt_cm3", y.label = "PTRAK 94 (pt/cm3; 20-1000 nm)",
+  colo.plot(x.variable = "scan_20_421_pt_cm3", x.label = "NanoScan 5 (20-421 nm pt/cm3)",
+                      y.variable = "ptrak_pt_cm3", y.label = "PTRAK 94 (20-1000 nm pt/cm3)",
                       mytitle = paste0("Comparison of collocated PTRAK and NanoScan instruments" , 
                                         "\ndropped NanoScan readings <100 and > 500k pt/cm3"),
-                      r2.digits = 2)
+            r2.digits = 2,             
+            coef_digits = 2
+            )
 
 ```
 
@@ -572,6 +607,9 @@ Will focus on medians vs means b/c:
 print("Average mean/median ratio")
 mean(mm$mean_value[mm$variable=="ptrak_pt_cm3"])/mean(mm$median_value[mm$variable=="ptrak_pt_cm3"])
 
+```
+
+```{r}
 #compare mean vs median. if no different, use one 
 mm %>%
   filter(variable == "ptrak_pt_cm3") %>%
@@ -593,7 +631,8 @@ colo.plot(
   x.variable = "median_value", x.label = "median value",
   y.variable = "mean_value", y.label = "mean value",
   #col.by = "season", 
-  mytitle = "Comparing diferent central tendency metrics\nfor stop concentrations"
+  mytitle = "Comparing diferent central tendency metrics\nfor stop concentrations", 
+  coef_digits = 2
   )
 
 mm %>%
@@ -601,14 +640,15 @@ mm %>%
   dplyr::rename(mean = mean_value,
          median = median_value
          ) %>%
-  gather("method", "value", median, mean) %>%
-  group_by(method) %>%
+  gather("Method", "value", median, mean) %>%
+  group_by(Method) %>%
   distribution.table(var.string = "value") %>%
-  kable(caption = "Distribution of stop means and medians. N = number of stop visits (308 sites x ~30 stop visits/site)")
+  kable(caption = "Distribution of stop means and medians. N = number of stop visits (308 sites x ~30 stop visits/site)") %>%
+  kable_styling()
 
 ```
 
-Empiric fractions of overall mean and median relative to 1-sec data. Computing the percentile of the ovarll mean and median UFP concentration value relative to all values
+Empiric fractions of overall mean and median relative to 1-sec data. Computing the percentile of the overall mean and median UFP concentration value relative to all values
 
 ### --> ?do by site & show the distribution of these percentiles?
 
@@ -618,11 +658,9 @@ Empiric fractions of overall mean and median relative to 1-sec data. Computing t
 ufp.values <- mm_full$value[mm_full$variable == "ptrak_pt_cm3"]
 
 ### mean
-print("empiric fraction of overall mean")
-round(sum(ufp.values < mean(ufp.values)) / length(ufp.values), 2)
+empir_frac_mean <- round(sum(ufp.values < mean(ufp.values)) / length(ufp.values), 2)
 ### median
-print("empiric fraction of overall median")
-round(sum(ufp.values < median(ufp.values)) / length(ufp.values), 2)
+empir_frac_median <- round(sum(ufp.values < median(ufp.values)) / length(ufp.values), 2)
 
 ## Parametric fraction:
 ### median
@@ -630,6 +668,11 @@ round(sum(ufp.values < median(ufp.values)) / length(ufp.values), 2)
 # round(pnorm((median(log(ufp.values)) - mean(log(ufp.values)))/sd(log(ufp.values))), 2)
 
 ```
+
+empiric fraction of overall mean: `r empir_frac_mean`
+
+empiric fraction of overall median: `r empir_frac_median`
+
 
 Save datasets for quicker access later. 
 

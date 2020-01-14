@@ -1,0 +1,1823 @@
+---
+title: 'Aim 1: Survival Analysis'
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  pdf_document:
+    toc: yes
+    toc_depth: '3'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+# --> to do
+# use FSS for IPWs? 
+
+```
+
+```{r, echo=F}
+#NOTES
+##4. merge with github. always do these 4 steps all together. enter the following into the Terminal (does not work any other way for some reason)
+###a. git pull origin master #do this before start editing & before you're read to upload changes again
+###b. git add A1.1_Survival.Rmd 
+###c. git commit -m "my commit message in parentheses" 
+###d. git push origin master
+
+#plot multiple saved plots 
+#grid.arrange(plot.interact, plot.complex, ncol = 2)
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      dpi=300 #fig.height = 8
+                      )  
+set.seed(1)
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(survival, tidyverse, knitr, Hmisc, EnvStats, lubridate, glmnet,
+               survminer, kableExtra
+               )  #Himsc: describe(); EnvStats: summaryFull(); survminer: ggflexsurvplot()  
+
+#To open doc:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
+# dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
+
+source("A1.0.2_Var&Fns.R")
+
+dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "issue_001.sas7bdat"), NULL)
+
+#remove SAS labels
+labelled::var_label(dem0.0) <- NULL
+
+#data that can be used for all analyses 
+dem0.1 <- dem0.0 %>% 
+  filter(
+    #drop PM10 predictions
+    pollutant %in% c("no2", "pm25")
+    ) %>%
+  select(
+    study_id,
+    birthdt,
+    intakedt,
+    last_visit,
+    birth_cohort,
+    corrected_onsetdate,
+    onsetage,
+    #"corrected_" = final decision on outcome
+    corrected_anydementia,  
+    corrected_dsmivdx,
+    final_nindx,
+    
+    #M1, 6, sensitivity analyses
+    exposure_year:exp_mos_coverage20_yr, 
+    
+    #M2
+    apoe,
+    male,
+    education, degree,
+    ## household income at the longest addressed lived at prior to baseline. It may include the date of the baseline
+    tr_med_inc_hshld, 
+    race,
+    
+    #M3
+    smoke, pack_years, 
+    exercise, exercise_reg,
+    cohort,
+    
+    #M4a
+    Hypertension, Diabetes,
+    CV_DIS, #indicates whether subject has ever reported having stroke, TIA, or CEA.
+    Heart_Dis, #indicates whether subject has ever reported having an MI, Angina, CABG, or Angioplasty.
+    bmi, bmi4,
+    
+    #M4b
+    casi_irt, casi_valid,
+    #address exactness
+    exact_coverage01_yr:exact_coverage20_yr
+    ) %>%
+  
+  #create/clean up variables
+  mutate(
+    #rename updated variables for correct outcomes
+    nindx = final_nindx,
+    dsmivdx = corrected_dsmivdx,
+    anydementia = corrected_anydementia,
+    onsetdate = corrected_onsetdate,
+    
+    age_intake = round(as.numeric(intakedt - birthdt)/365, 3),  
+    age_last_visit = round(as.numeric(last_visit - birthdt)/365, 3),  
+    #traditional definition used by ACT for follow-up time for cases and controls
+    age_onset = round(as.numeric(onsetdate - birthdt)/365, 3),
+    age_act = round(ifelse(!is.na(age_onset), age_onset, age_last_visit), 3),
+    #collapse earliest & latest cohorts since there are few ppl here 
+    birth_cohort = factor(ifelse(birth_cohort <= 1905, 1895,
+                           ifelse(birth_cohort >= 1935, 1935, birth_cohort))),
+    # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
+    anydementia = ifelse(is.na(anydementia), 0, anydementia),
+    dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
+    nindx = ifelse(is.na(nindx), 0, nindx),
+     #Time-varying covariates
+     ##starting age is age on Jan 1st of a given year if participant was enrolled, or on intake date, whichever came later
+    age_start_exposure = round(ifelse(format(intakedt, "%Y") == exposure_year,
+                                as.numeric(intakedt-birthdt)/365,
+                                as.numeric(as.Date(paste0(exposure_year, "-01-01")) - birthdt)/365), 3),
+    ##ending age is age at end of year or last visit date, whichever came first 
+    age_end_exposure = round(ifelse(format(last_visit, "%Y") == exposure_year,
+                                as.numeric(last_visit - birthdt)/365,
+                                as.numeric(as.Date(paste0(exposure_year, "-12-31")) - birthdt)/365), 3),
+    ### need to change age_last_visit to age_act for sensitivity analyses
+    dementia_now = ifelse(age_end_exposure < age_last_visit, 0, anydementia),
+    
+    ad_nincds = ifelse(nindx %in% c(1,2), 1, 0),
+    ad_now = ifelse(age_end_exposure < age_last_visit, 0, ad_nincds),
+    
+    ## filter out invalid casi scores 
+    casi_irt = ifelse(casi_valid ==1, casi_irt, NA),
+    income_cat = ifelse(tr_med_inc_hshld < 35000, 1, #tr_med_inc_hshld >= 20000 & 
+                                      ifelse(tr_med_inc_hshld >= 35000 & tr_med_inc_hshld < 50000, 2,
+                                             ifelse(tr_med_inc_hshld >= 50000 & tr_med_inc_hshld < 75000, 3, 4)
+                                             )), #),
+    race_white = ifelse(race == 1, 1, 0),
+    # make unknown degree=9 an 6 ("other") to avoid creating more NAs; 
+    # Rachel/Lianne - change 9 to none? 
+    degree = ifelse(degree != 9, degree, 0),
+    # combine GED and HS. Note, there is now no degree==2, but shoudn't matter since this is treated as a categorical variable
+    degree = ifelse(degree %in% c(1:2), 1, degree)
+    ) %>%
+  select(
+    study_id,
+    birthdt, birth_cohort, cohort, intakedt, onsetdate, last_visit, 
+    age_intake, age_act, age_last_visit, 
+    
+    anydementia, dsmivdx, nindx, ad_nincds,
+    dementia_now, ad_now,
+    
+    age_start_exposure, age_end_exposure,
+    #enrollment_yr,
+    exposure_year, pollutant, exp_avg01_yr:exp_mos_coverage20_yr,
+    
+    apoe:degree, tr_med_inc_hshld, income_cat,race, race_white, smoke:bmi4, casi_irt, 
+    
+    exposure_year:exp_mos_coverage20_yr, 
+  ) 
+ 
+#how long have participants been followed? 
+yr <- dem0.1 %>%
+  group_by(study_id) %>%
+  mutate(
+    intake_yr = as.numeric(min(format(intakedt, "%Y"))),
+    last_visit_yr = as.numeric(min(format(last_visit, "%Y"))),
+    fu_yrs = last_visit_yr - intake_yr +1
+    ) %>%
+  select(
+    study_id, intake_yr, last_visit_yr, fu_yrs #yr_n  #pollutant
+  ) %>%
+  unique()
+
+# 1 row per follow-up/exposure year
+enrollment_yrs <-rep(yr$study_id, yr$fu_yrs) %>%
+  as.data.frame() %>%
+  rename(study_id = ".") %>%
+  left_join(yr) %>%
+  group_by(study_id) %>%
+  mutate(
+    #use min() b/c need 1 value and all vector values are same
+    enrollment_yr = seq(1:min(fu_yrs)),
+    exposure_year = seq(from=min(intake_yr), to=min(last_visit_yr))) %>%
+  select(study_id, fu_yrs, enrollment_yr, exposure_year) %>%
+  as.data.frame()
+
+#data that can be used for most analyses (recode age_end_expo, dementia_now, ad_now when using onset age for cases)
+dem0.1 <-  dem0.1 %>% 
+  #keep all enrollment years
+  right_join(enrollment_yrs) %>%
+  select(
+    study_id:age_end_exposure,
+    fu_yrs,
+    enrollment_yr,
+    exposure_year:casi_irt
+  )
+
+# #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
+# prop.table(table(dem0.1$exp_mos_coverage10_yr>0.95)) %>% round(2)
+
+#obs after dropping ppl w/ just baseline
+#dim(dem0.1 %>% filter(fu_yrs>1))
+
+
+ 
+
+#data for primary and some secondary analyses 
+dem1 <- dem0.1 %>% 
+  filter(
+    #drop ppl with only a baseline observation
+    #fu_yrs > 1, #don't use this b/c 1/7 extra ppl who are dropped was followed for 10 months. all others have last_visit dates a few days after their intakedt
+    intakedt != last_visit,
+    #drop exposure predictions after the last visit when individuals are no longer "at risk" of the terminating event. 
+    ## --> note: when using act_age, have to change last_visit to onsetdate
+    exposure_year <= as.numeric(format(last_visit, "%Y")),  
+    ) %>%
+  mutate(
+    #copy all original predictions (for sensitivity analysis using min.pct = 0.75 vs 0.95)
+    exp_avg01_yr_original = exp_avg01_yr,
+    exp_avg05_yr_original = exp_avg05_yr,
+    exp_avg10_yr_original = exp_avg10_yr,
+    exp_avg20_yr_original = exp_avg20_yr,
+    exp_avg10_yr10yrlag_original = exp_avg10_yr10yrlag,
+    exp_avg10_yr20yrlag_original = exp_avg10_yr20yrlag,
+    
+    #only keep predictions w/ at least x% coverage (for primary analysis)
+    exp_avg01_yr = ifelse(exp_mos_coverage01_yr >= min.pct, exp_avg01_yr, NA),
+    exp_avg05_yr = ifelse(exp_mos_coverage05_yr >= min.pct, exp_avg05_yr, NA),
+    exp_avg10_yr = ifelse(exp_mos_coverage10_yr >= min.pct, exp_avg10_yr, NA),
+    exp_avg20_yr = ifelse(exp_mos_coverage20_yr >= min.pct, exp_avg10_yr, NA),
+    exp_avg10_yr10yrlag = ifelse(exp_mos_coverage10_yr10yrlag >= min.pct, exp_avg10_yr10yrlag, NA),
+    exp_avg10_yr20yrlag = ifelse(exp_mos_coverage10_yr20yrlag >= min.pct, exp_avg10_yr20yrlag, NA),
+    )   
+
+#make wide format
+no2 <- dem1 %>% 
+  filter(pollutant == "no2") %>%
+  select(-pollutant) %>%
+  rename(
+    #rename values to be used in main analysis
+    no2_1yr = exp_avg01_yr,
+    no2_5yr = exp_avg05_yr,
+    no2_10yr = exp_avg10_yr,
+    no2_20yr = exp_avg20_yr,
+    no2_10yr10yrlag = exp_avg10_yr10yrlag,
+    no2_10yr20yrlag = exp_avg10_yr20yrlag,
+    #rename original columns
+    no2_1yr_original = exp_avg01_yr_original,
+    no2_5yr_original = exp_avg05_yr_original,
+    no2_10yr_original = exp_avg10_yr_original,
+    no2_20yr_original = exp_avg20_yr_original,
+    no2_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
+    no2_10yr20yrlag_original = exp_avg10_yr20yrlag_original,
+    
+    no2_coverage_1yr = exp_mos_coverage01_yr,
+    no2_coverage_5yr = exp_mos_coverage05_yr,
+    no2_coverage_10yr = exp_mos_coverage10_yr,
+    no2_coverage_20yr = exp_mos_coverage20_yr,
+    no2_coverage_10yr10yrlag = exp_mos_coverage10_yr10yrlag,
+    no2_coverage_10yr20yrlag = exp_mos_coverage10_yr20yrlag
+    ) 
+
+pm25 <- dem1 %>% 
+  filter(pollutant == "pm25") %>%
+  select(-pollutant) %>%
+  rename(
+    pm25_1yr = exp_avg01_yr,
+    pm25_5yr = exp_avg05_yr,
+    pm25_10yr = exp_avg10_yr,
+    pm25_20yr = exp_avg20_yr,
+    pm25_10yr10yrlag = exp_avg10_yr10yrlag,
+    pm25_10yr20yrlag = exp_avg10_yr20yrlag,
+    #rename original columns
+    #rename original columns
+    pm25_1yr_original = exp_avg01_yr_original,
+    pm25_5yr_original = exp_avg05_yr_original,
+    pm25_10yr_original = exp_avg10_yr_original,
+    pm25_20yr_original = exp_avg20_yr_original,
+    pm25_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
+    pm25_10yr20yrlag_original = exp_avg10_yr20yrlag_original,
+    
+    pm25_coverage_1yr = exp_mos_coverage01_yr,
+    pm25_coverage_5yr = exp_mos_coverage05_yr,
+    pm25_coverage_10yr = exp_mos_coverage10_yr,
+    pm25_coverage_20yr = exp_mos_coverage20_yr,
+    pm25_coverage_10yr10yrlag = exp_mos_coverage10_yr10yrlag,
+    pm25_coverage_10yr20yrlag = exp_mos_coverage10_yr20yrlag
+    )   
+dem.w <- full_join(no2, pm25)
+
+#add variables for alternative analysis using age at onset (cases) or age at last visit (noncases)
+#dem.w <- dem.w 
+
+dem.w2 <- dem.w %>%
+  mutate(
+    last_act_fu_yr = ifelse(!is.na(onsetdate), year(onsetdate),
+                             year(last_visit)),
+    age_end_exposure2 = round(ifelse(last_act_fu_yr == exposure_year,
+                                age_act,
+                                as.numeric(as.Date(paste0(exposure_year, "-12-31")) - birthdt)/365), 3),
+    dementia_now2 = ifelse(age_end_exposure2 < age_act, 0, anydementia),
+    ad_now2 = ifelse(age_end_exposure2 < age_act, 0, ad_nincds),
+  ) %>%
+  #drop exposure predictions after individuals are no longer "at risk"  
+  filter(exposure_year <= last_act_fu_yr)
+
+```
+
+ 
+```{r, eval=F}
+length(unique(dem.w$study_id))
+
+dim(dem.w)
+
+table(dem.w$dementia_now)
+table(dem.w$ad_now)
+
+dim(dem.w2)
+table(dem.w2$dementia_now2)
+table(dem.w2$ad_now2)
+
+summary(dem.w$age_last_visit)
+
+summary(dem.w$onsetdate)
+
+summary(dem.w2$age_act)
+
+# TESTING code against Rachel's results
+
+# Rachel's numbers are 7 higher than mine
+# dem0.1 %>%
+#   filter(pollutant == "no2",
+#          fu_yrs==1,
+#          intakedt != last_visit
+#          ) %>% 
+#   View()
+
+ 
+
+  
+```
+
+Missing apoe by enrollment year
+
+Have a cut off since most recent enrollees: 
+*	tend to be those w/o apoe
+* wont contribute much to survival analysis
+* may have not-yet geocoded addresses 
+
+```{r}
+apoe_avail_ct_p <- dem.w %>%
+  filter(enrollment_yr==1,
+         ) %>%
+  mutate(exposure_year = factor(exposure_year)) %>%
+  ggplot(aes(x=exposure_year, fill = is.na(apoe))) + 
+  geom_bar() + 
+  theme(axis.text.x = element_text( angle = 90)) + 
+  labs(x = "Exposure year",
+       y = "Count",
+      fill = "APOE available"
+       )
+
+apoe_avail_prop_p <- dem.w %>%
+  filter(enrollment_yr==1,
+         ) %>%
+  mutate(exposure_year = factor(exposure_year)) %>%
+  ggplot(aes(x=exposure_year, fill = is.na(apoe))) + 
+  geom_bar(position = "fill") + 
+  theme(axis.text.x = element_text( angle = 90)) + 
+  labs(x = "Exposure year",
+       y = "proportion",
+       fill = "APOE available"
+       )
+
+ggarrange(apoe_avail_ct_p,
+          apoe_avail_prop_p, 
+          ncol=1,   
+          common.legend = T, legend = "bottom",
+          heights = c(1,1), 
+          labels = "Enrolless by APOE availability"
+          )
+```
+
+
+note: there > dem & AD cases when using ACT FU age definition b/c missing no2 exposure estimates differ for different incident years. 
+
+ 
+coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  birth_cohort
+
+```{r}
+t2 <- dem.w2 %>% select(
+  study_id,
+  last_visit, last_act_fu_yr,
+  age_end_exposure, age_end_exposure2,
+  anydementia,
+  dementia_now, dementia_now2,
+  ad_now, ad_now2,
+  exposure_year
+)
+
+#View(t2)
+
+t1 <- dem.w %>%
+  filter(dementia_now == 1,
+         !is.na(no2_10yr)
+         ) %>%
+  select(
+    study_id, 
+    dementia_now,
+    exposure_year,
+    no2_10yr, apoe, male, race_white, income_cat, degree, birth_cohort
+  )
+
+t2 <- dem.w2 %>%
+  filter(dementia_now2 ==1,
+        !is.na(no2_10yr)
+         ) %>%
+  select(
+    study_id,
+    dementia_now2,
+    exposure_year,
+    no2_10yr, apoe, male, race_white, income_cat, degree, birth_cohort
+    )
+
+```
+
+```{r}
+fixed.covariates <- dem.w %>%
+  select(
+    study_id:ad_nincds,
+    apoe:casi_irt
+    ) %>% 
+  #make all variables numeric; code has values starting at 0, whereas as.numeric() starts at 1, subtract 1 to fix
+  mutate(
+    birth_cohort = as.numeric(birth_cohort),
+    birth_yr = as.numeric(format(birthdt, "%Y")),
+    intake_yr = as.numeric(format(intakedt, "%Y")),
+    onset_yr = as.numeric(format(onsetdate, "%Y")),
+    last_visit_yr = as.numeric(format(last_visit, "%Y"))
+    ) %>%
+  #drop dates, which are not "numeric" 
+  select(
+    -birthdt, -intakedt, -onsetdate, -last_visit
+  ) %>%
+  #one row per individual
+  unique() 
+
+```
+
+## IPW since there is a lot of missing APOE values 
+
+#### --> also/change forward stepwsise selection
+### --> use same variables Rachel uses & check models
+
+```{r}
+# see B540 L7-8
+# Approach:
+#1. fill in missing values with their most likely option (mean for continuous, mode for categorical variables)
+#2. use selection model (e.g. lasso for glm) to select predictors of whether or not we have APOE values for people: apoe_available (in apoe.w)
+# 3. fit logistic model to determine probability of observing an observation given predictors: glm(apoe_available ~ [predictors]). use model w/ dataset to get predicted values (probability of being observed), 
+# 4. calculate stablized weights 
+
+apoe <- fixed.covariates %>%
+  mutate(apoe_available = !is.na(apoe)) %>% 
+  #don't inclue race b/c causes issues - creates 1 Very large wt for race==5...
+  select(-apoe, 
+         -race
+         ) 
+
+#1. replace missing values w/ most likely outcome  
+##variables w/ missing values  
+with.nas <- names(which(colSums(is.na(apoe)) > 0))
+#1 = TRUE, 0 = FALSE
+mynumeric = c(0, 1, 0, 0, 0, 1, 1, 0, 0, 0, 0, 0, 1, 0, 1, 0)
+  
+#replace  missing values w/ mean (if numeric) or mode (if factor)
+for (i in seq_along(with.nas)) {
+  #vector w/ missing values 
+  myvar <- with.nas[i]  
+  apoe[[myvar]] <- replace.nas.fn(apoe[[myvar]], 
+                                  numeric = mynumeric[i])
+  }
+
+#check that there are no more NAs #looks good
+#describe(apoe) 
+#table(!is.na(apoe))
+ 
+#2. Use Lasso to select variables most predictive of APOE being present
+#apoe2 <-apoe 
+
+apoe <- apoe %>%
+  #convert character variables to numberic
+  mutate_if(is.character, as.numeric) %>%
+  #convert these to factors
+  mutate_at(c("birth_cohort", 
+              "nindx",
+              "education",
+              "degree",
+              "income_cat",
+              #"race_white",
+              "smoke",
+              "bmi4"
+              ), 
+            as.factor)
+
+#create categorical dummy variables
+x <- model.matrix(apoe_available~., apoe)[,-1]
+y <- as.numeric(apoe$apoe_available)
+
+#select lambda through CV
+cv.out <- cv.glmnet(x = x, 
+                    y = y, 
+                    alpha=1, 
+                    family= "binomial",
+                    standardize = T
+                    )
+
+bestlam <- cv.out$lambda.min
+
+lasso.m <- glmnet(x = x, 
+                  y = y, 
+                 alpha = 1, 
+                 family= "binomial",
+                 standardize = T
+                 )
+
+lasso.coef <- predict(lasso.m, 
+                      type= "coefficients", 
+                      s= bestlam)[1:(ncol(x)+1),]
+
+#coefficients chosen by Lasso w/ bestlam that are not 0
+lasso.vars <- lasso.coef[lasso.coef != 0]
+ 
+#select selected variables if they are in main dataset as is or if the name is prior to a number. prevents similarly-named variables (e.g. exercise vs exercise_reg) from being selected
+
+#save names & relabel categorized bmi4 variable for now (has issues in loop below b/c of #4 - selects both "bmi" & "bmi4") 
+lasso_names <- names(lasso.vars) %>%
+  str_replace(pattern = "bmi4", replacement = "bmi_cat" )
+apoe_names <- names(apoe)%>%
+  str_replace(pattern = "bmi4", replacement = "bmi_cat" )
+
+selected_cov <- vector()
+
+for (i in seq_len(length(apoe_names))) {
+  #i=19
+  find_pattern <- paste0("^", apoe_names[i], "$", "|", "^", apoe_names[i], "\\d")
+  if(any(grepl(find_pattern, lasso_names)  )) {
+    
+    selected_cov <- append(selected_cov, apoe_names[i])
+    }
+}
+
+selected_cov <- selected_cov %>%
+  #change back to orinal name
+  str_replace(pattern = "bmi_cat", replacement = "bmi4" )
+
+#paste0(selected_cov, collapse = ", ")
+
+apoe <- apoe %>%
+  select(
+    study_id,
+     #y
+    apoe_available,
+    #categories selected via Lasso 
+    selected_cov
+    )  
+
+#3. model to predict APOE variable being present
+apoe.m <- apoe %>%
+  select(-study_id) %>%
+  glm(apoe_available ~ .,
+  family = "binomial",
+  data = .) 
+#apoe.m %>% summary()
+##denominator: probability of APOE being present
+apoe_available_prob <- predict(apoe.m, type = "response") 
+
+#min(apoe_available_prob) #check that probability isn't Tiny (like when used "race")
+ 
+#numerator: stabilizer 
+apoe.male.m <- apoe %>%
+  glm(apoe_available ~ male,
+  family = "binomial",
+  data = .) 
+#summary(apoe.male.m)
+apoe_male_prob <- predict(apoe.male.m, type = "response") 
+#max(apoe_male_prob)
+
+apoe.wts <- apoe %>% 
+  select(study_id) %>%
+  mutate(model_wt = apoe_male_prob/apoe_available_prob)
+
+#summary(apoe.wts$model_wt)
+
+# 4. take the inverse of probabilities to calculate "weights", use these weights in coxph(, weights = c()) 
+dem.w <- dem.w %>% 
+  #add stabilized weights  
+  left_join(apoe.wts)
+
+#for sensitivity analyses 
+dem.w2 <- dem.w2 %>% 
+  #add stabilized weights  
+  left_join(apoe.wts)
+
+```
+
+Summary of Lasso-selected stabilized weights used in coxph()
+
+```{r}
+summary(dem.w$model_wt)
+#sd(dem.w$model_wt)
+
+```
+
+
+```{r}
+#Rachel uses FSS & variables: cohort, race, diabetes, gender, degree, CV_Dis, birth cohort, intake age
+# see 556 wk 4 lab; machine learning hw 5 
+
+#library(leaps)
+# fss = regsubsets(Y~., data=df, method = "forward", )
+# reg.fwd.summary= summary(fss)
+
+library(MASS)
+
+
+
+
+# par(mfrow=c(2,2))
+# which.max(reg.fwd.summary$adjr2) #max r2 @ p=3
+# plot(reg.fwd.summary$adjr2, xlab="Number of Variables", ylab="Adjusted Rsq", type = "l")
+# points(3,reg.fwd.summary$adjr2[3], col="red", cex=2, pch=20)
+# 
+# p = which.min(reg.fwd.summary$cp) #find min cp  
+# plot(reg.fwd.summary$cp, xlab="Number of Variables", ylab="Cp", type = "l")
+# points(p,reg.fwd.summary$cp[p], col="red", cex=2, pch=20)
+# 
+# p = which.min(reg.fwd.summary$bic) #find min bic  
+# plot(reg.fwd.summary$bic, xlab="Number of Variables", ylab="BIC", type = "l")
+# points(p,reg.fwd.summary$bic[p], col="red", cex=2, pch=20)
+
+
+
+
+```
+
+
+
+
+
+# Quality Control
+
+Make sure age variables make sense.
+
+```{r}
+#check that ages make sense ages
+table(round(dem.w$age_intake, 1) <= round(dem.w$age_act, 1))  
+#View(dem.w[which(dem.w$age_intake > dem.w$age_act),]) 
+table(dem.w$age_intake <= dem.w$age_last_visit)
+#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) #study_id: 4647 has wrong last_visit/intakedt? last_visit is correct. "Will be updated in next freeze"
+table(dem.w$age_act <= dem.w$age_last_visit)
+
+#dementia 
+dementia_counts <- dem.w %>% 
+  group_by(study_id) %>%
+  dplyr::summarize(
+    #study_id = mean(study_id),
+    #number of times each patient has dementia_now==1 (should be max 1)
+    anydementia = mean(anydementia),
+    dem_now_n = sum(dementia_now==1)
+  ) 
+
+##check that individuals who have anydementia=1 also have dementia_now=1 & those who don't don't  
+dementia_counts %>%
+  with(., table(anydementia, dem_now_n))
+
+##check that individuals only have 1 dementia_now
+dementia_counts %>%
+  with(., table(dem_now_n <= 1))
+#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) 
+#study_id 1027 has 2 dementia_now's b/c last visit age vs end of year age, which rounded to same thing
+#View(dem.w[dem.w$study_id==1027,]) 
+
+#AD 
+ad_counts <- dem.w %>% 
+  group_by(study_id) %>%
+  dplyr::summarize(
+    ad_nincds = mean(ad_nincds),
+    ad_now_n = sum(ad_now==1)
+  ) 
+##check that individuals who have ad_nincds=1 also have ad_now=1 & those who don't don't #looks good
+ad_counts %>%
+  with(., table(ad_nincds, ad_now_n))
+
+##check that individuals only have 1 ad_now
+ad_counts %>%
+  with(., table(ad_now_n <= 1))
+
+```
+
+Compare numbers vs Rachel's
+```{r}
+summary(dem.w$age_end_exposure)
+
+summary(dem.w$age_act) 
+#summary(dem.w$age_act[dem.w$anydementia==1]) 
+
+summary(dem.w2$last_act_fu_yr)
+ 
+
+summary(fixed.covariates$age_last_visit)
+
+table(dem.w$dementia_now)
+table(dem.w2$dementia_now2)
+
+summary(fixed.covariates$age_last_visit)
+summary(fixed.covariates$age_act) 
+
+summary(fixed.covariates$age_last_visit[fixed.covariates$anydementia==1]) 
+summary(fixed.covariates$age_act[fixed.covariates$anydementia==1]) 
+
+```
+
+
+# Descriptive Statistics   
+## Sample size  
+
+```{r, echo=F}
+#sample size 
+##no. in cohort 
+cohort_ids <- dem.w %>%
+  select(study_id) %>%
+  unique() 
+
+n_cohort <- length(cohort_ids$study_id)
+
+##no. of cases
+cases_ids <- dem.w %>%
+  filter(anydementia==1) %>%
+  select(study_id) %>%
+  unique() 
+
+n_cases <- length(cases_ids$study_id)
+
+## no. noncases
+non_cases_ids <-dem.w %>%
+  filter(anydementia==0) %>%
+  select(study_id) %>%
+  unique()  
+
+n_noncases <- length(non_cases_ids$study_id)
+
+case_proportion <- round(n_cases/n_cohort, 2)
+  
+n_personyears <- nrow(dem.w)
+
+data.frame(cohort = n_cohort, 
+          cases = n_cases, 
+          non_cases =n_noncases,
+          case_proportion = case_proportion,
+                total_person_years = n_personyears
+           ) %>%
+  kable(caption = "Sample size")
+ 
+```
+
+## Dementia incidence over time   
+
+```{r dementia}
+### --> why does 1st plot show no cases in 1995 but second does? 
+
+#enrolled participants & dementia incidence over time
+dem.w %>%
+  mutate(dementia_now = factor(dementia_now, levels = c(1,0))) %>%
+  ggplot(aes(x= exposure_year, 
+             fill= dementia_now)) + 
+  geom_bar() + 
+  labs(title = "enrolled participants",
+       fill = "dementia incidence"
+       ) #+ scale_y_log10()
+
+
+#dementia incidence over time
+dem.w %>%
+  filter(dementia_now == 1) %>%
+  # group_by(exposure_year) %>%
+  # dplyr::summarize(
+  #   N = n())
+  ggplot(aes(x= exposure_year)) + 
+  geom_bar() + 
+  labs(title= "number of dementia incident cases over time")
+
+```
+
+### --> age at entry vs (?)proportion of individuals who develop dementia. ? Among ppl followed the same length of time (otherwise those who enter later have less opportunity to develop dementia)? 
+
+```{r}
+fixed.covariates %>%
+  mutate(
+    age_intake_cat = cut(age_intake, breaks = 10)
+  ) %>%
+  group_by(age_intake_cat) %>%
+  dplyr::summarize(
+    prop_who_devp_dem = mean(anydementia==1)
+  )
+
+#names(fixed.covariates)
+
+```
+
+
+
+## Distribution of key covariates.    
+
+Do any have less than ~50 individuals?
+
+```{r, fig.height=10}
+
+#histograms
+fixed.covariates %>% 
+  mutate(birth_cohort = as.numeric(birth_cohort)) %>%
+  gather(key = "variable",  value = "value", -study_id) %>%   
+  ggplot(aes(x=value)) + 
+  geom_histogram() + #stat="count"
+    facet_wrap(~variable, scales = "free")
+
+fixed.covariates %>%
+  select(
+    birth_cohort,
+    apoe,
+    male,
+    degree,
+    income_cat,
+    race_white,
+    smoke,
+    exercise_reg,
+    Hypertension,
+    Diabetes,
+    CV_DIS,
+    Heart_Dis,
+    bmi4,
+    #casi_irt
+  ) %>%
+  mutate_at(
+    c("apoe",
+      "male",
+      "race_white",
+      "exercise_reg",
+      "Hypertension",
+      "Diabetes",
+      "CV_DIS",
+      "Heart_Dis",
+      "bmi4"), 
+    as.factor) %>%
+  describe()
+  
+#fixed.covariates %>% summaryFull(digit.type = "round")  
+
+#Individuals in each birth Cohort and birth year. Some 5-year cohorts have few only 1 individual
+with(fixed.covariates, table(dem=anydementia, birth_cohort=birth_cohort))
+
+#Degree
+with(fixed.covariates, table(dem=anydementia, degree = degree))
+
+#Income  
+with(fixed.covariates, table(dem=anydementia, income_cat = income_cat))
+
+```
+
+Those that entered later in life are less likely to have an income variable.
+
+```{r}
+dem.w %>%
+  filter(enrollment_yr ==1) %>%
+  mutate(age_intake_decade = factor(floor(age_intake/10))) %>%  
+  ggplot(aes(x=age_intake_decade)) + 
+  geom_bar(position = "fill",
+           aes(fill = is.na(income_cat))) + 
+  geom_text(stat='count',
+            aes(label= paste0("N = ", ..count..),
+                y = ..prop..),
+            vjust=-1) +
+   
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = "Age Decade at Enrollment", 
+       y = "% participants with missing \"income\" variable",
+       fill = "missing income variable"
+       )
+
+```
+
+
+Data is for all individuals with NO2 and/or PM2.5 predictions.    
+ 
+ 
+## Table 1
+Participant baseline characteristics. Percents are calculated based on the number of individuals with available data (missing values removed). Some participants did not have baseline exposure estimates and are thus excluded from above/below median columns. 
+ 
+How others have stratified:   
+-most proivde a table for the entire cohort (? & don't state which went into models?)   
+- entire cohort vs dementia cases (chen 2017)   
+- by exposure quartiles at baseline (baseline was during same time period, e.g., 1993-1995) (Oudin 2016; Chang 2014) ["baseline" was same time period for cohort]   
+- mean personal AP  
+
+```{r, delete old tables?}
+# #characteristics for entire cohort 
+# t1.all <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#     #1 row per participant
+#     pollutant == "no2") %>%
+#   unique() %>%
+#   t1.fn(data=., column.name = "All")
+# 
+# kable(t1.all, caption = "Cohort Baseline Characteristics") %>%
+#   add_indent(c(6:7, 9:14,16:19,22:24, 27:30, 32:35))
+#   
+# 
+# #characteristics by dementia status
+# t1.dem.case <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#   #1 row per participant
+#   pollutant == "no2") %>%
+#   filter(anydementia == 1) %>%
+#   t1.fn(data = ., column.name = "Dementia")
+# 
+# t1.dem.noncase <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#     pollutant == "no2") %>%
+#   filter(anydementia == 0) %>%
+#   t1.fn(data = ., column.name = "No Dementia")
+# 
+# t1.by.anydementia <- cbind(t1.dem.case, t1.dem.noncase)
+# 
+# kable(t1.by.anydementia, caption = "Cohort Characteristics by Dementia Outcome") %>%
+#   add_indent(c(6:7, 9:14,16:19,22:24, 27:30, 32:35))
+#   
+# 
+# #characteristics by AD status
+# t1.ad.case <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#   #1 row per participant
+#   pollutant == "no2") %>%
+#   filter(ad_nincds == 1) %>%
+#   t1.fn(data = ., column.name = "AD")
+# 
+# t1.ad.noncase <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#   #1 row per participant
+#   pollutant == "no2") %>%
+#   filter(ad_nincds == 0) %>%
+#   t1.fn(data = ., column.name = "No AD")
+# 
+# t1.by.ad <- cbind(t1.ad.case, t1.ad.noncase)
+# 
+# kable(t1.by.ad, caption = "Cohort Characteristics by AD Outcome") %>%
+#   add_indent(c(6:7, 9:14,16:19,22:24, 27:30, 32:35))
+# 
+# #characteristics by those w/ & w/o apoe
+# t1.apoe.yes <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#     pollutant == "no2") %>%
+#   filter(apoe == 1) %>%
+#   t1.fn(data = ., column.name = "APOE+")
+# 
+# t1.apoe.no <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#     pollutant == "no2") %>%
+#   filter(apoe == 0) %>%
+#   t1.fn(data = ., column.name = "APOE-")
+# 
+# 
+# t1.apoe.avail <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#     pollutant == "no2") %>%
+#   filter(!is.na(apoe)) %>%
+#   t1.fn(data = ., column.name = "Available")
+# 
+# t1.apoe.unavail <- dem1 %>%
+#   filter(
+#     #1st year of enrollment (baseline)
+#     enrollment_yr == 1,
+#     pollutant == "no2") %>%
+#   filter(is.na(apoe)) %>%
+#   t1.fn(data = ., column.name = "Missing") %>%
+#   rownames_to_column() %>%
+#   #get rid of NANs since trying to divide by 0 available readings
+#   mutate(Missing = str_replace(string = Missing, pattern = "0 \\(NaN%\\)", replacement =  "NA")) %>%
+#   column_to_rownames()
+# 
+# 
+# #t1.m2 <- cbind(t1.apoe.yes, t1.apoe.no, t1.apoe.unavail)
+# t1.m2 <- cbind(t1.apoe.avail, t1.apoe.unavail)
+# 
+# kable(t1.m2, caption = "Cohort characteristics by whether subjects have APOE readings available") %>%
+#   add_indent(c(6:7, 9:14,16:19,22:24, 27:30, 32:35)) %>%
+#   add_header_above(c("", "APOE" = 2))
+# 
+# #kable_styling()
+
+```
+
+Dementia
+
+```{r}
+#by apoe & dementia
+t1.apoe.dem <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(!is.na(apoe),
+         anydementia == 1) %>%
+  t1.fn(data = ., column.name = "apoe avail & dementia")
+
+t1.apoe.nodem <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(!is.na(apoe),
+         anydementia == 0) %>%
+  t1.fn(data = ., column.name = "apoe avail & no dementia")
+
+t1.noapoe.dem <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(is.na(apoe),
+         anydementia == 1) %>%
+  t1.fn(data = ., column.name = "no apoe avail & dementia") %>%
+  rownames_to_column() %>%
+  #get rid of NANs since trying to divide by 0 available readings
+  mutate("no apoe avail & dementia" = str_replace(get("no apoe avail & dementia"), pattern = "0 \\(NaN%\\)", replacement =  "NA")) %>%
+  column_to_rownames()
+
+t1.noapoe.nodem <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(is.na(apoe),
+         anydementia == 0) %>%
+  t1.fn(data = ., column.name = "no apoe avail & no dementia")%>%
+  rownames_to_column() %>%
+  #get rid of NANs since trying to divide by 0 available readings
+  mutate("no apoe avail & no dementia" = str_replace(get("no apoe avail & no dementia"), pattern = "0 \\(NaN%\\)", replacement =  "NA")) %>%
+  column_to_rownames()
+
+#table1
+cbind(t1.apoe.dem, t1.apoe.nodem, t1.noapoe.dem, t1.noapoe.nodem) %>%
+  kable(caption = "Cohort characteristics by Dementia Incidence and APOE availability", 
+        col.names = c("", "", "", ""), 
+        align = "c", 
+        ) %>%
+  add_indent(c(7:12,14:17,20:22, 25:28, 30:33)) %>%
+  add_header_above(c("", "Dementia" = 1, "No Dementia" = 1,  "Dementia" = 1, "No Dementia" = 1)) %>%
+  add_header_above(c("", "APOE Available" = 2, "APOE Not Available" = 2))
+
+ 
+
+```
+
+AD
+
+```{r}
+#by apoe & dementia
+t1.apoe.ad <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(!is.na(apoe),
+         ad_nincds == 1) %>%
+  t1.fn(data = ., column.name = "apoe avail & AD")
+
+t1.apoe.noad <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(!is.na(apoe),
+         ad_nincds == 0) %>%
+  t1.fn(data = ., column.name = "apoe avail & no AD")
+
+t1.noapoe.ad <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(is.na(apoe),
+         ad_nincds == 1) %>%
+  t1.fn(data = ., column.name = "no apoe avail & AD") %>%
+  rownames_to_column() %>%
+  #get rid of NANs since trying to divide by 0 available readings
+  mutate("no apoe avail & AD" = str_replace(get("no apoe avail & AD"), pattern = "0 \\(NaN%\\)", replacement =  "NA")) %>%
+  column_to_rownames()
+
+t1.noapoe.noad <- dem1 %>%
+  filter(
+    #1st year of enrollment (baseline)
+    enrollment_yr == 1,
+    pollutant == "no2") %>%
+  filter(is.na(apoe),
+         ad_nincds == 0) %>%
+  t1.fn(data = ., column.name = "no apoe avail & no AD")%>%
+  rownames_to_column() %>%
+  #get rid of NANs since trying to divide by 0 available readings
+  mutate("no apoe avail & no AD" = str_replace(get("no apoe avail & no AD"), pattern = "0 \\(NaN%\\)", replacement =  "NA")) %>%
+  column_to_rownames()
+
+#table1
+cbind(t1.apoe.ad, t1.apoe.noad, t1.noapoe.ad, t1.noapoe.noad) %>%
+  kable(caption = "Cohort characteristics by Alzheimer's Disease incidence and APOE availability", 
+        col.names = c("", "", "", ""), 
+        align = "c", 
+        ) %>%
+  add_indent(c(7:12,14:17,20:22, 25:28, 30:33)) %>%
+  add_header_above(c("", "AD" = 1, "No AD" = 1,  "AD" = 1, "No AD" = 1)) %>%
+  add_header_above(c("", "APOE Available" = 2, "APOE Not Available" = 2))
+
+ 
+
+```
+
+## Exposure Distribution
+
+Plot.
+
+```{r exposure}
+#ANOVA: How much of the variability due to calendar yr vs other factors (e.g., age vs birth cohort)? 
+no2.exposure <- 
+  dem.w %>%
+  filter(enrollment_yr == 1) %>%  
+  lm(no2_10yr ~ exposure_year + birth_cohort + factor(degree) + factor(race) + factor(income_cat), data = .)
+
+dem.w %>%
+filter(enrollment_yr == 1) %>%  
+  as.data.frame() %>%
+VCA::anovaVCA(no2_10yr ~ exposure_year + birth_cohort + degree + race + income_cat, Data = .)  
+
+anova(no2.exposure) %>% kable()
+
+#summary(no2.exposure)
+
+###########################
+#no2 trend over time by averaging periods
+# using everyone enrolled in study at any point in time (peson-years)
+avg_no2_by_avg_prds <- dem1 %>%
+  select(exposure_year, exp_avg01_yr:exp_avg20_yr) %>%
+  gather(key = "Avg_Prd", value = "NO2_ppb" , -exposure_year) %>%
+  mutate(Avg_Prd = as.factor(substr(Avg_Prd, 8, nchar(Avg_Prd)))) %>%
+  #calculate mean exposure prediction for any one year and averaging period
+  group_by(exposure_year, Avg_Prd) %>%
+  dplyr::summarize(mean_no2_ppb = mean(NO2_ppb, na.rm=T))
+
+dem1 %>%
+  ggplot(aes(x=exposure_year, y = exp_avg01_yr)) +
+  geom_point(alpha=0.1) +
+  geom_point(data=avg_no2_by_avg_prds, aes(y=mean_no2_ppb, col=Avg_Prd)) + 
+  geom_line(data=avg_no2_by_avg_prds, aes(y=mean_no2_ppb, col=Avg_Prd)) + 
+    labs(x = "Year",
+         y = "NO2 Exposure (ppb)",
+         col = "Averaging Period",
+         title = "NO2 exposure over time in the cohort", 
+         subtitle = "black points: individual exposure predictions;\ncolored points: average exposure predictions for that year and averaging period"
+           )
+
+# ggsave(filename = file.path("A1_Images", "NO2 over time by avg prd2.png"), 
+#        width = 8)    
+
+#formula = y ~ splines::bs(x, 3)
+```
+
+#### --> ? parallel plot for e.g., 2 ppl who never moved (show how their estimates decreased over time & how diff avg periods affect these estimates)
+
+```{r}
+
+```
+
+Table 2
+
+```{r}
+# exposure over time for everyone in cohort
+no2.all.yrs.py <- dem1 %>% expo.distrib.fn(dt = ., years.description = "All", var. = "exp_avg10_yr")
+
+no2.yr1.py <- dem1 %>%
+  filter(exposure_year <= 2000) %>%
+expo.distrib.fn(dt = ., years.description = "1994-2000", var. = "exp_avg10_yr")
+
+no2.yr2.py <- dem1 %>%
+  filter(exposure_year >= 2001, 
+         exposure_year <= 2009) %>%
+expo.distrib.fn(dt = ., years.description = "2001-2009", var. = "exp_avg10_yr")
+
+no2.yr3.py <- dem1 %>%
+  filter(exposure_year >= 2010) %>%
+  expo.distrib.fn(dt = ., years.description = "2010-2018", var. = "exp_avg10_yr")
+
+no2.by.yrs.py <- rbind(no2.all.yrs.py, no2.yr1.py, no2.yr2.py, no2.yr3.py)
+
+#no2
+no2.by.yrs.py %>% 
+  filter(pollutant == "no2") %>%
+  select(-pollutant) %>%
+  kable(., digits = 0,
+        caption = "10-yr average NO2 (ppb) exposure predictions over time for everyone in Cohort (N = person-years)")
+
+#pm2.5
+no2.by.yrs.py %>% 
+  filter(pollutant == "pm25") %>%
+  select(-pollutant) %>%
+  kable(., digits = 0,
+        caption = "10-yr average PM2.5 (ug/m3) exposure predictions over time for everyone in Cohort (N = person-years)")
+
+```
+
+## Correlations of variables in models     
+
+See high correlatin (R^2) between NO2 and PM2.5. Results may be confounded by PM2.5.
+
+```{r}
+#dataset with model variables of interest for descriptive purposes (similar dataset generated in models.fn())
+model.vars <- dem.w %>%
+  select(
+    #m1 & sensitivity
+    no2_1yr:no2_20yr ,
+    #m2
+    apoe,
+    male,
+    race_white,
+    income = income_cat,
+    edu = degree,
+    birth_cohort,
+    #m3
+    smoke,
+    exercise_reg,
+    #m4
+    Hypertension,
+    Diabetes, 
+    CV_DIS,
+    Heart_Dis,
+    bmi = bmi4,
+    #m6
+    pm25_1yr:pm25_20yr,
+    #pm25_10yr
+    ) %>%
+  mutate(
+  #make factors
+    income = factor(income),
+    edu = factor(edu),
+    birth_cohort = factor(birth_cohort),
+    smoke = factor(smoke),
+    
+    #make 10 ppb units
+    no2_10ppb_1yr = no2_1yr/my.no2.units,
+    no2_10ppb_5yr = no2_5yr/my.no2.units,
+    no2_10ppb_10yr = no2_10yr/my.no2.units,
+    no2_10ppb_20yr = no2_20yr/my.no2.units,
+    no2_10ppb_10yr10yrlag = no2_10yr10yrlag/my.no2.units,
+    no2_10ppb_10yr20yrlag = no2_10yr20yrlag/my.no2.units,
+    
+    #make 5 mg/m3
+    pm25_1ugm3_1yr = pm25_1yr/my.pm25.units,
+    pm25_1ugm3_5yr = pm25_5yr/my.pm25.units,
+    pm25_1ugm3_10yr = pm25_10yr/my.pm25.units,
+    pm25_1ugm3_20yr = pm25_20yr/my.pm25.units,
+    pm25_1ugm3_10yr10yrlag = pm25_10yr10yrlag/my.pm25.units,
+    pm25_1ugm3_10yr20yrlag = pm25_10yr20yrlag/my.pm25.units,
+   ) %>%
+  #drop these columns to avoid confusion, since using 10 ppb for NO2 and 5 ug/m3 for pm2.5
+  select(-c(no2_1yr:no2_20yr, 
+            pm25_1yr:pm25_20yr)) 
+
+# correlation plot
+model.vars %>% 
+  mutate(
+    #make numeric for cor() fn 
+    income = as.numeric(income),
+    edu = as.numeric(edu),
+    birth_cohort = as.numeric(birth_cohort),
+    smoke = as.numeric(smoke)
+    ) %>%
+  select(apoe:bmi, no2_10ppb_10yr, pm25_1ugm3_10yr) %>%
+  rename(no2_10yr = no2_10ppb_10yr,
+         pm25_10yr = pm25_1ugm3_10yr) %>%
+  cor(method = "pearson",
+      use ="complete.obs") %>%
+  corrplot::corrplot(method="color") 
+
+
+print("R2 for 10 yr avg NO2 and PM2.5 exposure")
+with(dem.w, cor(no2_10yr, pm25_10yr,
+                method = "pearson",
+                use = "complete.obs")^2) %>% round(2)
+
+```
+
+# Inferential Statistics
+
+## Primary Analysis, Redued & Extended Models
+
+"Hazard of dementia incidence is __% higher for every additional 10 ppb of NO2 exposure in the past 10 years.
+
+using dataset w/ missing values 
+
+Dementia
+
+```{r, fig.height=8}
+
+dem_10yr <- models.fn(mydata = dem.w,
+                models = paste0("m", c(1, 2, "3a", "3b",  "4a", "4b", 5, 6)),  
+                surv.time2 = "age_end_exposure", 
+                surv.event = "dementia_now", 
+                no2.var = "no2_10yr",
+                pm25.var = "pm25_10yr")
+
+dem_10yr_hrs <- dem_10yr$hrs %>%
+  mutate(
+    Model = c("1",
+           "2", 
+           "3a", 
+           "3b", 
+           "4a", 
+           "4b", 
+           "5", 
+           "5", 
+           "6"),
+    Description = c("Reduced",
+           "Primary", 
+           "Extended", 
+           "Extended, includes ACT Cohort", 
+           "Extended & Mediation", 
+           "Extended & Mediation, includes CASI Score", 
+           "Interaction, no APOE", 
+           "Interaction, APOE", 
+           "PM2.5 Adjusted")
+    )
+
+ 
+#m2 for other exposure years
+dem_other_yrs <- data.frame()
+expo.prds <- paste0("no2_", c("1yr", "5yr", "20yr", "10yr10yrlag", "10yr20yrlag"))
+
+for (i in seq_along(expo.prds)) {
+  df <- models.fn(mydata = dem.w,
+                models = "m2",
+                surv.time2 = "age_end_exposure", 
+                surv.event = "dementia_now", 
+                no2.var = expo.prds[i])
+  
+  dem_other_yrs <- rbind(dem_other_yrs, df$hrs)
+  }
+
+dem_other_yrs <- dem_other_yrs %>%
+  mutate(
+    Model = "2",
+    Description = "Different exposure period"
+    )
+
+#HR table 
+dem_hrs <- rbind(dem_10yr_hrs, dem_other_yrs) %>%
+  mutate(exposure = factor(exposure, levels = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr20yrlag")))
+
+dem_hrs %>% kable(caption = "Dementia HRs")
+
+#HR plot 
+dem_hrs %>% hr.plot(., outcome.var = "dementia")  
+
+```
+
+AD 
+
+```{r, fig.height=8}
+ad_10yr <- models.fn(mydata = dem.w,
+                models = paste0("m", c(1, 2, "3a", "3b",  "4a", "4b", 5, 6)),  
+                surv.time2 = "age_end_exposure", 
+                surv.event = "ad_now", 
+                no2.var = "no2_10yr",
+                pm25.var = "pm25_10yr")
+
+ad_10yr_hrs <- ad_10yr$hrs %>%
+  mutate(
+    Model = c("1",
+           "2", 
+           "3a", 
+           "3b", 
+           "4a", 
+           "4b", 
+           "5", 
+           "5", 
+           "6"),
+    Description = c("Reduced",
+           "Primary", 
+           "Extended", 
+           "Extended, includes ACT Cohort", 
+           "Extended & Mediation", 
+           "Extended & Mediation, includes CASI Score", 
+           "Interaction, no APOE", 
+           "Interaction, APOE", 
+           "PM2.5 Adjusted")
+    )
+
+#m2 for other exposure years
+ad_other_yrs <- data.frame()
+
+for (i in seq_along(expo.prds)) {
+  df <- models.fn(mydata = dem.w,
+                models = "m2",
+                surv.time2 = "age_end_exposure", 
+                surv.event = "ad_now", 
+                no2.var = expo.prds[i])
+  
+  ad_other_yrs <- rbind(ad_other_yrs, df$hrs)
+  }
+
+ad_other_yrs <- ad_other_yrs %>% 
+  mutate(Model = "2",
+         Description = "Different exposure period"
+  )
+
+#HR table 
+ad_hrs <- rbind(ad_10yr_hrs, ad_other_yrs) %>%
+  mutate(exposure = factor(exposure, levels = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr20yrlag")))
+
+ad_hrs %>% kable(caption = "AD HRs")
+
+#HR plot 
+ad_hrs %>% hr.plot(., outcome.var = "AD")   
+
+```
+
+## Other Sensitivity Analyses    
+
+### M2 using age at ACT onset diagnosis (cases) or last visit (noncases) 
+
+Dementia 
+
+```{r}
+
+#check that new coding is correct #looks good
+# t <- dem.w2 %>% select(study_id, onsetdate, last_visit, last_act_fu_yr, 
+#                        exposure_year,
+#                        age_start_exposure, age_end_exposure, age_end_exposure2,
+#                        dementia_now, dementia_now2,
+#                        ad_now, ad_now2) 
+# View(t)
+
+# dem.w2 %>%
+#   filter(exposure_year == last_act_fu_yr) %>%
+#   ggplot(aes(x=age_end_exposure, y= age_end_exposure2)) + 
+#   geom_point(alpha=0.15) +
+#   geom_abline(intercept = 0, slope = 1, col = "red") + 
+#   labs(x = "age at last visit (everyone)", 
+#        y = "age at onset (cases) or last visit (non-cases)")
+
+dem_10yr_act <- dem.w2 %>%
+  models.fn(.,
+            models = paste0("m2"),
+            surv.time2 = "age_end_exposure2", 
+            surv.event = "dementia_now2", 
+            no2.var = "no2_10yr",
+            pm25.var = "pm25_10yr") 
+
+dem_10yr_act <- dem_10yr_act$hrs %>%
+  mutate(Model = "2",
+         Description = "Using ACT onset age"
+         )
+
+dem_10yr_act %>% kable(caption = "Dementia HR using age at onset (cases) or last visit (non-cases)")
+
+```
+
+AD
+
+```{r}
+ad_10yr_act <- dem.w2 %>%
+  models.fn(.,
+            models = paste0("m2"),
+            surv.time2 = "age_end_exposure2", 
+            surv.event = "ad_now2", 
+            no2.var = "no2_10yr",
+            pm25.var = "pm25_10yr")  
+
+ad_10yr_act <- ad_10yr_act$hrs %>%
+  mutate(Model = "2",
+         Description = "Using ACT onset age"
+         )
+
+ad_10yr_act %>% kable(caption = "AD HR using age at onset (cases) or last visit (non-cases)")
+
+```
+
+### M2 without IPW for missing APOE status
+
+Dementia
+
+```{r}
+dem_10yr_m2_wt1 <- dem.w %>%
+  mutate(model_wt = 1) %>%
+  models.fn(mydata = .,
+            models = "m2",
+            surv.time2 = "age_end_exposure",
+            surv.event = "dementia_now",
+            no2.var = "no2_10yr",
+            pm25.var = "pm25_10yr")
+ 
+dem_10yr_m2_wt1_hr <- dem_10yr_m2_wt1$hrs %>%
+  mutate(Model = "2",
+         Description = "No IPW")
+
+dem_10yr_m2_wt1_hr %>% 
+  kable(caption = "unweighted HR for dementia incidence based on 10 yr avg exposure")
+
+```
+
+AD
+
+```{r}
+ad_10yr_m2_wt1 <- dem.w %>%
+  mutate(model_wt = 1) %>%
+  models.fn(mydata = .,
+            models = "m2",
+            surv.time2 = "age_end_exposure",
+            surv.event = "ad_now",
+            no2.var = "no2_10yr",
+            pm25.var = "pm25_10yr")
+ 
+ad_10yr_m2_wt1_hr <- ad_10yr_m2_wt1$hrs %>%
+  mutate(Model = "2",
+         Description = "No IPW")
+
+ad_10yr_m2_wt1_hr %>% 
+  kable(caption = "unweighted HR for AD incidence based on 10 yr avg exposure")
+
+
+```
+
+### keep exposure observations if address available at least 75% of time 
+
+Dementia
+
+```{r}
+#View(dem.w %>% select(no2_coverage_10yr, no2_10yr, no2_10yr_original))
+
+dem_address_0.75 <- dem.w %>%
+  filter(no2_coverage_10yr >= 0.75) %>%
+  models.fn(mydata = ., models = "m2",
+                        surv.time2 = "age_end_exposure",
+                        surv.event = "dementia_now",
+                        no2.var = "no2_10yr_original")
+
+dem_address_0.75_hrs <- dem_address_0.75$hrs %>%
+  mutate(Model = "2",
+         Description = "Address available at least 75% of time") 
+
+dem_address_0.75_hrs %>%
+  kable(caption = "HR for dementia incidence using known address threshold of 0.75%")
+
+
+```
+
+AD
+
+```{r}
+
+ad_address_0.75 <- dem.w %>%
+  filter(no2_coverage_10yr >= 0.75) %>%
+  models.fn(mydata = ., models = "m2",
+                        surv.time2 = "age_end_exposure",
+                        surv.event = "ad_now",
+                        no2.var = "no2_10yr_original")
+
+ad_address_0.75_hrs <- ad_address_0.75$hrs %>%
+  mutate(Model = "2",
+         Description = "Address available at least 75% of time") 
+
+ad_address_0.75_hrs %>%
+  kable(caption = "HR for AD incidence using known address threshold of 0.75%")
+
+```
+
+
+### --> [emailed Roy] Only include individuals for whom we have complete air pollution predictions and address history during the exposure period of interest
+
+Dementia
+
+```{r}
+
+```
+
+AD
+
+```{r}
+
+```
+
+
+## Compare all HRs
+
+```{r}
+#combine HRs from all analyses 
+
+dem_all_hrs <- rbind(
+  #reduced, primary & extended models, using 10 yr exposure
+  dem_hrs,
+  #M2 using age at ACT onset diagnosis (cases) or last visit (noncases)  
+  dem_10yr_act,
+  #no IPW
+  dem_10yr_m2_wt1_hr,
+  #address min 75%
+  dem_address_0.75_hrs
+  ) %>%
+  mutate(
+    model_description = paste0(Model, ". ", Description),
+    hr_ci = paste0(hr, " (", lower_limit, ", ", upper_limit, ")")
+    )
+
+#AD
+ad_all_hrs <- rbind(
+  #reduced, primary & extended models, using 10 yr exposure
+  ad_hrs,
+  #M2 using age at ACT onset diagnosis (cases) or last visit (noncases)  
+  ad_10yr_act,
+  #no IPW
+  ad_10yr_m2_wt1_hr,
+  #address min 75%
+  ad_address_0.75_hrs
+) %>%
+  mutate(
+    model_description = paste0(Model, ". ", Description),
+    hr_ci = paste0(hr, " (", lower_limit, ", ", upper_limit, ")")
+  )
+
+```
+
+Dementia
+
+```{r}
+#plot HRs
+
+dem_all_hrs %>%
+  select(
+    Model, Description, exposure,
+    hr_ci,
+    person_years, number_events
+    ) %>%
+  rename(
+    Exposure = exposure,
+    "HR (CI)" = hr_ci,
+    "Person-years" = person_years,
+    "No. events" = number_events,
+    ) %>%
+  kable() %>%
+  kable_styling()
+
+dem_all_hrs %>% hr.plot.m1_m6(dt = ., outcome.var = "dementia")
+
+# diff exposure periods
+dem_all_hrs %>% hr.plot.diff.expo.prds(dt = ., outcome.var = "Dementia")
+
+#other sensitivity analyses
+dem_all_hrs %>% hr.plot.other.models(dt = ., outcome.var = "dementia")
+
+
+```
+
+AD
+
+```{r}
+#M1-6
+ad_all_hrs %>% hr.plot.m1_m6(dt = ., outcome.var = "AD")
+
+#diff exposure periods
+ad_all_hrs %>% hr.plot.diff.expo.prds(dt = ., outcome.var = "AD")
+
+#other models
+ad_all_hrs %>% hr.plot.other.models(dt = ., outcome.var = "AD")
+
+
+```
+
+
+### Optional/time permitting 
+
+1. finer adjustments for confounders
+2. Model "1b" w/ APOE stratification
+3. calculate IPW weights based on the probability that All of the M2 predictors (not just APOE) are observed (e.g., all_covs_available ~ [predictors])
+
+```{r}
+
+
+```
+
+### Cox model assumptions and inference validity    
+1. Proportional hazards Assumption    
+a) Schoenfeld residuals. If the proportional hazards model is correctly specified, there should be no trend in the residuals over time (uncorrelated, with mean zero across event times)
+
+```{r}
+m2 <- dem_10yr$raw_model_output$m2
+
+```
+
+```{r, results="hide"}
+## ?? interpretation of schenresid matrix?
+schoenresid = residuals(m2, type = "scaledsch")
+
+time = as.numeric(rownames(schoenresid))
+
+# link no2_10yr & "times" column
+cbind(resid=schoenresid[,1], time) %>%
+  as.data.frame() %>%
+  ggplot(aes(x=time, y=resid)) + 
+  geom_point() + 
+  geom_smooth() + 
+  labs(y = "scaled Schoenfeld residuals for NO2 coefficient",
+       x = "failure time (age at dementia incidence)")
+
+```
+
+b. formally test. using cox.zph(). if global p-val is significant, assumption is violated   
+-assumption is not violated 
+
+```{r, results="hide"}
+cox.zph(m2)
+
+```
+
+2. linear relationship between continuous covariates and log hazard of the outcome    
+If a correct model is used, these residuals are uncorrelated and have mean nearly zero.
+
+
+Martingale residuals are used to check if the functional form of the covariate is okay (eg. linear vs quadratic terms). 
+
+```{r, results="hide"}
+##??
+martingalesid = residuals(m2, type = "martingale", data = dem.w) %>%
+  as.data.frame() %>%
+  #df rows used in M2
+  rownames_to_column(.) 
+names(martingalesid)[names(martingalesid) %in% "."] <- "martingaleresid" 
+  
+#only keep rows used in M2. 
+dem.w.m2 <- dem.w[martingalesid$rowname,] 
+
+plot.martingaleresid <- cbind(resid=martingalesid$martingaleresid, no2_10yr=dem.w.m2$no2_10yr) %>%
+  as.data.frame() 
+
+plot.martingaleresid %>%
+  ggplot(aes(x=no2_10yr, y=resid)) +
+  geom_point(alpha=0.3) +
+  geom_smooth() +
+  labs(y = "Martingale residuals",
+       x = "NO2 (ppb), 10 yr avg"
+      )
+
+#mean, +-SD  # looks good, mean is close to 0?
+print("mean, SD")
+mean(plot.martingaleresid$resid)
+sd(plot.martingaleresid$resid)
+
+```
+
+3. no outliers or influential observations, $\triangle \beta$
+ 
+```{r, fig.height=8, eval=T}
+# B537 L3, slide 125
+
+dfbetas <- residuals(m2, type="dfbeta") 
+#rename columns
+colnames(dfbetas) <- names(coef(m2))
+
+dfbetas %>%  
+  as.data.frame() %>%
+  #get rows used in model
+  rownames_to_column(var = "ind") %>%
+  mutate(ind = as.numeric(ind)) %>%
+  #make long format
+  gather(covariate, value, -ind) %>%
+  as.data.frame() %>%
+  #plot
+  ggplot(aes(x=ind, y=value)) +
+  geom_point() +
+  facet_wrap(~covariate, scales="free") + 
+  labs(x="observation index",
+       y= "delta beta")
+
+
+```

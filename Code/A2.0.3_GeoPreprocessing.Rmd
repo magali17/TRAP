@@ -1,0 +1,293 @@
+---
+title: "Geocovariate Preprocessing"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+editor_options:
+  chunk_output_type: console
+params: 
+  output_dir: "Output"
+---
+
+```{r}
+# # --> TO DO:
+# issue: lot of NAs in ACT dataset, only few columns w/o any NAs
+
+```
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      fig.height = 8, fig.width = 8
+                      )  
+
+options(knitr.kable.NA = '')
+
+pacman::p_load(tidyverse,
+               kable, kableExtra
+               )  
+
+set.seed(1)
+
+source("A2.0.1_Var&Fns.R")
+source("A2.0.3_functions_covariate_preprocessing_regional.R")
+
+images_path <- file.path(images_path0, "0. Geocovariates")
+tables_path <- file.path(tables_path0, "0. Geocovariates")
+
+  
+cov_mm0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
+cov_act0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "cohort_covars_20200107.csv")) 
+
+```
+
+# Initial covariates 
+
+Length
+
+```{r}
+initial_cov <- cov_mm0 %>%
+  select(-(location_id:msa)) %>%
+  names()
+
+length(initial_cov)
+
+```
+
+names
+
+```{r}
+initial_cov 
+
+```
+
+prepare geocovaraites for covariate.preprocess() function.
+
+```{r}
+
+# mobile monitoring geocovariates
+cov_mm0 <- cov_mm0 %>%
+  #drop columns if any NAs
+  select_if(~!any(is.na(.))) %>%
+  select(
+    #don't need this
+    -contains("region"),
+    ) %>%
+  mutate(
+    # --> correct setting? 
+    site_type = "FIXED"
+  )
+
+#save mm location info
+locations_mm <- cov_mm0 %>%
+  select(
+    site_id = native_id,
+    latitude:lambert_y
+  )
+
+#only keep covariates
+cov_mm0 <- cov_mm0 %>%
+  select(-c(location_id:msa, latitude:lambert_y))
+
+mm_names <- names(cov_mm0)
+
+```
+
+```{r}
+
+# ACT
+#  fake ACT cohort geocovariate dataset so names are the same across datasets
+cov_act_fake0 <- cov_mm0 %>%
+  slice(1:100) %>%
+  mutate(
+    # --> ??? Prediction sites??
+    site_type = "P"
+  )
+
+# actual data, but has too many NAs
+cov_act0 <- cov_act0 %>%
+  #drop columns w/ all NAs
+  select_if(~!all(is.na(.))) %>%
+  select(
+    -c(X), - contains("state"),
+    #don't need this
+    -contains("region"),
+  ) %>%
+  mutate(
+    # ? correct setting?
+    site_type = "P"
+  )
+
+# ----> ISSUE: lot of NAs in columns
+# #number of NAs in each column
+# cov_act0 %>%
+#   summarise_all(~sum(is.na(.))) 
+   
+#save act location info
+locations_act <- cov_act0 %>%
+  select(
+    site_id = location_id,
+    latitude:lambert_y
+  )
+
+#only keep covariates
+cov_act0 <- cov_act0 %>%
+  select(-c(location_id:county))
+
+act_names <- names(cov_act0)
+
+ 
+# [? need to do this?] only keep variables if also in the mobile monitoring dataset
+cov_act0 <- cov_act0 %>%
+  select_if(names(.) %in% mm_names)
+
+
+```
+
+clean up geocovariates using covariate.preprocess() function (lab protocol/code)   
+* returns log-transformed proximity variables; drops old land use ("lu") variables; drops variables not available/ready for use in our study area
+
+```{r}
+cov_preprocessed <- covariate.preprocess(covars.mon = cov_mm0, 
+                                         covars.sub = cov_act_fake0,  #cov_act0,
+                                         region = "NW")
+ 
+
+```
+
+Drop other variables I won't be using in this analysis
+* emissions data 
+
+```{r}
+cov_mm <- cov_preprocessed$covars.mon %>%
+  # drop AP predictions (these are based on other covariate models)
+  select(-contains("em_"),  -contains("no2_")) 
+
+final_cov <- names(cov_mm)
+
+# add site info back in 
+cov_mm <- cbind(locations_mm, cov_mm)
+
+#View(cov_mm)
+
+cov_act_fake <-cov_preprocessed$covars.sub %>%
+  select(-contains("em_"),  -contains("no2_"))
+
+#cov_act <- cbind(locations_act, cov_act)
+
+```
+
+# Final covariates to be used in analysis
+
+```{r}
+cov_descrip <- data.frame(Covariate = final_cov) %>%
+  mutate(Covariate= as.character(Covariate)) %>%
+    split_cov_name(cov = "Covariate")%>%
+  group_by(Covariate = cov) %>%
+  dplyr::summarize("Available Buffer Sizes" = paste0(sort(unique(buffer)), collapse = ", ")) %>%
+  mutate(Description = recode(Covariate,
+                          elev_above = "number of points (out of 24) more than 20 m and 50 m uphill of a location for a 1000 m and 5000 m buffer, respectively",
+                         elev_below = "number of points (out of 24) more than 20 m and 50 m downhill of a location for a 1000 m and 5000 m buffer, respectively",
+                         elev_at_elev = "number of points (out of 24) within 20 m and 50 m of the location' elevation for a 1000 m and 5000 m buffer, respectively",
+                         elev_stdev = "standard deviation of elevation of 20 points surrounding the location",
+                         elev_elevation = "elevation above sea level in meters",
+                         imp_a = "average imperviousness",
+                         intersect_a1_a3_s = "number of a1-a3 road intersections",
+                         intersect_a2_a2_s = "number of a2-a2 road intersections",
+                         intersect_a2_a3_s = "number of a2-a3 road intersections",
+                         intersect_a3_a3_s = "number of a3-a3 road intersections",
+                         ll_a1_s = "length of a1 roads",
+                         ll_a23_s = "length of a2 and a3 roads",
+                         log_m_to_a1 = "log meters to closest a1 road",
+                         log_m_to_a1_a1_intersect = "log meters to closest a1-a1 road intersection",
+                         log_m_to_a1_a3_intersect = "log meters to closest a1-a3 road intersection",
+                         log_m_to_a123 = "log meters to closest a1, a2 or a3 road",
+                         log_m_to_a2_a2_intersect = "log meters to closest a2-a2 road intersection",
+                         log_m_to_a2_a3_intersect= "log meters to closest a2-a3 road intersection",
+                         log_m_to_a23 = "log meters to closest a2 or a3 road",
+                         log_m_to_a3_a3_intersect = "log meters to closest a3-a3 road intersection",
+                         log_m_to_airp = "log meters to closest airport",
+                         log_m_to_coast = "log meters to closest coastline",
+                         log_m_to_comm = "log meters to closest commercial and services area",
+                         log_m_to_l_airp = "log meters to closest large airport",
+                         log_m_to_l_port = "log meters to closest large port",
+                         log_m_to_m_port = "log meters to closest medium port",
+                         log_m_to_rr = "log meters to closest railroad",
+                         log_m_to_ry = "log meters to closest rail yard",
+                         log_m_to_truck = "log meters to closest truck route",
+                         log_m_to_waterway = "log meters to closest waterway",
+                         ndvi_q25_a = "NDVI (25th quantile)",
+                         ndvi_q50_a = "NDVI (50th quantile)",
+                         ndvi_q75_a = "NDVI (75th quantile)",
+                         ndvi_summer_a = "average summer time NDVI",
+                         ndvi_winter_a = "average winter time NDVI",
+                         pop_s = "2000 population density",
+                         pop10_s = "2010 population density",
+                         pop90_s = "1990 population density",
+                         rlu_barren_p = "proportion of barren land",
+                         rlu_decid_forest_p = "proportion of deciduous forest",
+                         rlu_dev_hi_p = "proportion of highly developed land (e.g., commercial and services; industrial; transportation, communication and utilities)",
+                         rlu_dev_lo_p = "proportion of low developed land  (e.g., residential)",
+                         rlu_dev_med_p = "proportion of medium developed land (e.g., residential)",
+                         rlu_dev_open_p = "proportion of developed open land",
+                         rlu_evergreen_p = "proportion of evergreen forest",
+                         rlu_herb_wetland_p = "proportion of herb (nonforested) wetland",
+                         rlu_mix_forest_p = "proportion of mixed forest",
+                         rlu_water_p = "proportion of water",
+                         rlu_woody_wetland_p = "proportion of woody wetland",
+                         tl_s = "length of truck routes"
+                         ),
+    Kind = ifelse(grepl("elev", Covariate), "elevation", 
+                  ifelse(grepl("^imp", Covariate), "imperviousness",
+                         ifelse(grepl("_a[1-3]", Covariate), "roads",
+                                ifelse(grepl("airp", Covariate), "airports",
+                                       ifelse(grepl("coast", Covariate), "coast",
+                                              ifelse(grepl("comm", Covariate), "commercial and services",
+                                                     ifelse(grepl("port", Covariate), "port",
+                                                            ifelse(grepl("rr$|ry$", Covariate), "railroads, rail yards",
+                                                                   ifelse(grepl("truck|tl_", Covariate), "truck routes",
+                                                                          # --> ? rlu also has a water variable. keep as "land use"?
+                                                                          ifelse(grepl("water", Covariate), "water",
+                                                                                 ifelse(grepl("ndvi", Covariate), "NDVI",
+                                                                                        ifelse(grepl("^pop", Covariate), "population",
+                                                                                               ifelse(grepl("^rlu", Covariate), "land use", ""
+                         ) ) ) ) )))))))))
+    ) %>%
+  select(Kind, everything()) %>%
+  arrange(Kind)
+
+# table   
+cov_descrip %>% kable(caption = paste0("Geocovariates and buffers to be used in analysis (n = ", length(final_cov), ")"), row.names = T) %>%
+  kable_styling() %>%
+  add_footnote("see MESA DOOP for additional details") #%>% save_kable(file.path("A2_Images", "test.png"))
+
+# # save table
+#   # includes 1990, 2000 population densities
+# write_excel_csv(cov_descrip, file.path(tables_path, "cov_descrip.csv"), na = "")
+ 
+```
+
+
+Save datasets
+
+```{r}
+# # geocovariates data
+# saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda"))
+# saveRDS(cov_act_fake,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_fake_preprocessed.rda"))
+
+```
+
+ 

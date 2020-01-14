@@ -1,0 +1,70 @@
+---
+title: 'Aim 2: Sensitivity Analyses'
+author: "Magali Blanco"
+date: "1/2/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Sensitivity Analyses
+
+## Averaging of 1 sec data at each stop
+
+??? Use averages
+
+```{r}
+
+```
+
+## Annual averages 
+
+Trim 10% observations
+
+```{r}
+
+```
+
+Windosrize extreme stop readings 
+
+```{r}
+# #windosrized alternative 
+# ufp <- ufp %>%
+#   group_by(site_id) %>%
+#   mutate(
+#     ufp_wind = ifelse(ptrak_ct_cm3 > quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), 
+#                       ifelse(ptrak_ct_cm3 < quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), 
+#                              ptrak_ct_cm3)))
+
+
+```
+
+## UK Model
+
+Change TRAP indicator variable transformations (native to log-transformed or vise versa)
+
+```{r}
+
+
+```
+
+Use different annual averages
+
+```{r}
+
+```
+
+Differeent number of PLS components
+
+```{r}
+
+```
+
+
+? [time permitting] Normalize to the Roosevelt garage 
+```{r}
+
+```
+

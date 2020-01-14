@@ -1,0 +1,795 @@
+---
+title: "Historical UFP Data"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    df_print: paged
+    number_sections: yes
+    toc: yes
+    toc_depth: '3'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r, echo=F}
+ 
+```
+
+    
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(readxl, dplyr, tidyverse, lubridate, knitr, nlme, lme4, VCA)   
+
+#set plot theme
+theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+
+set.seed(1)
+
+#source common variables (e.g., percentil, time of day)
+source("A2.0.1_Var&Fns.R") #colo.plot.wide.data(), add.temporal.variables(), ptrak.bind.fn()
+source("A2.0.1_Var&Fns.R") #compare.fn()
+
+```
+
+```{r}
+#jitter 5 homes locations
+five_homes_loc <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "Hx Data", "Tim Larson", "Five Homes Study", "five homes addresses.csv")) %>%
+  mutate(
+    Latitude_jittered = jitter(Latitude),
+    Longitude_jittered = jitter(Longitude))
+#write.csv(five_homes_loc, file= file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "Hx Data", "Tim Larson", "Five Homes Study", "five homes addresses jittered.csv"), row.names = F)
+ 
+
+```
+
+
+# Sampling Locations for Other Projects
+
+* Beacon Hill (T Larson)
+   + 2001, most months and hours 
+* Five Homes (T Larson)
+    + 2000-2002, Dec-Mar, few days at each location 
+    + M14, H05, M37, V10, P63
+* Four MOV-UP Locations (E Seto)
+   + 2018-2019, scattered throughout the year
+   + Sand Point, 10th & Weller, Maywood, Sea Tac Community Center, 
+  
+![UFP Sampling Locations. Five home locations jittered.](../Write Up/1. Proposal/Aim 2. 2019 UFP/Images/all sampling locations_jittered5homes.png)
+
+
+# Beacon Hill 2001 Data 
+
+```{r, BH 2001 notes, echo=F}
+# #Notes
+
+# * If there is no "P" in the name, the particle diameter is 0.__ µm.
+# V05 is the volume of .05 micrometer particles per cc. V1 through V7 (columns L-R) are for 0.1-0.7 µm particles   
+# *  What are columns S:AH, which have about 5 numbers after the “V”, and some have additional letters (e.g., ‘V83546, V1P0368)? - 0.835 microns and 1.0368 microns  (the P stands for “point”- I didn’t make that one up!)   
+# *  Particle size (e.g., 0.05 µm) is the lowest size limit of the bin 
+# 
+#missing data
+## The midnight data is missing due to daily calibration procedures at the Beacon Hill site.  Not sure about the July/December missing data.
+#
+# Kim et al. 2004:
+# * The sampling height was 4 m above ground (this is lower than our samples).
+# * Range: 20 - ____ nm
+# * ?? are bins counts within that bin (?Yes); or counts greater than that size?
+# 
+# Mobile Monitoring particle counter ranges
+# * PTRAK: 20 nm -  1 µm, screened: 50 nm - 1 µm
+# * DiscMini: 10-700 nm
+# * Nanoscan: 10-420 nm
+
+```
+
+### --> ? change weights to what I had originally: upweigh neighbroing months/hours since this is on a finer scale than binning? 
+
+```{r}
+bh <- read_excel(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "Hx Data", "Tim Larson", "Beacon Hill Data", "Beacon Hill size data.xls") )
+
+bh <- bh %>%
+  #only keep 2001 data; too little 2000 and 2002 data to calculate annual avg
+  filter(year(date) == "2001") %>%
+  #format date for use in function
+  mutate(
+    date = ymd_h(paste(date, hour))
+    ) %>%
+  add.temporal.variables(data = ., date.var = "date") %>%
+  mutate(
+    #group night hours together (for plotting)
+    hour_night = ifelse(hour < min(early_am), hour + 24, hour),     
+    
+    # assign temporal weights
+    # #upweigh surrounding months of missing times (no Jul or Dec data)
+    # month.wt = ifelse(month == 01 | month == 11 | month == 06 | month == 08, 1.5/12, 1/12),
+    # #upweight hr 1 and 23 since no hour 24
+    # hour.wt = ifelse(hour == 01 | hour == 23, 1.5/24, 1/24),
+    # month.hour.wt = month.wt*hour.wt
+    season.wt = 1/4,
+    day_of_week.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+    time_of_day.wt = ifelse(time_of_day == "early_am", length(early_am)/24,
+                            ifelse(time_of_day == "am", length(am)/24,
+                                   ifelse(time_of_day == "noon", length(noon)/24,
+                                          ifelse(time_of_day == "evening", length(evening)/24, length(night)/24)))),
+    season_week_hour.wt = season.wt*day_of_week.wt*time_of_day.wt
+    ) 
+
+```
+
+```{r}
+# #check that sum of weights should be 1. # it is
+# weights <- bh %>% group_by(season, time_of_week, time_of_day) %>%
+#   select(season, time_of_week, time_of_day, season_week_hour.wt) %>%
+#   unique() %>%
+#   ungroup() %>%
+#   summarize(
+#     sum = sum(season_week_hour.wt)
+#   )
+
+# how many hourly values do we have? 
+##only have data for 10 months & 23 hours
+# unique(bh$month) #no July or December
+# unique(bh$hour) #no midnight
+
+##old: No data for July or December, or Midnight. Little data for months 1, 10, 11; more data for hour 23 than the rest. Thus, values need to be reweighted.
+
+# bh %>%
+#   ggplot(aes(x=hour, fill=time_of)) +  #fill= hour
+#   geom_bar() + 
+#   facet_wrap(~month, labeller = "label_both")
+
+```
+
+## Available Data
+
+```{r}
+bh %>%
+  ggplot(aes(x=time_of_day, fill= time_of_week)) +  #fill= hour
+  geom_bar() + 
+  facet_wrap(~season)
+
+```
+
+
+ 
+```{r}
+# calculate total PNC per hourly 
+
+##convert vol conc (µm3/cm3 air) to num conc (particles/cm3 air)
+###make long format
+bh.long <-bh %>%
+  gather(V02:V2P4579, key = "diam_um_lower", value = "vol_conc_um3_cm3")
+
+bins <- unique(bh.long$diam_um_lower) 
+
+bh.long <- bh.long %>% 
+            #rename bin column names
+    mutate(diam_um_lower = as.numeric(ifelse(diam_um_lower %in% bins[1:19], 
+                    paste0("0.", substr(diam_um_lower, 2,7)),
+                    paste0(substr(diam_um_lower, 2,2), ".", substr(diam_um_lower, 4,7))))) 
+
+##Calculate mean diameter for each bin (bin sizes are for lower size cut)
+diam <- unique(bh.long$diam_um_lower)
+bh.long$diam_um_upper <- NA 
+
+for (i in 1:length(diam)) {
+  bh.long$diam_um_upper[bh.long$diam_um_lower == diam[i]] = diam[i+1]
+}
+
+bh.long$diam_um_center <- rowMeans(bh.long[c("diam_um_lower", "diam_um_upper")])
+ 
+ bh.long <- bh.long %>%
+   mutate(
+     #calculate particle volume per bin      
+     particle_vol_um3_particle = 4/3*pi*(diam_um_upper/2)^3,
+    # calculate number concentration
+    num_conc_particles_cm3 = vol_conc_um3_cm3 / particle_vol_um3_particle
+    ) 
+
+### get a total particle conc for a specific size range (# counts are for particles ">" __ um) & date
+bh.long <- bh.long %>%
+    # only keep bin counts for particle sizes similar to what we are collecting in mobile monitoring (PTRAK: 20 nm - 1µm; DiscMini: 10-700 nm; Nanoscan: 10-420 nm). Note: few particles are large, so this doens't make a large difference in the annual avg estimate.
+  ## counts similar to PTRAK
+  filter(diam_um_lower < 1.03680) %>%
+  #calculate avg total PNC for each hour
+  group_by(date, hour, hour_night, time_of_day, day, time_of_week, month,  season, season_week_hour.wt) %>%
+ dplyr::summarize(
+            #total particle count for each day and hour
+            pnc_particles_cm3 = sum(num_conc_particles_cm3, na.rm = T)) %>%
+  ungroup()
+ 
+  
+```
+
+ 
+
+```{r}
+#plot ??w/o of extreme values
+bh.long %>%
+  ggplot(aes(x=pnc_particles_cm3)) +
+  geom_histogram()
+
+```
+
+
+## Weighted Annual Average UFP (#/cm3)   
+ 
+```{r}
+#take season-week-hour avg's 
+
+# #look to see if there are any extreme values. There are
+# bh.long %>%
+#   ggplot(aes(x=pnc_particles_cm3)) + 
+#   geom_histogram()  
+
+
+
+# take avg reading for each season-week-hour combination  
+pnc <- bh.long %>% 
+  #group by hour, day & month first since some of these times are sampled more than others; later, take group averages (e.g., season, time_of_week, time_of_day)
+  group_by(hour, time_of_day, day, time_of_week, month, season, season_week_hour.wt) %>%
+    dplyr::summarize(
+      # number of observations used to calculate each month-hour combination (all use 1-2 obs)
+      unique_hour_samples = n(),
+      # use na.rm=T b/c some values are missing when exclude extremely high values
+      avg_pnc_particles_cm3 = mean(pnc_particles_cm3, na.rm = T)
+      ) %>%
+  #now take avg of larger temporal groups
+  group_by(time_of_day, time_of_week, season, season_week_hour.wt) %>%
+    dplyr::summarize(
+      # number of observations per month-hour combination 
+      N = n(),
+      # use na.rm=T b/c some values are missing when exclude extremely high values
+      avg_pnc_particles_cm3 = mean(avg_pnc_particles_cm3, na.rm = T)
+      )
+
+#check that weights add up to 1. They do
+#sum(pnc$season_week_hour.wt)
+  
+# when there is only 1 value for each season-week-hour combination, multiply its respective weight; sum all values to estimate annual avg for total PNC
+(pnc_annual_avg_particles_cm3 <- round(sum(pnc$avg_pnc_particles_cm3 * pnc$season_week_hour.wt))) 
+
+#annaul estimates
+## w/o lower/upper 5% values
+### 69,259: using upper bin size 
+### 91,876: using center bin size 
+### 130,647: using lower bin size 
+
+## 54,418: using center cut bin size and without extreme values > 90% 
+## 96,069: using center cut bin size and without extreme values > 99% 
+## ~102,534: using center cut bin size with all values included
+## ~146,514: using lower cut bin size (vol/particle is smaller than using center cut --> vol conc is divided by smaller # --> larger PNC)
+
+```
+
+## Temporal UFP patterns   
+### Plots    
+
+```{r}
+### -->  add adjusted means from LS fits to boxplots? 
+
+```
+
+#### --> add N to all boxplots 
+
+
+```{r}
+
+#season/month
+bh.long %>%
+  ggplot(aes(x=season, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=month)) + 
+  geom_smooth(aes(x=as.numeric(season)), se=F, formula = y ~ splines::bs(x, 4), method = lm) + 
+  labs(title = "loess fit to month")
+  
+bh.long %>%
+  ggplot(aes(x=month, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=season)) + 
+  geom_smooth(aes(x=as.numeric(month)), se=F, formula = y ~ splines::bs(x, 4), method = lm) + 
+  labs(title = "loess fit to month")
+ 
+#day
+bh.long %>%
+  ggplot(aes(x=day, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, formula = y ~ splines::bs(x, 5), method = lm) 
+
+
+#hour 
+bh.long %>%
+  ggplot(aes(x=hour, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
+  geom_smooth(aes(x=as.numeric(hour)), se=F) 
+
+bh.long %>%
+  ggplot(aes(x=hour_night, y=pnc_particles_cm3)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour_night)) + 
+  geom_smooth(aes(x=as.numeric(hour_night)), se=F) + 
+  labs(title = paste0("Hours < ", min(early_am), " renumbered to group 'night' hours"))
+```
+
+### Temporal Models 
+
+####-> ? have to nest anovas covariates time_of_day/time_of_week/season  ?
+### --> ? use log (UFP) if distributin is log normal 
+#### --> ? rescale #s so ANOVA reads easier 
+    scale()  #only for numerical variables? 
+    standardize::scale_by() #also for factors... 
+
+```{r}
+#scale UFP for anova
+pnc$ufp_scaled <- scale(pnc$avg_pnc_particles_cm3) %>% as.vector()
+bh.long$ufp_scaled <- scale(bh.long$pnc_particles_cm3) %>% as.vector()
+
+
+
+bh.lm1 <- lm(ufp_scaled ~ time_of_day + time_of_week + season, data=pnc) 
+bh.lm2 <- lm(ufp_scaled ~ factor(hour_night) + factor(day, ordered = F) + factor(month, ordered = F), data=bh.long) 
+
+anovaVCA(ufp_scaled ~ time_of_day + time_of_week + season, Data=as.data.frame(pnc))  
+
+# ????nested results 
+anovaVCA(ufp_scaled ~ time_of_day/time_of_week/season, Data=as.data.frame(pnc))  
+
+anova(bh.lm1)
+
+anovaVCA(ufp_scaled ~ hour + day + month, Data=as.data.frame(bh.long)) 
+#? nested #ERROR
+#anovaVCA(avg_pnc_particles_cm3 ~ hour/day/month, Data=as.data.frame(bh.long))  
+
+anova(bh.lm2)
+
+bh.lm1 %>% summary()
+bh.lm2 %>% summary()
+
+```
+
+
+## Compare 2019 (Mobile Monitoring) vs 2001 (Larson) UFP at Beacon Hill 
+
+little mobile monitoring data to fully capture temporal patterns finer than 1 yr? 
+
+```{r}
+mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191021.rda"))
+
+bh.mm <- mm.wide %>%
+  filter(aqs_location == "Beacon Hill") %>%
+  select(arrival_time, date:season, ufp_pt_noscreen_ct_cm3) %>%
+  drop_na(ufp_pt_noscreen_ct_cm3)
+
+print(paste("median 2019 UFP (pt/cm3): Feb -", month(max(bh.mm$date), label = T)))
+round(median(bh.mm$ufp_pt_noscreen_ct_cm3)) 
+
+# 7265 through 10/21/19
+
+# rbind w/ bh.long 
+bh.mm2 <- bh.mm %>%
+  select(date:season,
+         ufp_pt_cm3 = ufp_pt_noscreen_ct_cm3
+         ) %>% 
+  mutate(
+    source = "2019 mobile monitoring", 
+    #group night hours together (for plotting)
+    hour_night = ifelse(hour < min(early_am), hour + 24, hour)
+  )
+bh.2001 <- bh.long %>%
+select(
+  date, hour, hour_night, time_of_day, day, time_of_week, month, season,
+  ufp_pt_cm3 = pnc_particles_cm3
+) %>%
+  mutate(
+    date = as.Date(date),
+    source = "2001 T. Larson"
+  )
+
+bh.mm.2001 <-rbind(bh.mm2, bh.2001)
+
+#month
+bh.mm.2001 %>% 
+  ggplot(aes(x=month, y=ufp_pt_cm3)) + 
+  geom_boxplot(aes(fill=month)) + 
+  geom_smooth(aes(x=as.numeric(month)),  se=T, formula = y ~ splines::bs(x, 4), method = lm) +
+  labs(title = " ") + 
+  facet_wrap(~source) + 
+  scale_y_log10() 
+
+#day
+bh.mm.2001 %>%
+  ggplot(aes(x=day, y=ufp_pt_cm3)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  geom_smooth(aes(x=as.numeric(day)), se=T, 
+              formula = y ~ splines::bs(x, 5), 
+              method = lm) + 
+  facet_wrap(~source) + 
+  scale_y_log10() 
+
+## --> ?? why isn't there a loess line for MM data? 
+#hour
+bh.mm.2001 %>%
+  #filter(source == "2019 mobile monitoring") %>%
+  ggplot(aes(x=hour_night, y=ufp_pt_cm3)) + 
+  geom_boxplot(aes(group=hour_night, 
+                   fill = time_of_day)) + 
+  geom_smooth(aes(x=hour_night), se=T) + 
+  scale_y_log10() +
+  facet_wrap(~source) 
+  
+```
+
+Mobile monitoring obserations
+
+```{r}
+# standardize UFP to make output #s smaller 
+bh.mm$ufp_scaled <- scale(bh.mm$ufp_pt_noscreen_ct_cm3) %>% as.vector()
+
+# models 
+mm.lm1 <- lm(ufp_scaled ~ time_of_day + time_of_week + season, data = bh.mm) 
+mm.lm2 <- lm(ufp_scaled ~ factor(hour) + factor(day, ordered = F) + factor(month, ordered = F), data = bh.mm) 
+
+anovaVCA(ufp_scaled ~ time_of_day + time_of_week + season, 
+         Data = as.data.frame(bh.mm))  
+anova(mm.lm1)
+
+anovaVCA(ufp_scaled ~ hour + day + month, 
+         Data=as.data.frame(bh.mm)) 
+# ERROR b/c SE's are NAs
+anova(mm.lm2)
+
+
+mm.lm1 %>% summary()
+# ERROR in this model???
+mm.lm2 %>% summary()
+
+```
+
+
+# 5 Homes UFP Data
+
+UFP data collected during the winters of 2000 2001 at 5 homes in the Seattle are (data unpublished).
+
+```{r}
+#particle column counts are in µm
+# count concentration is for: #/cm3
+
+```
+
+```{r}
+#I changed v05 (same location as h05) to read "v10" - what Tim L had noted it as. the sampling calendar (Size Dist. Locations.xls) is confusing.
+
+homes0 <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "Hx Data", "Tim Larson", "Five Homes Study","five home combined_out_no.csv"))  
+
+homes <- homes0 %>%
+  mutate(
+    #format time
+    time = ymd_hms(time, tz = "America/Los_Angeles"),
+    #time2 = time,
+    #recalculate this. it's wrong/off in original dataset for some reason
+    DOY = format(time, "%j"),
+    #order locations by when sampling occurred 
+    location = factor(location, levels = c("m14", "h05", "m37", "v10", "p63"))
+    ) %>%
+  #add temporal variables
+  add.temporal.variables(data = ., date.var = "time") %>%
+  mutate(month = factor(month, levels = c("Dec", "Jan","Feb", "Mar")))
+
+#calculate total UFP particles uner 1 µm
+homes$ufp_67_950_nm_pct_cm3 <- homes %>% 
+  dplyr::select(X0.06745 : X0.94868) %>%
+  rowSums()
+
+#how long were locations sampled? 
+sampling_times <- homes %>%
+  group_by(location) %>%
+  dplyr::summarize(
+    #mean_ufp = mean(ufp_67_0.95_nm),
+    start_doy = as.numeric(min(DOY)),
+    end_doy = as.numeric(max(DOY)),
+    days_sampled = end_doy - start_doy,
+    start_date = min(time),
+    end_date = max(time)
+    )  
+
+#All but location v05 are sampled for full days 24
+kable(sampling_times, caption = "Locations Sampled by Days of the Year. All but location v05 are sampled for full days 24", )
+
+# drop times sampled at loc v05 after 9:55:04 AM on last sampling day to ensure all mean estimates are for full days
+v05.start.time <- format(sampling_times[sampling_times$location=="v10",]$start_date, "%H:%M:%S" )
+v05.end.date <- format(sampling_times[sampling_times$location=="v10",]$end_date, "%Y-%m-%d" )
+v05.new.end <- as.POSIXct(paste(v05.end.date, v05.start.time))
+                            
+homes <- homes %>%
+  mutate(
+  time = as.POSIXct(ifelse(location %in% c("m14", "h05", "m37", "p63") | 
+                      (location == "v10" & time < v05.new.end), 
+                    time, NA),
+                      origin = "1970-01-01"
+                    )) %>%
+  drop_na(time)
+
+#calculate avg (total) UFP reading at each site 
+ufp_mean <- homes %>%
+  group_by(location) %>%
+  dplyr::summarize(
+    ufp_site_mean = round(mean(ufp_67_950_nm_pct_cm3))
+  ) 
+
+homes <- homes %>% 
+  left_join(ufp_mean)
+
+site_means <- ufp_mean %>%
+  left_join(sampling_times[c("location", "start_date", "end_date", "days_sampled")])
+
+kable(site_means, caption = "UFP PNC (#/cm3) by loation and date sampled")
+
+kable(cbind(min_conc_pct_cm3=range(site_means$ufp_site_mean)[1],
+            max_conc_pct_cm3=range(site_means$ufp_site_mean)[2]), 
+      caption = "range of UFP PNCs (#/cm3) observed")
+
+```
+
+all samples occurred in late fall/winter. None occurred at Same time, though some occurred at similar times.
+
+similar temporal trends acros locations: weekend, diurnal  
+
+```{r}
+#site_means
+
+#time series
+homes %>%
+    mutate(year = year(time)) %>%
+  ggplot(aes(x=time, y=ufp_67_950_nm_pct_cm3)) + 
+  geom_point() + 
+  geom_smooth(formula = y ~ splines::bs(x, 15), method = lm) +
+  geom_hline(aes(yintercept = ufp_site_mean)) +
+  facet_wrap(~location + year, 
+             scales="free_x")
+
+#month
+homes %>%
+  ggplot(aes(x=month, y=ufp_67_950_nm_pct_cm3)) + 
+  geom_boxplot(aes(fill=location)) 
+   
+#weekend 
+homes %>% 
+  ggplot(aes(x=location, y=ufp_67_950_nm_pct_cm3, fill = time_of_week)) + 
+  geom_boxplot(aes()) 
+
+#day
+homes %>%
+  ggplot(aes(x=day, y=ufp_67_950_nm_pct_cm3, )) + 
+  geom_boxplot(aes(fill=location)) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F,formula = y ~ splines::bs(x, 5), method = lm) + 
+  facet_wrap(~location, ncol=1)
+   
+#hour
+homes %>%
+  ggplot(aes(x=hour_night, y=ufp_67_950_nm_pct_cm3, fill= location)) + 
+  geom_boxplot(aes(group = hour_night)) + 
+  geom_smooth(formula = y ~ splines::bs(x, 5), method = lm) + 
+  facet_wrap(~location, ncol=1)
+
+
+```
+
+variation: error > season > time of day > location > time of week
+
+#### ??	Anova() vs aov() vs anovaVCA() vs lm() ? 
+
+### ---> add random component to anovaVCA ??  e.g. (time_of_day + time_of_week + season)/location
+### ?? interpretation of "hour:day:month:location"??
+
+aov()
+
+```{r}
+# standardize UFP to make output #s smaller 
+homes$ufp_scaled <- scale(homes$ufp_67_950_nm_pct_cm3) %>% as.vector()
+
+
+homes.lm1 <- lm(ufp_scaled ~ time_of_day +  time_of_week + season + location, data = homes)  
+homes.lm2 <- lm(ufp_scaled ~ factor(hour) +  factor(day, ordered = F) + factor(month, ordered = F) + location, data = homes)
+
+### ?? how to interpret these random effects 
+anovaVCA(ufp_scaled ~ time_of_day +  time_of_week + season + location, Data=as.data.frame(homes))
+anova(homes.lm1)
+
+anovaVCA(ufp_scaled ~ (hour + day + month)/location, Data=as.data.frame(homes))
+anovaVCA(ufp_scaled ~ hour + day + month/location, Data=as.data.frame(homes))
+anova(homes.lm2)
+
+homes.lm1 %>% summary()
+homes.lm2 %>% summary()
+
+```
+
+# Edmund's Data 
+
+more samples were taken using CPC.
+
+see similar seasonal and weekly patters across locations. Less similar diurnal patterns across locations.  
+
+```{r}
+#  cpc_cal  [cpc: 10 nm - 1 µm], pnc_noscreen_cal [ptrak: 20 nm - 1 µm], Total Conc [nanoscan: 10-350 nm],
+seto <- readRDS( file.path("..", "Write Up", "1. Proposal", "Aim 2. 2019 UFP", "Edmund Seto", "Data_TRAP.RDS")) %>% 
+  select(date, location, pnc_noscreen_cal, cpc_cal, `Total Conc`) %>%
+  mutate(location = factor(location)) %>%
+  add.temporal.variables(., date.var = "date") %>%
+  mutate(date = date(date))
+  
+#summarize readings by the hr
+seto <- seto %>%
+  group_by(date, hour, hour_night, time_of_day, day, time_of_week, month, season, location) %>%
+   dplyr::summarize(
+    ptrak_20nm_1um = median(pnc_noscreen_cal, na.rm = T),
+    cpc_10nm_1um = median(cpc_cal, na.rm = T),
+    ns_10nm_350nm = median(`Total Conc`, na.rm = T)
+    ) %>%
+  ungroup()
+
+#summary(seto)
+
+seto.l <- gather(seto, "instrument", "value", ptrak_20nm_1um:ns_10nm_350nm) %>%
+  drop_na(value)
+
+#number of unique hours sampled
+seto.l %>%
+  group_by(instrument) %>%
+  dplyr::summarize(
+    unique_hrs_sampled = n()
+  ) %>%
+  arrange(desc(unique_hrs_sampled)) %>%
+  kable()
+
+#time series by instrument and location  
+seto.l %>% 
+  ggplot(aes(x=date, y=value)) + 
+  geom_point(aes(colour=location)) + 
+  facet_wrap(~instrument,  
+             ncol = 1) +
+  labs(title = "More CPC readings at more locations over time")
+
+#season
+seto.l %>% 
+  filter(instrument == "cpc_10nm_1um") %>%
+  mutate(season = relevel(season, ref = "winter")) %>%
+  ggplot(aes(x=location, y=value, fill = season)) + 
+  geom_boxplot(aes()) + 
+  labs(title = "CPC readings")
+
+#weekend 
+seto.l %>% 
+  filter(instrument == "cpc_10nm_1um") %>%
+  ggplot(aes(x=location, y=value, fill = time_of_week)) + 
+  geom_boxplot(aes()) + 
+  labs(title = "CPC readings")  
+ 
+#day 
+seto.l %>% 
+  filter(instrument == "cpc_10nm_1um") %>%
+  ggplot(aes(x=day, y=value, fill = location)) + 
+  geom_boxplot(aes()) + 
+  geom_smooth(aes(x=as.numeric(day), colour=location), se=F, formula = y ~ splines::bs(x, 5), method = lm) +
+  facet_wrap(~location, scales = "free_x", ncol=1) + 
+  scale_y_log10() +
+  labs(title = "CPC readings, log y scale") 
+
+#hour 
+seto.l %>% 
+  filter(instrument == "cpc_10nm_1um") %>%
+  ggplot(aes(x=hour, y=value, fill = location)) + 
+  geom_boxplot(aes(group=hour)) + 
+  geom_smooth(aes(x=as.numeric(hour)), se=T, formula = y ~ splines::bs(x, 5), method = lm) +
+  labs(title = "CPC readings") + 
+  facet_wrap(~location, scales = "free_x", ncol=1) +   
+  scale_y_log10()
+
+```
+
+ 
+* ANOVA: "is there a diff in mean UFP given, e.g., time of day, week or season?"
+   * If the p < ~0.05, differences in hour, day, season significantly impact UFP levels (there is a statistical difference between the subgroups of each variable)
+   * functions used:
+      * anovaVCA(): shows variance values, but does not perform an analysis of variance to evaluate group means
+      * anova(lm()): ANOVA to evaluate group means
+   
+variation: error > location > day or time of week > hour or time of day > month or season 
+
+#### --> make the data similar for models? only keep sites w/ samples @ similar times.
+
+```{r}
+# made wide format for each date/time of year
+
+
+# see what data is still left - enough to calculate annual/seasonal avg? 
+
+
+# do anova with these data
+
+
+
+```
+
+
+
+```{r}
+#standardize UFP
+seto$ufp_scaled <- scale(seto$cpc_10nm_1um) %>% as.vector()
+
+movup.lm1 <- seto %>%
+  mutate(
+    time_of_day = factor(time_of_day),
+    time_of_week = factor(time_of_week, ordered = F),
+    season = factor(season, ordered = F)) %>% 
+  lm(ufp_scaled ~ time_of_day +  time_of_week + season + location, data = .) 
+
+movup.lm2 <- seto %>%
+  mutate(
+    hour = factor(hour),
+    day = factor(day, ordered = F),
+    month = factor(month, ordered = F)) %>%
+  lm(ufp_scaled ~ hour +  day + month + location, data = .)
+
+anovaVCA(ufp_scaled ~ time_of_day +  time_of_week + season + location, Data=as.data.frame(seto))
+anova(movup.lm1)
+
+anovaVCA(ufp_scaled ~ hour + day + month + location, Data=as.data.frame(seto))
+anova(movup.lm2)  #almost identical to: summary.aov(movup.lm2)
+ 
+
+
+```
+
+
+
+# Estimating Annual avg 
+how can we calculate an unbiased annual avg? 
+is a simple avg just as good as other approaches if temporal variables contribute so little to the variability we are seeing (most is random or location-specific)
+what's likely to bias it? can we make corrections to get less bias estimates? 
+
+
+### --> use different sampling schemes/methods to estimate "best" annual avg
+? at BH 2001?  
+? use Edmund's data collecte @ same time to compare across sites? 
+ 
+##### --> fit model w/ random effects for time/season ; spatial model for location using a 2D spline basis 
+2D: x1 and X2 would be lat/long and predict an outcome
+Y ~ 2dspline(lat, long) + random intercept for temporal variables (season + dow) + spline(hour)  
+-If we don’t interact 2D spline w/ temporal fns, we don’t allow spline to change over time 
+
+? spline()
+
+```{r}
+# Take SRS to Somewhat simulate mm campaign
+
+
+# Y ~ 2dspline(lat, long) + random intercept for temporal variables (season + dow) + spline(hour)  
+
+
+#? same as above but use splines for: hour, day, month
+
+# log(UPF) ~ doy + location 
+
+# ?use interaction terms (will have more missing data)
+
+
+
+
+
+```
+
+
+
+
+#### --> boot strap at end to get measure of uncertainty 
+Apte: normalized SE: the ratio of the standard error of the median (mean) concentration to the median (mean) concentration itself (SI Table S4).
+
+The SI provides further information on bootstrapping and precision calculations, comparisons between mean and median metrics, and summary tables of raw and reduced data (SI Tables S2−S3)

@@ -1,0 +1,166 @@
+---
+title: "AQS Sites"
+author: "Magali Blanco"
+date: "12/2/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(readxl, tidyverse, knitr, lubridate) 
+
+#set plot theme
+#theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+
+set.seed(1)
+
+```
+
+### --> check why aqs_annual doesn't have EC readings starting in 1996 (like aqs_daily)
+
+```{r}
+# Annual BC & EC data 
+
+#upload data
+folder_path <- file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "Hx Data", "AQS sites")
+
+#annual concentrations
+file_prename <- file.path("annual", "annual_conc_by_monitor_")
+years <- seq(1996, 2019)
+
+aqs_annual <- data.frame()
+
+#append Hx annual avg for sites of interest 
+for (i in seq_along(years)) { #1:3) { 
+  #i=1
+  one_yr <- read.csv(file.path(folder_path, paste0(file_prename, years[i], ".csv"))) %>%
+    filter(
+      #only keep AQS sites in our study area
+      State.Name == "Washington",
+      County.Name %in% c("King", "Snohomish"),
+      #drop Darringotn & Marysville locations outside study area
+      !Site.Num %in% c(20, 1007),
+      grepl(x = Parameter.Name, pattern = "Black carbon|EC PM", ignore.case = T)
+      #Black Carbon PM2.5 at 880 nm, Black Carbon PM10 LC, EC PM2.5 LC TOR, EC PM2.5 LC TOT, Optical EC PM2.5 LC TOT
+      #Parameter.Code %in% c(88313,88316, 85313, 88321, 88381, 88316,    84313, 84316)
+    ) %>%
+    #select columns of interest
+    select(
+      Year, Local.Site.Name, Parameter.Name, Parameter.Code, County.Name,
+      Arithmetic.Mean, Arithmetic.Standard.Dev, X50th.Percentile, 
+      Sample.Duration, Method.Name, Units.of.Measure, 
+      Observation.Count, Observation.Percent, Completeness.Indicator, Valid.Day.Count, Required.Day.Count)
+  
+  aqs_annual <- rbind(aqs_annual, one_yr)
+  
+}
+
+#rename sites  
+aqs_annual$Local.Site.Name <- stringi::stri_trans_totitle(aqs_annual$Local.Site.Name)
+
+#aqs$Local.Site.Name <- stringi::stri_trans_totitle(sub(".*-", "", aqs$Local.Site.Name))
+
+# #test
+# t <- read.csv(file.path(folder_path, paste0(file_prename, 2008, ".csv"))) %>%
+#   filter(State.Code == 53,
+#          County.Name %in% c("King", "Snohomish")
+#          )
+
+#write.csv(aqs, "aqs_annual_BC_EC.csv")
+
+
+```
+
+```{r}
+# Daily BC & EC data 
+#daily concentrations
+file_prename_daily <- file.path("daily", "daily_SPEC_")
+aqs_daily <- data.frame()
+#years <- c(2003)
+
+#append Hx annual avg for sites of interest 
+for (i in seq_along(years)) { #
+  #i=1
+  one_yr <- read.csv(file.path(folder_path, paste0(file_prename_daily, years[i], ".csv"))) %>%
+    filter(
+      #only keep AQS sites in our study area
+      State.Name == "Washington",
+      County.Name %in% c("King", "Snohomish"),
+      #drop Darringotn & Marysville locations outside study area
+      #!Site.Num %in% c(20, 1007),
+      grepl(x = Parameter.Name, pattern = "Black Carbon|EC PM2.5", ignore.case = T)
+      #Black Carbon PM2.5 at 880 nm, Black Carbon PM10 LC, EC PM2.5 LC TOR, EC PM2.5 LC TOT
+      #Parameter.Code %in% c(88313, 85313, 88321, 88381)
+    ) %>%
+    #select columns of interest
+    select(
+      Date.Local, Local.Site.Name, Parameter.Name, Parameter.Code, County.Name,
+      Arithmetic.Mean,  
+      Sample.Duration, Method.Name, Units.of.Measure, 
+      Observation.Count, Observation.Percent
+      )
+  
+  aqs_daily <- rbind(aqs_daily, one_yr)
+  
+}
+
+#rename sites - take "Seattle" out
+aqs_daily$Local.Site.Name <- stringi::stri_trans_totitle(aqs_daily$Local.Site.Name)
+
+# add temporal variables
+aqs_daily %>% 
+  mutate(
+    year = year(Date.Local),
+    month = month(Date.Local, label = T, abbr = T),
+  )
+
+#write.csv(aqs_daily, "aqs_daily_EC.csv")
+
+```
+
+
+### annual plots 
+
+```{r}
+aqs_annual %>%
+  mutate(
+    Parameter = ifelse(grepl(x = Parameter.Name, "EC PM2.5", ignore.case = T), "Elemental Carbon", "Black Carbon")
+  ) %>%
+  ggplot(aes(x=Year, y = Arithmetic.Mean, col=Local.Site.Name)) + 
+  geom_point() + 
+  geom_line(aes(linetype = Parameter)) + 
+  labs(col = "Site", 
+       y = "Annual Arithmetic Mean (ug/m3)" 
+       #title = "Annual Average BC Levels at AQS Sites"
+         )
+
+#ggsave(file.path("A3_Images", "Hx BC at AQS Sites.png"), width = 8, height = 5)
+
+```
+
+### daily plots 
+
+```{r}
+# aqs_daily %>%
+#   ggplot(aes(x=year, y = Arithmetic.Mean, col=Local.Site.Name)) + 
+#   geom_point() + 
+#   geom_line(aes(linetype = Parameter.Name)) + 
+#   labs(col = "Site", 
+#        y = "Daily Arithmetic Mean (ug/m3)" 
+#        #title = "Annual Average BC Levels at AQS Sites"
+#          )
+
+```
+
+ 

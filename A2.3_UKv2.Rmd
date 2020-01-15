@@ -52,7 +52,7 @@ pacman::p_load(tidyverse, ggpubr, #dplyr,
 
 options(knitr.kable.NA = '')
 set.seed(1)
-source(file.path("A2.0.1_Var&Fns.R"))
+source("A2.0.1_Var&Fns.R")
 
 images_path <- file.path(images_path0, "3. UK")
 tables_path <- file.path(tables_path0, "3. UK")
@@ -685,12 +685,23 @@ pls_df_test_aqs %>%
 
 
 
+### ?? test: interpolate/predict on grid
+
+```{r}
+pacman::p_load(akima)
+
+
+
+
+
+ 
+```
 
 
 
 Predict at participant homes
 
-### --> see 556 lab 9 code for R?
+### --> see 556 lab 9: "2.4.5 Plotting the predictions"
 ### --> need new dataset w/ same variable names. rename all variables to match training data?   
 
 ```{r, eval=F}

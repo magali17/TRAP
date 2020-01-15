@@ -722,9 +722,13 @@ ggarrange(
 )
 
 #table 
-annual.l %>%
+methods_table <- annual.l %>%
   group_by(method, weight) %>%
-  distribution.table(var.string = "ufp") %>%
+  distribution.table(var.string = "ufp") 
+
+names(methods_table) <- methods_table %>% names() %>% capitalize()
+  
+methods_table %>%
   kable(caption = "Annual average site estimates using various estimation methods and weights") %>%
   kable_styling()
 
@@ -884,6 +888,14 @@ tow2$diff <- tow2$max - tow2$min
 
 ```
 
+
+```{r, fig.height= 10}
+left_join(tow2, site_locations, by= "site_id") %>%
+map_fn(color_by = "diff", map_title = "Range in inter-method UFP estimates")
+
+```
+
+
 Predictors of estimate range. What covariates predict whether annual averages may be effected by estimation method?
 
 ```{r}
@@ -910,6 +922,7 @@ tow2 %>%
        )
 
 ```
+
 
 plot of estimates for highly variable sites
 
@@ -1371,6 +1384,14 @@ ggarrange(p1, p2, p3, p4,
 
 ### ID high residuals: concentrations being missed by LUR    
 
+Map the residuals 
+
+```{r, fig.height= 10}
+left_join(annual_with_LUR, site_locations, by = "site_id") %>%
+  map_fn(color_by = "resid_yhat_s_tow2_tod5")
+
+```
+
 Using log yhat_s_tow2_tod5   
 
 ```{r}
@@ -1445,15 +1466,15 @@ myquant <- 0.98
 
 ```
 
+
+### --> ? delete? 
+
 ![Map of poorly performing sites. Gray = stop with high inter-method variation. Green = high LUR residual (above `r myquant` quantile). Other colored dots are UFP concentrations estimates at all sites - darker red indicates higher concentrations. "MC" locations indicate AQS sites.](../Write Up/1. Proposal/Aim 2. 2019 UFP/Images/resid_yhat_s_tow2_tod2_q0.98.png)
 
-
-### --> get list of what all covariates mean eactly  (e.g., evergreen)
 ### --> ? 3D/correlation plot of most correlated covariates?
 
-
 ```{r}
-# # annual average estimates  
+# # annual average estimates   
 
 # # #Export csv w/ site lat/long
 # site_averages <- annual.scaled %>% 
@@ -1467,6 +1488,7 @@ myquant <- 0.98
 #           row.names = F)
 
 ```
+
 
 
 # Final annual average UFP concentrations
@@ -1505,39 +1527,6 @@ Map Annual Average estimates from selected weighted and unweighted regression me
 
 ```{r, fig.height=10}
 
-# height <- max(annual_ufp_and_cov$latitude) - min(annual_ufp_and_cov$latitude)
-# width <- max(annual_ufp_and_cov$longitude) - min(annual_ufp_and_cov$longitude)
-# 
-# # make map boundaries little larger than data dimensions
-# bbox <- c(
-#   min(annual_ufp_and_cov$longitude) - 0.2*width,
-#   min(annual_ufp_and_cov$latitude) - 0.1*height,
-#   max(annual_ufp_and_cov$longitude) + 0.2*width,
-#   max(annual_ufp_and_cov$latitude) + 0.1*height
-# )
-# 
-# names(bbox) <- c("left", "bottom", "right", "top")
-# 
-# # Make a map base layer of "Stamen" tiles
-# # # "terrain", "terrain-lines", 
-# map <- suppressMessages(get_stamenmap(bbox = bbox, zoom = 11, 
-#                                       maptype = "terrain", #"toner", "toner-background", "watercolor"
-#                                       ))
-# 
-# # Make the map image from the tiles  
-# ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void() + 
-#    geom_point(data = annual_ufp_and_cov, 
-#              aes(x = longitude, y = latitude), col= "black", 
-#              size = 2.5, 
-#              ) +
-#   geom_point(data = annual_ufp_and_cov, 
-#              aes(x = longitude, y = latitude, col = ufp), 
-#              alpha = 0.8, size = 2, 
-#              ) +
-#   scale_color_gradient(name = "pt/cm3", low = "yellow", high = "red")  +
-#   theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) +
-#   labs(title = "Map of annual average UFP concentrations at mobile monitoring locations")
-
 main_map <- annual_ufp_and_cov %>% 
   map_fn(map_title = "Primary: yhat_s_tow2_tod5 estimates")
   
@@ -1552,7 +1541,6 @@ ggarrange(main_map, alt_map,
   annotate_figure(top = "Annual average UFP concentrations at mobile monitoring locations")
 
 ```
-
 
 Table and plots
 

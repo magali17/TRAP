@@ -1,0 +1,616 @@
+---
+title: "Hx Vehicle Counts"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+editor_options:
+  chunk_output_type: console
+---
+
+```{r, echo=F}
+#Notes 
+
+# ggarrange() 
+##http://www.sthda.com/english/articles/24-ggpubr-publication-ready-plots/81-ggplot2-easy-way-to-mix-multiple-graphs-on-the-same-page/
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE, 
+                      fig.height = 8, 
+                      eval=T
+                      )  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(dplyr, tidyverse, ggpubr, knitr)  #ggpubr::ggarrange()
+
+source(file.path("Code", "A3.0.0_Var&Fns.R"))
+
+set.seed(1)
+
+```
+
+# Point File of Hx Traffic Counts
+Clean up count data for use in GIS.
+
+File is for total vehicle counts. No need to worry about HOV lanes for main line counts. HOV counts are only separated for some Ramps.
+
+```{r}
+traffic <- read.csv(file.path("Data", "Aim 3", "Hx Traffic Counts", "historic-traffic-volumes.csv")) %>%
+  filter(Year >= 1990) %>%
+  select(Year, AADT, Latitude, Longitude, Location) %>% 
+  #group into 5-yr intervals since there is a lot of missing data
+  mutate(Yr_grp = ifelse(Year >= 1990 & Year <= 1994, 1990,
+                         ifelse(Year >= 1995 & Year <= 1999, 1995, 
+                                ifelse(Year >= 2000 & Year <= 2004, 2000,
+                                       ifelse(Year >= 2005 & Year <= 2009, 2005,
+                                       ifelse(Year >= 2010 & Year <= 2014, 2010, 2015
+                                              ))))),
+         #Label traffic counts on ramps
+         Ramp = grepl("RAMP", Location, ignore.case = T))
+          
+  
+traffic.wide <- traffic %>%
+  group_by(Yr_grp, Latitude, Longitude, Location, Ramp) %>%  
+  #some years have multiple readings at the same location - counters across the road? take avg to get 1 estimate
+ dplyr::summarize(AADT = mean(AADT)) %>%
+  ungroup() %>%
+  spread(Yr_grp, AADT)  %>%
+  #only keep locations with values each 5-year period
+  drop_na() 
+   
+#write.csv(traffic.wide, "hx.traffic.counts.csv", row.names = F)
+
+```
+
+compare ramp vs highway counts.
+
+```{r}
+#on GIS: exported new file of hx traffic counts in our study region
+
+traffic.in.region0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Hx Traffic Counts/hx.traffic.counts.in.study.region.csv")
+
+traffic.in.region <- traffic.in.region0 %>%
+  select(
+    point_id,
+    X1990:Ramp
+  ) %>%
+  gather(Year=X1990:X2015, "Year", "AADT") %>%
+  mutate(
+    Year = as.numeric(substr(Year, 2,5))
+  )
+
+traffic.in.region %>%
+  #filter(Ramp=="FALSE") %>%
+  ggplot(aes(x=AADT, fill=Ramp)) + 
+  geom_histogram(position = "dodge") + 
+  facet_wrap(~Year)
+
+# ggsave(filename="AADT_ramp_vs_hwy.png",
+#       units = "in",
+#       width = 10
+#        )
+
+```
+
+
+# Estimating road segment counts prior to 2005
+
+On GIS: Linked 2 nearest points to each road section.
+
+ 
+Calculate weighted avg of vehicle counts on road segments based on distance of each highway traffic counter (2 traffic counters used per segment).
+
+```{r}
+
+myjoin0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/joins/JoinedNearest2PtsToEachSection.csv")
+
+#calculate weighted avg based on each point's distance from a road link
+myjoin <- myjoin0 %>%
+  group_by(OBJECTID) %>%
+  mutate(
+    dist_sum = sum(distance),
+    dist_wt = (dist_sum - distance)/dist_sum,
+    wt_1990 = X1990*dist_wt,
+    wt_1995 = X1995*dist_wt,
+    wt_2000 = X2000*dist_wt,
+    wt_2005 = X2005*dist_wt,
+    wt_2010 = X2010*dist_wt,
+    wt_2015 = X2015*dist_wt
+    ) %>%
+  group_by(OBJECTID,
+           #SRID, BegARM, EndARM, Year_2005, Location, LOC_ERROR, Shape_Leng
+           ) %>%
+  summarize(
+    AADT_1990 = round(sum(wt_1990)),
+    AADT_1995 = round(sum(wt_1995)),
+    AADT_2000 = round(sum(wt_2000)),
+    AADT_2005 = round(sum(wt_2005)),
+    AADT_2010 = round(sum(wt_2010)),
+    AADT_2015 = round(sum(wt_2015))
+  )  
+
+#write.csv(myjoin, "wt.avg.counts.by.point.distance.csv", row.names = F)
+
+```
+
+On GIS: linked these weighted averages to road sections (instead of counts from  nearest 2 points).
+
+AADT estiamtes in our study region (from points).Uses 2005 WADOT road segments as the reference shapefile. 
+
+```{r, eval=T}
+HxWtAADT0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/HxWtAvgAADTInStudyArea.csv")
+
+HxWtAADT <- HxWtAADT0 %>%
+  select(
+    OBJECTID,
+    Shape_Leng,
+    X1990:X2015
+  ) %>%
+  rename(
+    "AADT_points_1990_94" = X1990,
+    "AADT_points_1995_99" = X1995,
+    "AADT_points_2000_04" = X2000,
+    "AADT_points_2005_09" = X2005,
+    "AADT_points_2010_14" = X2010,
+    "AADT_points_2015_18" = X2015
+    ) #%>%
+  #gather(Year = "1990":"2015", "Year", "AADT")
+
+# traffic %>%
+#   ggplot(aes(x=AADT, fill=Ramp)) + 
+#   geom_histogram(position = "dodge") + 
+#   facet_wrap(~Yr_grp)
+
+```
+
+
+## Validation    
+### using nearest 2 points   
+On GIS: created one shapefile with WADOT section counts from 2005-2018.
+
+Calculate 5-year averages & later compare to weighted avgs using my point method. 2005 used as the reference shapefile. 
+
+```{r}
+#knitr::opts_chunk$set(eval=T)
+
+```
+
+```{r, eval=T}
+sections0 <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "roads", "Traffic Sections", "2005_2018_InStudy.csv"))
+
+sections <- sections0 %>%
+  select(
+    OBJECTID,
+    AADT_sections_2005 = Year_2005,
+    AADT_sections_2006 = X2006_Year_,
+    AADT_sections_2007 = X2007_Year_,
+    AADT_sections_2008 = X2008_Year_,
+    AADT_sections_2009 = X2009_Year_,
+    AADT_sections_2010 = X2010_Year_,
+    AADT_sections_2011 = X2011_Year_,
+    AADT_sections_2012 = X2012_ESTAA,
+    AADT_sections_2013 = X2013_Year_, 
+    AADT_sections_2014 = X2014_Year_,
+    AADT_sections_2015 = X2015_Year_,
+    AADT_sections_2016 = X2016_AADT,
+    AADT_sections_2017 = X2017_AADT,
+    AADT_sections_2018 = X2018_AADT,
+    
+    #distnace beween 2005 road segment and nearest road segment joined for each year
+    # dist_ft_06 = distance06,
+    # dist_ft_07 = distance07,
+    # dist_ft_08 = distance08,
+    # dist_ft_09 = distance09,
+    # dist_ft_10 = distance10,
+    # dist_ft_11 = distance11,
+    # dist_ft_12 = distance12,
+    # dist_ft_13 = distance13,
+    # dist_ft_14 = distance14,
+    # dist_ft_15 = distance15,
+    # dist_ft_16 = distance16,
+    # dist_ft_17 = distance17,
+    # dist_ft_18 = distance18,
+   )  
+
+#calculate 5-year averages AADT estimates from road sections
+sections$AADT_sections_2005_09 <- sections %>% 
+  select(AADT_sections_2005:AADT_sections_2009) %>%
+  rowMeans()
+
+sections$AADT_sections_2010_14 <- sections %>% 
+  select(AADT_sections_2010:AADT_sections_2014) %>%
+  rowMeans()
+
+sections$AADT_sections_2015_18 <- sections %>% 
+  select(AADT_sections_2015:AADT_sections_2018) %>%
+  rowMeans()
+
+#rearrange columns
+sections <- sections %>%
+  select(OBJECTID,
+         AADT_sections_2005_09:AADT_sections_2015_18,
+         AADT_sections_2005:AADT_sections_2018)
+
+
+#check that files are the same before merging #looks good 
+# nrow(HxWtAADT0) == nrow(sections)
+# table(HxWtAADT0$OBJECTID == sections$OBJECTID)
+# table(HxWtAADT0$Year_2005 == sections$AADT2005)
+
+#merge
+compare <- sections %>%
+  select(
+    OBJECTID,
+    AADT_sections_2005_09: AADT_sections_2015_18
+  ) %>%
+  left_join(HxWtAADT[c("OBJECTID", 
+                       "AADT_points_2005_09",
+                       "AADT_points_2010_14",
+                       "AADT_points_2015_18"
+                       )]
+            )
+
+```
+
+Estimates from lines (not using road network) are not great. 
+
+Notes:    
+* “performance statistics” (R2, RMSE, smooth line estimates) across time are similar - they don't get progressively worse. This is good because we won’t be introducing an artifact b/c of the data.    
+* We won't be able to completely replicate DOT's complex modeling ("gold standard") using incomplete, hx data
+
+
+```{r, eval=T}
+## 2005-2009
+p2005 <- compare.fn(mydata = compare, 
+                    x= "AADT_sections_2005_09",
+           y = "AADT_points_2005_09", 
+           plot.title = "",
+                    x.label = "DOT AADT Estimates", 
+                    y.label = "AADT Based on 2 Nearest Hwy Points")
+
+## 2010 - 2014
+p2010 <- compare.fn(mydata = compare,
+                    x= "AADT_sections_2010_14",
+                    y = "AADT_points_2010_14",
+                    x.label = "DOT AADT Estimates", 
+                    y.label = "AADT Based on 2 Nearest Hwy Points"
+                    )
+
+## 2015 - 2018
+p2015 <- compare.fn(mydata = compare,
+                    x= "AADT_sections_2015_18",
+                    y = "AADT_points_2015_18", 
+                    x.label = "DOT AADT Estimates", 
+                    y.label = "AADT Based on 2 Nearest Hwy Points"
+                    
+                    )
+
+
+(myplots <- ggarrange(p2005, p2010, p2015, 
+          labels = c("2005-2009", "2010-2014", "2015-2018"), 
+          label.x = F,
+          nrow = 1
+          
+          )
+)
+
+# ggsave(plot=myplots, filename="road_count_comparisons.png",
+#       units = "in",
+#       width = 10
+#        )
+
+```
+
+
+### Using Buffers   
+
+```{r}
+buffer.folder <- file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "Traffic Sections", "Buffers_Using2005Sections", "joined to points within")
+
+b100.0 <- read.csv(file.path(buffer.folder, "100mBufferWithPointCounts.csv"))
+b800.0 <- read.csv(file.path(buffer.folder, "800mBufferWithPointCounts.csv"))
+b1000.0 <- read.csv(file.path(buffer.folder, "1000mBufferWithPointCounts.csv"))
+b1600.0 <- read.csv(file.path(buffer.folder, "1600mBufferWithPointCounts.csv"))
+b2500.0 <- read.csv(file.path(buffer.folder, "2500mBufferWithPointCounts.csv"))
+b3500.0 <- read.csv(file.path(buffer.folder, "3500mBufferWithPointCounts.csv"))
+b4000.0 <- read.csv(file.path(buffer.folder, "4000mBufferWithPointCounts.csv"))
+
+buffers.list <- list(b100.0, b800.0, b1000.0, b1600.0, b2500.0, b3500.0, b4000.0 ) 
+mybuffers <- c(100, 800, 1000, 1600, 2500, 3500, 4000)
+
+buffers <- as.data.frame(matrix(ncol=13))
+names(buffers) <-  c("OBJECTID", "SRID", "Location", "Shape_Leng", "AADT1990", "AADT1995", "AADT2000", "AADT2005", "AADT2010", "AADT2015", "pts_used", "point_kind", "buffer_m")    
+
+for (i in seq_along(mybuffers)) {
+  df <- aadt_from_points_within_buffer(mydata = as.data.frame(buffers.list[i]), 
+                                       mybuffer = mybuffers[i])  
+  
+  buffers <- rbind(buffers, df )
+}   
+ 
+buffers$point_kind <- as.factor(buffers$point_kind)
+
+buffers.l<- buffers %>%
+  gather("Year", "AADT",AADT1990:AADT2015) %>%
+  mutate(
+    Year = as.numeric(substr(Year, 5, 8))
+  )
+
+ 
+```
+
+ 
+```{r}
+buffers.l %>%
+  filter( #buffer_m == 2500
+         Year == 1990
+         ) %>%
+  ggplot(aes(x=AADT, fill= point_kind)) + 
+  geom_density(alpha=0.3) + 
+  facet_wrap(~Year + buffer_m)
+
+
+
+```
+
+ 
+ramps on their own look very bad. hwy alone looks best but sample size is smaller?
+
+```{r}
+buffers_renamed <- buffers %>%
+      rename_at(., vars(AADT2005:AADT2015), funs(paste0(substr(.,1,4), "_buffer_", substr(.,5,8), "_"))) %>%
+  select(
+    OBJECTID, SRID, Location, Shape_Leng, 
+    AADT_buffer_2005_09 = AADT_buffer_2005_,
+    AADT_buffer_2010_14 = AADT_buffer_2010_,
+    AADT_buffer_2015_18 = AADT_buffer_2015_,
+    pts_used:buffer_m
+  )
+
+
+
+compare_to_buffers <- sections %>%
+  select(
+    OBJECTID,
+    AADT_sections_2005_09:AADT_sections_2015_18
+  ) %>%
+  left_join(buffers_renamed) 
+
+
+# --> filter by: 1) buffer (100-4000), 2) point kind ("Hwy" "hwy or ramp" "Ramp")
+# change: year, mycol (pts_used, SRID, Shape_Leng)
+ 
+
+```
+
+ 
+```{r}
+
+dot_vs_buffers <- buffers %>%
+  group_by(point_kind,
+           buffer_m) %>%
+  dplyr::summarize(
+    road_sections_with_point_counts = n()
+  ) %>% 
+  ungroup() %>%
+  drop_na(point_kind) %>%
+  mutate(
+    R2 = NA,
+    RMSE = NA
+  )
+
+sections.l <- sections %>%
+  select(
+    #dont include annual AADT estimates for now
+    OBJECTID:AADT_sections_2015_18
+  ) %>%
+  gather("Year", "AADT_DOT", -OBJECTID) %>%
+  mutate(
+    Year = as.numeric(substr(Year, 15,18))
+  )   #recode()
+
+buffers.l.205_18 <- buffers.l %>%
+  filter(Year >= 2005) %>%
+  rename(AADT_buffers = AADT)
+
+dot_and_buffers_df <- sections.l %>%
+  left_join(buffers.l.205_18)
+
+for (i in 1:nrow(dot_vs_buffers)) {
+  #look at a specific point kind & buffer size  
+  df.temp <- dot_and_buffers_df %>% 
+    filter(
+      point_kind == dot_vs_buffers$point_kind[i],
+      buffer_m == dot_vs_buffers$buffer_m[i]
+      )  
+    
+    lm1 <- lm(AADT_buffers~AADT_DOT, 
+              data = df.temp)
+    
+    dot_vs_buffers$R2[i] <-  summary(lm1)$r.squared %>% round(2)
+    dot_vs_buffers$RMSE[i] <- round(sqrt(mean((predict(lm1) - df.temp$AADT_buffers)^2)))
+    
+    }
+
+dot_vs_buffers %>% 
+  gather("variable", "value", road_sections_with_point_counts:RMSE) %>%
+  ggplot(aes(x=buffer_m, y= value, colour= point_kind)) + 
+  geom_point() + 
+  geom_line() + 
+  facet_wrap(~variable, scales = "free") + 
+  labs(
+    title = "Road Section AADT Estimates for 2005-2018: DOT vs Points Within Buffers"
+  )
+ 
+# ggsave(filename="AADT_buffer_comparisons.png",
+#       units = "in",
+#       width = 10
+#        )
+
+
+```
+
+ 
+```{r}
+dot_vs_buffers %>%
+  mutate(
+    buffer_m = as.factor(buffer_m),
+    point_kind = factor(point_kind,levels = c("ramp", "hwy", "hwy or ramp") )
+    ) %>%
+  ggplot(aes(x=point_kind, y=road_sections_with_point_counts/733*100, group=buffer_m, col = buffer_m)) + 
+  geom_point() + 
+  geom_line() + 
+  labs(
+    y= "% Road sections w/ point counts"
+    
+  )
+
+dot_and_buffers_df %>%
+  filter(buffer_m == 800, #100, 800, 1000, 1600, 2500, 3500, 4000
+         point_kind == "hwy"  #hwy  #why or ramp
+  ) %>%
+  compare.fn(.,
+             x = "AADT_DOT",    
+             y= "AADT_buffers", 
+             #mycol = "pts_used", #pts_used, SRID, Shape_Leng
+             x.label = "DOT AADT Estimate",
+             y.label = "Points Within Buffers AADT Estimate",
+             plot.title = "800 m buffer, hwy points")
+
+```
+
+# AADT every ~ 100m on hwys from nearest 2 counters, based on a road network (primary & secondary)
+
+Using DOT road shapefiles
+
+```{r}
+#notes
+# Name = Incident - Facility
+#            = hwy_pts$row_no - hwy_InStudy$row_no
+# 
+# facilityID = hwy_InStudy$row_no
+#  
+# hwy_pts_instudy: 
+# row_num: 3850
+
+```
+
+```{r}
+fp <- file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS")
+#using only in study data.
+
+routes <- read.csv(file.path(fp, "Hx Traffic Counts", "routes_row_no", "routes_row_no.csv")) %>%
+  select(-FacilityID, -FacilityRa, -IncidentCu, -FacilityCu, -IncidentID, -Total_Leng) %>%
+  rename(distnace_m = length_m)
+
+#file for all of WA is here. Note, can't remember if I can merge w/ the hwy counts in the same way. Also, the "name" field may be a little different. 
+
+# hx counts on "main lines"/highways
+hx_cts <- read.csv(file.path(fp, "Hx Traffic Counts", "hwy_InStudy.csv")) %>%
+  select(counter_row_no = row_number, X1990:X2015) #hwy_pt_id
+
+#  [don't need now?] hwy as pts every 100 m
+hwy_100m <- read.csv(file.path(fp, "Roads", "Traffic Sections", "2005_TPTTrafficSections", "Hwy_Pts_InStudy_100m.csv")) %>%
+  #cat is same as OBJECTID, 
+  select(hwy_row_no = row_number, fid, OBJECTID, segment_length_m = length) #SRID, segment_location = Location, Shape_Leng, 
+
+#separate "name": this corresponds to "row_number"
+route_names <- str_split(routes$Name, "-", simplify = T) %>%
+  as.data.frame() %>%
+  mutate(hwy_row_no = as.numeric(as.character(V1)),
+         counter_row_no = as.numeric(as.character(V2))) %>%
+  select(-V1, -V2)
+
+routes <- cbind(routes, route_names)
+
+rm(route_names)
+
+routes <- routes %>% left_join(hx_cts)
+
+#asgn distance-weighted AADT estimate to every hwy_row_no
+routes <- routes %>%
+  group_by(hwy_row_no) %>%
+  mutate(
+    tot_dist_m = sum(distnace_m),
+    dist_wt = 1 - distnace_m/tot_dist_m,
+    wt_1990 = X1990*dist_wt,
+    wt_1995 = X1995*dist_wt,
+    wt_2000 = X2000*dist_wt,
+    wt_2005 = X2005*dist_wt,
+    wt_2010 = X2010*dist_wt,
+    wt_2015 = X2015*dist_wt) %>%
+  group_by(hwy_row_no) %>%
+  summarize(
+    AADT_1990_94 = round(sum(wt_1990)),
+    AADT_1995_99 = round(sum(wt_1995)),
+    AADT_2000_04 = round(sum(wt_2000)),
+    AADT_2005_09 = round(sum(wt_2005)),
+    AADT_2010_14 = round(sum(wt_2010)),
+    AADT_2015_18 = round(sum(wt_2015))) %>%
+  left_join(hwy_100m)
+    
+ # ?? calc vehicle_meters? - multiply AADT_[yr] by hwy_100m$segment_length_m  
+
+#export AADT estimates on 100 m centroids in order to link these to 100 m road segments
+# routes %>%
+#   select(-OBJECTID) %>%
+# write.csv(x=., file = "AADT estimates on 100 m centroids.csv", row.names = F, na = "")
+
+```
+
+Comparison of AADT estimates based on 100 m road sections and two nearest counting locations and DOT AADT Estimates on road links (varying lengths).
+
+```{r}
+# compare to DOT road section estimates    
+#fewer road sections dropped in "sections" b/c they weren't present in all yrs and so dropped
+#merge by object ID (original 2005 DOT road section IDs used to merge all line files 2005+ and used to break up lines into 100 m segments)
+compare <- sections %>%
+  select(OBJECTID, AADT_sections_2005_09: AADT_sections_2015_18) %>% 
+  left_join(routes)
+
+## 2005-2009
+p2005 <- compare.fn(mydata = compare,  x= "AADT_sections_2005_09", y = "AADT_2005_09")
+
+## 2010 - 2014
+p2010 <- compare.fn(mydata = compare,  x= "AADT_sections_2010_14", y = "AADT_2010_14")
+
+## 2015 - 2018
+p2015 <- compare.fn(mydata = compare, x= "AADT_sections_2015_18",  y = "AADT_2015_18")
+
+myplots <- ggarrange(p2005, p2010, p2015, 
+          labels = c("2005-2009", "2010-2014", "2015-2018"), 
+          label.x = F,
+          nrow = 1) %>%
+  annotate_figure(#top = "AADT Estimates 2005+", 
+                  left = "Distance-weighted avg for 100 m road links",
+                  bottom = "WADOT road segment estimates")
+
+#myplots
+
+# ggsave(plot = myplots, filename = file.path("A3_Images", "AADT_comparison.png"),
+#          units = "in", width = 10, height = 4)
+
+ 
+```
+
+
+

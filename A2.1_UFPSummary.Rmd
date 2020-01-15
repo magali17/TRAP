@@ -1,0 +1,537 @@
+---
+title: "Mobile Monitoring Data Report - UFP, PM2.5, BC"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}  
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(dplyr, tidyverse, VCA, geepack, knitr)    #chron
+
+#set plot theme
+theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+ 
+```
+
+
+```{r average stop data}
+source(file.path("Code", "A2.0.1_Var&Fns.R"))
+
+#load stop average data 
+mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_191112.rda")) %>% 
+  #only keep relevant particle values
+  filter(variable %in% c("ptrak_ct_cm3",
+                         "bc_880_ng_m3",
+                         #"ufp_disc_ct_cm3",
+                          "ufp_scan_10_421_nm_ct_cm3",
+                         "scan_20_421_nm_ct_cm3_median"
+                          
+                         )
+         )
+
+
+mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.wide_191112.rda"))  
+
+#load overnight AQS site data 
+ptrak <- readRDS(file.path("Data", "Aim 2", "Overnight Collocations", "ptrak.rda"))
+
+#start/end dates
+end.date = max(mm$date)
+
+plot_quantile <- 0.99
+
+#on what days have instruments been used?
+instrument.use <- mm %>% group_by(instrument_id) %>%
+  summarize(no_runs = length(unique(runname)))
+ 
+```
+
+Using untrimmed, median instrument values for each stop (there are many stops per location).
+
+Data used in this report are those greater than the `r myquantile_lower` quantile and less than the `r myquantile_upper` quantile.
+
+
+# Data Completeness     
+##### --> numbers seem high?
+
+```{r}
+total_site_visits <- nrow(mm.wide)
+
+instrument_readings <- mm.wide %>%
+  select(bc_880_ng_m3_median: scan_20_421_nm_ct_cm3_median)
+
+unique_instruments <- dim(instrument_readings)[2]
+
+total_stops <- instrument_readings %>% nrow()
+
+complete_instrument_readings <- instrument_readings %>%
+  drop_na() %>% nrow()
+   
+  
+data_completeness <- data.frame(variable = names(instrument_readings),
+                 stop_count = NA,
+                 percent_complete = NA)
+
+for(i in 1:nrow(data_completeness)) {
+  data_completeness$stop_count[i] <- nrow(drop_na(instrument_readings[i]))
+  data_completeness$percent_complete[i] <- data_completeness$stop_count[i] / total_site_visits *100  
+  }
+
+data_completeness <- data_completeness %>%
+  arrange(desc(percent_complete))
+  
+total_df <- data.frame(variable = c("total stops", paste("all", unique_instruments, "instruments running")),
+                       stop_count = c(total_stops, complete_instrument_readings),
+                       percent_complete = c(NA, complete_instrument_readings/total_stops*100))
+
+data_completeness <- rbind(total_df, data_completeness)
+
+kable(data_completeness, digits = 1, caption = "Data Completeness")
+
+```
+ 
+# Data Collection Over Time  
+
+```{r}
+#instrument used each day
+mm %>%
+  filter(
+    #grepl(pattern = "ufp|bc", x = variable),
+    variable != "scan_20_421_nm_ct_cm3_median"
+         ) %>%
+  #1 record per variable combination - to reduce file size
+  select(date, instrument_id, variable) %>% 
+  unique() %>%
+  ggplot(aes(x=date, y=instrument_id, colour = instrument_id)) + 
+  geom_point() + 
+  facet_wrap(~variable, scales="free", ncol = 2) + 
+  theme(legend.position = "none") + 
+  labs(title = "Instruments used over time")
+
+```
+
+```{r, include=F}
+#stops over time 
+mm %>%  
+  #1 record per date-site_no to reduce file size
+  select(date, site_no, route, aqs_id) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=date, y=site_no, colour=route)) + 
+  geom_point() + 
+  #aqs sites 
+  geom_point(aes(shape=aqs_id), colour="black") + 
+  labs(title = paste("Sites visited over time", subtitle= paste(start.date, "-", end.date))) 
+  
+```
+
+#### ---> replace w/ plot on A2_UK?
+
+```{r}
+#stops by season/day of week/time of day/hour 
+##stops by season
+mm %>%  
+  select(runname, site_no, season, site_id) %>%   
+  unique() %>%
+  ggplot(aes(x=site_no, fill=season)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by season", subtitle= paste(start.date, "-", end.date)) 
+  
+ 
+```
+
+```{r}
+##stops by time of week
+mm %>%  
+  select(runname, site_no, time_of_week) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=time_of_week)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by time of week", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+```{r}
+##stops by day of the week
+mm %>%  
+  select(runname, site_no, day) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=day)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by week day", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+```{r}
+##stops by time of day
+mm %>%  
+  select(runname, site_no, time_of_day) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=time_of_day)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by time of day", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+# Data Quality Control  
+## Field Collocations  
+
+### PTRAKs
+
+```{r}
+#need to compare PMPT_1 to PMPT_93 and PMPT_94, and PMPT_93 to PMPT_94
+
+#the colocations we actually have
+
+mm %>%
+    #select only values from desired instruments
+    filter(instrument_id %in% c("PMPT_93", "PMPT_4")) %>%
+             #make wide format
+  select(-mean_value) %>%           
+  spread(instrument_id, median_value) %>%
+             #only look at rows where have observations for both instruments
+             drop_na("PMPT_93", "PMPT_4") %>%
+  filter(PMPT_93 <= quantile(PMPT_93, plot_quantile, na.rm = T),
+         PMPT_4 <= quantile(PMPT_4, plot_quantile, na.rm = T)
+         ) %>%
+  colo.plot(data.wide = ., x.variable = "PMPT_93",
+                      y.variable = "PMPT_4",
+                      mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"),
+                      r2.digits = 3  
+                      )
+
+mm %>%
+    #select only values from desired instruments
+    filter(instrument_id %in% c("PMPT_94", "PMPT_4")) %>%
+  select(-mean_value) %>%                      
+  #make wide format
+             spread(instrument_id, median_value) %>%
+             #only look at rows where have observations for both instruments
+             drop_na("PMPT_94", "PMPT_4") %>%
+  filter(PMPT_94 <= quantile(PMPT_94, plot_quantile, na.rm = T),
+         PMPT_4 <= quantile(PMPT_4, plot_quantile, na.rm = T)
+         ) %>%
+  colo.plot(data.wide = ., x.variable = "PMPT_94",
+                      y.variable = "PMPT_4",
+                      mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"),
+                      r2.digits = 3  
+                      )
+
+```
+
+Compare NanoScan (20-421 nm +) to ptrak (20- 1000 nm) since NanoScan tends to be more steady. Assuming few particles > 421 nm, such that the NanoScan and PTRAK are comparable.
+
+Excluding top 1% of data. 
+
+```{r}
+
+mm.wide %>%
+  #take out extreme values that make R2 look very large
+  filter(scan_20_421_nm_ct_cm3_median <= quantile(scan_20_421_nm_ct_cm3_median, plot_quantile, na.rm = T),
+         ptrak_ct_cm3_median <= quantile(ptrak_ct_cm3_median, plot_quantile, na.rm = T)
+         ) %>%
+  colo.plot(data.wide = ., x.variable = "scan_20_421_nm_ct_cm3_median",
+                      y.variable = "ptrak_ct_cm3_median", mytitle = paste0("excluding top ", (1-plot_quantile)*100, "% of data"))
+
+```
+
+ 
+### NanoScans
+
+```{r} 
+colo.plot(primary.instrument = "PMSCAN_5", 
+          secondary.instrument = "PMSCAN_3")
+
+```
+
+
+### BC    
+Fit is not great, but BC_63 has always/mostly been used.
+
+```{r}
+mm %>%
+#select only values from desired instruments
+    filter(instrument_id %in% c("BC_63", "BC_66")) %>%
+    #rename(value = value_mean_median) %>%
+    select(-mean_value) %>%
+    spread(instrument_id, median_value) %>%
+  #trim
+  filter(BC_63 >= quantile(BC_63, trim_quantile, na.rm = T),
+         BC_63 <= quantile(BC_63, (1-trim_quantile), na.rm = T),
+         BC_66 >= quantile(BC_66, trim_quantile, na.rm = T),
+         BC_66 <= quantile(BC_66, (1-trim_quantile), na.rm = T)) %>%
+  colo.plot(x.variable = "BC_63", 
+          y.variable = "BC_66",
+          mytitle = paste0("Comparison of collocated Aethelometer instrument readings" , 
+                                        "\ntop and bottom ", (trim_quantile)*100, "% of data trimmed"),
+          )
+
+
+```
+
+ 
+## Lab/Garage Collocations
+
+### --> see Lab collocations in database: Imports table/ lab0, lab C, or Rm 114 
+
+### PTRAKs   
+
+```{r}
+
+
+```
+
+## Overnight AQS Site Collocations
+Using PST.   
+
+### PTRAK
+
+Plotting median hourly concentrations (all data included) at Beacon hill (BH) and 10th & Weller (10W).
+
+#### --> ? color by date (have to create date varaible)? 
+
+```{r}
+
+ptrak %>%
+  ggplot(aes(x=month, y=Conc_pt_cm3)) + 
+  geom_boxplot() + 
+  #geom_smooth(aes(x=as.numeric(month)), se=F, method = "loess") + 
+  facet_wrap(~location)
+
+ptrak %>%
+  ggplot(aes(x=day, y=Conc_pt_cm3)) + 
+  geom_boxplot() + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") + 
+  facet_wrap(~location)
+
+ptrak %>%
+  ggplot(aes(x=hour, y=Conc_pt_cm3)) + 
+  geom_boxplot(aes(group=hour, fill=time_of_day)) +
+  geom_smooth(se=F, method = "loess") + 
+  facet_wrap(~location) #+DaylightSavings
+
+```
+
+```{r}
+#only spring (vs winter) is significant
+lm(Conc_pt_cm3 ~ factor(hour) + day + month, data=ptrak) %>% summary()
+
+lm(Conc_pt_cm3 ~ time_of_day + time_of_week + season, data=ptrak) %>% summary() 
+ 
+anovaVCA(Conc_pt_cm3 ~ hour + day + month, 
+         Data=as.data.frame(ptrak)) 
+
+anovaVCA(Conc_pt_cm3 ~ time_of_day + time_of_week + season, 
+         Data=as.data.frame(ptrak))  
+
+```
+
+## 2-minute stops a AQS sites
+
+### PTRAK
+
+```{r}
+mm %>%
+  filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
+  ggplot(aes(x=hour, y=median_value)) + 
+  geom_boxplot(aes(group=hour, fill=time_of_day)) +
+  geom_smooth(se=F, method = "loess") + 
+  facet_wrap(~aqs_location) # + time_of_week
+ 
+mm %>%
+  filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
+  ggplot(aes(x=day, y=median_value)) + 
+  geom_boxplot() + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") + 
+  facet_wrap(~aqs_location)
+
+mm %>%
+  filter(aqs_location %in% c("Beacon Hill", "10th & Weller")) %>%
+  ggplot(aes(x=as.numeric(month), y=median_value)) + 
+  geom_boxplot(aes(group=month)) + 
+  geom_smooth(aes(), se=F, method = "loess") + 
+  facet_wrap(~aqs_location) 
+
+
+```
+
+
+# PTRAK Data Summary  
+
+## Temporal Patterns
+
+```{r}
+#month
+mm %>%
+  filter(variable == "ptrak_ct_cm3") %>%
+  ggplot(aes(x=date, y=median_value)) + 
+  geom_boxplot(aes(fill=season, group=month)) + 
+  geom_smooth(aes(), se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free") +  #, ncol = 2
+  labs(title= "Concentrations over time",
+       x="month",
+       subtitle = paste0(start.date, " - ", end.date)) + 
+  scale_y_log10()
+
+#day
+mm %>%
+  filter(variable== "ptrak_ct_cm3") %>%
+  ggplot(aes(x=day, y=median_value)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free") + 
+  labs(title= "Concentrations by week day",
+       subtitle = paste0(start.date, " - ", end.date)) + 
+  scale_y_log10()
+ 
+ 
+#hour
+mm %>%
+  filter(variable== "ptrak_ct_cm3") %>%
+  ggplot(aes(x=hour, y=median_value)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
+  geom_smooth(aes(), se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free") + #, ncol = 3
+  labs(title= "Concentrations by hour",
+       subtitle = paste0(start.date, " - ", end.date))  + 
+  scale_y_log10()
+
+ 
+```
+
+## Spatial Patterns
+
+### --> use lasso to select geocovariates & then plot UFP vs geocov
+### ? bad plots since not usign annual averages & obsrvations at each location taken at slighty different times 
+
+```{r}
+mm %>%
+ filter(variable== "ptrak_ct_cm3") %>%
+  ggplot(aes(x=site_no, y=median_value)) + 
+  geom_point(alpha=0.2, aes(colour=route)) +   
+  geom_smooth( se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  labs(title= "Concentrations by Site",
+       subtitle = paste0(start.date, " - ", end.date)) + 
+  scale_y_log10()
+
+
+
+#### --> use lasso instead to select predictive geocovariates 
+
+
+
+
+
+mm.w.geo <- mm.wide %>% 
+  # geocovariates
+  select(arrival_time:season,
+         ptrak_ct_cm3_median,
+         m_to_a1:m_to_a3,
+        #airport, largest airport
+        m_to_airp, #m_to_l_airp,
+        m_to_rr,
+        #dist to and length of
+        m_to_truck, #contains("tl_s"),
+        #m_to_bus, contains("bus_"),
+        elev_elevation,
+        #contains("lu_industrial_"),
+        #contains("ndvi_q50_"),
+        pop_s01000, #contains("pop_s")
+       )
+
+mm.w.geo$m_to_a1_or_a2 <- apply(mm.w.geo[c("m_to_a1", "m_to_a2")], 1, function(x) min(x))
+
+mm.geo <- gather(mm.w.geo, geocovariate, value, m_to_a1:m_to_a1_or_a2)
+
+
+
+geo_quantile <- 0.99
+
+mm.geo %>%
+  filter(ptrak_ct_cm3_median <= quantile(ptrak_ct_cm3_median, geo_quantile, na.rm = T)) %>%
+  ggplot(aes(x=value, y=ptrak_ct_cm3_median)) + 
+  geom_point(alpha=0.3) + 
+  geom_smooth( se=F, method = "loess") +  
+  facet_wrap(~geocovariate, scales = "free_x") + 
+  labs(title = paste0("excludes top ", (1-geo_quantile)*100, "% of observations") )
+  
+ 
+
+
+```
+
+## Models 
+ 
+variability: error > location > month > day > hour    
+variability: error > location > time_of_week > season > time_of_day
+
+```{r}
+mm %>%
+  filter(variable == "ptrak_ct_cm3") %>%
+lm(median_value ~ factor(hour) + factor(day, ordered = F) + factor(month, ordered = F) + site_id, data=.) %>%
+  summary()
+
+mm %>%
+  filter(variable == "ptrak_ct_cm3") %>%
+lm(median_value ~ time_of_day + time_of_week + season + site_id, data=.) %>%
+  summary()
+
+mm %>%
+  filter(variable == "ptrak_ct_cm3") %>%
+  as.data.frame() %>%
+ anovaVCA(median_value ~ hour + day + month + site_id, 
+         Data=.) 
+
+mm %>%
+  filter(variable == "ptrak_ct_cm3") %>%
+  as.data.frame() %>%
+  anovaVCA(median_value ~ time_of_day + time_of_week + season + site_id, 
+         Data=.)  
+
+
+```
+
+
+## Pollutant Correlations (R)  
+
+UFPs are poorly correlated with PM2.5 & BC
+
+```{r}
+mm.wide %>%
+  select(pt = ptrak_ct_cm3_median, 
+         ns_20_421 = scan_20_421_nm_ct_cm3_median, 
+         bc = bc_880_ng_m3_median) %>%
+  cor(method = "pearson",
+      use ="complete.obs") %>%
+  corrplot::corrplot(method="color", 
+                     addCoef.col = T, 
+                     title = "Pearson Correlation (R)"
+                     )
+
+
+```
+
+ 
+
+ 

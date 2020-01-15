@@ -1,0 +1,574 @@
+---
+title: "Mobile Monitoring Data Report - All Instruments"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+editor_options:
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}  
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(dplyr, tidyverse, VCA, knitr)    #chron
+
+#set plot theme
+theme_set(theme_linedraw() + theme(legend.position="bottom")) 
+ 
+```
+
+### see Qs in code
+
+```{r average stop data}
+source(file.path("Code", "A2.0.1_Var&Fns.R"))
+
+#load stop average data 
+mm <- readRDS(file.path("Data", "MobileMonitoring", "mm_190917.rda"))
+mm.wide <- readRDS(file.path("Data", "MobileMonitoring", "mm.wide_190917.rda"))
+
+#load overnight AQS site data 
+ptrak <- readRDS(file.path("Data", "MobileMonitoring", "ptrak_190628.rda"))
+
+```
+
+```{r definitions}
+#start/end dates
+#start.date = min(mm$date) #in A2-3 variables.R sourcing
+end.date = max(mm$date)
+
+#on what days have instruments been used?
+instrument.use <- mm %>% group_by(instrument_id) %>%
+  summarize(no_runs = length(unique(runname)))
+ 
+#UFP instrument variable names 
+ufp <- c(#"bc_ir880nm_ng_m3", 
+          #     "neph_bscat_per_m", 
+               "ufp_disc_ct_cm3", 
+               "ufp_pt_noscreen_ct_cm3", 
+               "ufp_pt_screen_ct_cm3", 
+               "ufp_scan_ct_cm3")
+
+```
+
+Data used in this report are those greater than the `r myquantile_lower` quantile and less than the `r myquantile_upper` quantile.
+
+
+# Data Completeness 
+
+```{r}
+total_site_visits <- nrow(mm.wide)
+
+instrument_readings <- mm.wide %>%
+  select(bc_ir880nm_ng_m3 : ufp_scan_ct_cm3)  
+
+total_stops <- instrument_readings %>% nrow()
+
+complete_instrument_readings <- instrument_readings %>%
+  drop_na() %>% nrow()
+   
+  
+data_completeness <- data.frame(variable = names(instrument_readings),
+                 stop_count = NA,
+                 percent_complete = NA)
+
+for(i in 1:nrow(data_completeness)) {
+  data_completeness$stop_count[i] <- nrow(drop_na(instrument_readings[i]))
+  data_completeness$percent_complete[i] <- data_completeness$stop_count[i] / total_site_visits *100  
+  }
+
+data_completeness <- data_completeness %>%
+  arrange(desc(percent_complete))
+  
+total_df <- data.frame(variable = c("total stops", "all instruments running"),
+                       stop_count = c(total_stops, complete_instrument_readings),
+                       percent_complete = c(NA, complete_instrument_readings/total_stops*100))
+
+data_completeness <- rbind(total_df, data_completeness)
+
+# data_completeness <- data_completeness %>% 
+#   mutate(percent_complete = round(percent_complete, 1)) 
+   
+kable(data_completeness, digits = 1, caption = "Data Completeness")
+
+```
+ 
+# Data Collection Over Time  
+
+```{r}
+#instrument used each day
+mm %>%
+  #1 record per variable combination - to reduce file size
+  select(date, instrument_id, variable) %>% 
+  unique() %>%
+  ggplot(aes(x=date, y=instrument_id, colour = instrument_id)) + 
+  geom_point() + 
+  facet_wrap(~variable, scales="free", ncol = 2) + 
+  theme(legend.position = "none") + 
+  labs(title = "Instruments used over time")
+
+```
+
+```{r}
+#stops over time 
+mm %>%  
+  #1 record per date-site_no to reduce file size
+  select(date, site_no, route, aqs_id) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=date, y=site_no, colour=route)) + 
+  geom_point() + 
+  #aqs sites 
+  geom_point(aes(shape=aqs_id), colour="black") + 
+  labs(title = paste("Sites visited over time", subtitle= paste(start.date, "-", end.date))) 
+  
+```
+
+```{r}
+#stops by season/day of week/time of day/hour 
+##stops by season
+mm %>%  
+  select(runname, site_no, season, site_id) %>%   
+  unique() %>%
+  ggplot(aes(x=site_no, fill=season)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by season", subtitle= paste(start.date, "-", end.date)) 
+  
+ 
+```
+
+```{r}
+##stops by time of week
+mm %>%  
+  select(runname, site_no, time_of_week) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=time_of_week)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by time of week", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+```{r}
+##stops by day of the week
+mm %>%  
+  select(runname, site_no, day) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=day)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by week day", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+```{r}
+##stops by time of day
+mm %>%  
+  select(runname, site_no, time_of_day) %>%   
+  unique() %>%
+  #all sites
+  ggplot(aes(x=site_no, fill=time_of_day)) + 
+  geom_bar() + 
+  labs(title = "Number of visits to each site by time of day", subtitle= paste(start.date, "-", end.date)) 
+
+```
+
+# Collocations 
+## Field  
+
+### DiscMini's
+
+```{r} 
+colo.plot(primary.instrument = "PMDISC_3", secondary.instrument = "PMDISC_8")
+
+```
+
+### PTRAKs
+
+```{r}
+#need to compare PMPT_1 to PMPT_93 and PMPT_94, and PMPT_93 to PMPT_94
+
+
+
+#the colocations we actually have
+colo.plot(primary.instrument = "PMPT_93", secondary.instrument = "PMPT_4")
+colo.plot(primary.instrument = "PMPT_94", secondary.instrument = "PMPT_4")
+
+
+```
+
+
+### Neph   
+PM25_176 has always/mostly been used.
+
+```{r}
+colo.plot(primary.instrument = "PM25_176", secondary.instrument = "PM25_205")
+
+```
+
+### BC    
+Fit is not great, but BC_63 has always/mostly been used.
+
+```{r}
+colo.plot(primary.instrument = "BC_63", secondary.instrument = "BC_66")
+
+```
+
+## Lab/Garage  
+
+### PTRAKs   
+
+```{r}
+# see data in database 
+#PTRAK lab collocations:
+# 3/20
+# 3/22
+# 4/9 Lab ptrak
+# 4/18 Lab ptrak
+# 4/19 (just DiscMini)
+# 5/6 Lab ptrak
+# 5/8 Lab Ptrak zerp; Discmini colo
+# 5/9 lab scan
+# 5/10 discmini, nanoscan 
+# 5/31 disc
+# 7/9 ptrak, scan
+# 7/10 disc zero
+# 8/9 disc, ptrak
+
+
+
+```
+
+# Overnight AQS Site Readings
+Using PST.   
+
+## PTRAK
+
+### Plots 
+
+Plotting median hourly concentrations (all data included) at Beacon hill (BH) and 10th & Weller (10W).
+
+```{r}
+ptrak %>%
+  ggplot(aes(x=hour, y=Conc_pt_cm3, group=hour, fill=time_of_day)) + 
+  geom_boxplot() + 
+  facet_wrap(~Location) # + time_of_week
+
+ptrak %>%
+  ggplot(aes(x=day, y=Conc_pt_cm3)) + 
+  geom_boxplot() + 
+  facet_wrap(~Location)
+
+ptrak %>%
+  ggplot(aes(x=month, y=Conc_pt_cm3)) + 
+  geom_boxplot() + 
+  facet_wrap(~Location)
+
+
+```
+
+### Models by time of day, time of week and season   
+#### LS linear Fit
+
+Weekend is lower than weekday; winter is higher than spring
+
+```{r}
+#only spring (vs winter) is significant
+lm(Conc_pt_cm3 ~ time_of_day + time_of_week + season, data=ptrak) %>%
+  summary() 
+ 
+```
+
+#### ANOVA Variance Component Analyses for random models
+
+```{r}
+###### --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week) ?
+
+anovaVCA(Conc_pt_cm3 ~ time_of_day + time_of_week + season, 
+         Data=as.data.frame(ptrak))  
+
+```
+
+### Models by hour, day and month   
+#### LS linear fit   
+
+noon is higher than midnight; Sat & Sun are lower than Monday; April and June are lower than January 
+
+```{r}
+#sign: hour, Sat, Sun, Apr, Jun, Nov
+                      #factor(hour_night)
+lm(Conc_pt_cm3 ~ factor(hour) + day + month, data=ptrak) %>%
+  summary()
+
+```
+
+#### ANOVA Variance Component Analyses for random models
+
+Most of the variation is within groups, some from month, and a minor amount from hour and day.
+
+```{r}
+anovaVCA(Conc_pt_cm3 ~ hour + day + month, 
+         Data=as.data.frame(ptrak)) 
+
+```
+
+
+# Data Summary  
+## Density Plots
+
+```{r}
+#density plots of concentrations for each pollutant & instrument
+mm %>% 
+  ggplot(aes(x=value, fill = instrument_id)) +  
+  geom_density( alpha=0.3) + 
+  facet_wrap(~variable, scales = "free", ncol = 2) + 
+  labs(title = "Density plots of Pollutant Concentrations by Instrument",
+       subtitle = paste0(start.date, " - ", end.date)) + 
+  theme(legend.position = "none")
+
+```
+
+```{r}
+#density plots of UFP instrument concentrations
+mm %>% 
+  filter(variable %in% ufp) %>%
+  ggplot(aes(x=value, fill = variable)) +  
+  geom_density(alpha=0.3) +
+  scale_x_log10() +
+  labs(title = "Density plots of UFP Concentrations (#/cm3)",
+        subtitle = paste0(start.date, " - ", end.date,
+                          "\nlog x scale",
+                          "\nPTRAK: 20 nm - 1 µm (50 nm - 1 µm w/ screen);\nDiSCmini:10-700 nm; \nNanoScan: 10-420 nm"))
+
+``` 
+
+ 
+
+## Concentrations Over Time
+
+```{r}
+#concentrations by time & season 
+mm %>%
+  ggplot(aes(x=month, y=value)) + 
+  geom_boxplot(aes(fill=season)) + 
+  # error, doesn't print loess line correctly on x axis
+  #geom_smooth(aes(x=as.numeric(month)), se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 2) + 
+  labs(title= "Concentrations over time",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+```
+
+```{r}
+##ptraks
+mm %>%
+  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=date, y=value)) + 
+  geom_point(aes(colour=season)) + 
+  geom_smooth(aes(x=date), se=F, method = "loess") +  
+  #formula = y ~ splines::bs(x, 4), 
+  #facet_wrap(~variable, scales="free", ncol = 2) + 
+  labs(title= "PTRAK Concentrations over time",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+
+```
+
+
+```{r}
+#concentrations by week day
+mm %>%
+  ggplot(aes(x=day, y=value)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  labs(title= "Concentrations by week day",
+       subtitle = paste0(start.date, " - ", end.date))  
+ 
+```
+
+```{r}
+##ptraks
+mm %>%
+  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=day, y=value)) + 
+  geom_boxplot(aes(fill=time_of_week)) + 
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  geom_smooth(aes(x=as.numeric(day)), se=F, method = "loess") +  
+  labs(title= "PTRAK Concentrations by week day",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+```
+
+
+```{r}
+#concentrations by hour and time of day
+mm %>%
+  ggplot(aes(x=hour, y=value)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
+  geom_smooth(aes(x=hour), se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  labs(title= "Concentrations by hour",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+ 
+```
+
+```{r}
+##ptraks
+mm %>%
+  filter(variable== "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=hour, y=value)) + 
+  geom_boxplot(aes(fill=time_of_day, group=hour)) + 
+  geom_smooth(aes(x=hour), se=F, method = "loess") +  
+  labs(title= "PTRAK Concentrations by hour",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+
+```
+
+## Concentrations by Location
+
+```{r}
+mm %>%
+  ggplot(aes(x=site_no, y=value)) + 
+  geom_boxplot(aes(group=site_no)) +  #, fill="green"
+  geom_smooth( se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  labs(title= "Concentrations by Site",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+```
+
+```{r}
+mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  ggplot(aes(x=site_no, y=value)) + 
+  geom_boxplot(aes(group=site_no), fill="green") + 
+  geom_smooth( se=F, method = "loess") +  
+  facet_wrap(~variable, scales="free", ncol = 3) + 
+  labs(title= "Concentrations by Site",
+       subtitle = paste0(start.date, " - ", end.date))  
+
+```
+
+
+## Concentrations by Geographic Features 
+
+### --> need geocovariates from Amanda/Data team 
+
+```{r}
+#distance to roadway
+
+#distance to airport
+
+#population density
+
+#elevation
+
+```
+
+## UFP Models by time of day, time of week and season   
+### LS linear Fit
+
+AM and noon are higher than early AM; weekend is lower than weekday; summer is lower than spring; winter is higher than spring 
+
+```{r}
+   mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+lm(value ~ time_of_day + time_of_week + season, data=.) %>%
+  summary()
+
+```
+
+### ANOVA Variance Component Analyses for random models
+
+Most of the variation is "noise" within groups.
+
+```{r}
+###### --> ? delete? can't calc variance w/ just 2 categores (e.g., time_of_week) ?
+   mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  as.data.frame() %>%
+  anovaVCA(value ~ time_of_day + time_of_week + season, 
+         Data=.)  
+
+```
+
+## Models by hour, day and month   
+### LS linear fit   
+
+most hours after 5 AM are higher than 5 AM; Tue, Fri and Sun are lower than Mon; Mar and April higher than Feb
+
+```{r}
+ mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+lm(value ~ factor(hour) + day + month, data=.) %>%
+  summary()
+
+```
+
+### ANOVA Variance Component Analyses for random models
+
+Most of the variation is within groups, some from month, and a minor amount from hour and day.
+
+```{r}
+  mm %>%
+  filter(variable == "ufp_pt_noscreen_ct_cm3") %>%
+  as.data.frame() %>%
+ anovaVCA(value ~ hour + day + month, 
+         Data=.) 
+
+```
+
+
+
+
+
+
+
+
+
+
+## Pollutant Correlations  
+ 
+```{r}
+plot(mm.wide[21:32])
+
+# what method to use for dealing with NA's? 
+cor.table <- cor(scale(mm.wide[21:32]), use="complete.obs")
+
+heatmap(cor.table )
+
+```
+
+
+
+
+
+
+
+
+
+ 
+
+
+
+
+
+
+
+
+ 

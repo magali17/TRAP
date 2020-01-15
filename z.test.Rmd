@@ -1,0 +1,35 @@
+---
+title: "Untitled"
+author: "Magali Blanco"
+date: "4/18/2019"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+#geocovariates available from MESA Air database (?)
+#? no MOVES?
+
+ 
+```
+
+ 
+
+test
+
+```{r}
+# # trying to save rmarkdown output to specific folder 
+# rmarkdown::render("code/z.test.Rmd", 
+#                   #output_format =  "html_document", 
+#                   output_file = "Output/z.test.html"
+#                   #output_dir = "Output"
+#                   )
+
+```
+
+ 

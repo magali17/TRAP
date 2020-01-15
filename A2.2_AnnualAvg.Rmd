@@ -1500,12 +1500,10 @@ annual_ufp_and_cov <- left_join(site_locations, preds.s.tow.tod5) %>%
  
 ```
 
-Map Annual Averages
+Map Annual Average estimates from selected weighted and unweighted regression methods. Spatial patterns are nearly identical.
+
 
 ```{r, fig.height=10}
-
-annual_ufp_and_cov %>% 
-  map_fn(map_title = "Annual average UFP concentrations \nat mobile monitoring locations \nbased on yhat_s_tow2_tod5")
 
 # height <- max(annual_ufp_and_cov$latitude) - min(annual_ufp_and_cov$latitude)
 # width <- max(annual_ufp_and_cov$longitude) - min(annual_ufp_and_cov$longitude)
@@ -1539,22 +1537,21 @@ annual_ufp_and_cov %>%
 #   scale_color_gradient(name = "pt/cm3", low = "yellow", high = "red")  +
 #   theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) +
 #   labs(title = "Map of annual average UFP concentrations at mobile monitoring locations")
+
+main_map <- annual_ufp_and_cov %>% 
+  map_fn(map_title = "Primary: yhat_s_tow2_tod5 estimates")
   
-
-```
-
-Map using unweighted annual averegae estimates. Spatial patterns are nearly identical.
-
-```{r}
-
-suppressWarnings(left_join(site_locations, preds.uw, by= "site_id") %>%
+alt_map <- suppressWarnings(left_join(site_locations, preds.uw, by= "site_id") %>%
   rename(ufp = contains("yhat")) %>%
   left_join(cov_mm, by= "site_id")  %>%
   drop_na()) %>% 
-  map_fn(map_title = "Annual average UFP concentrations \nat mobile monitoring locations \nbased on unweighted means")
+  map_fn(map_title = "Alternative: unweighted means")
+
+ggarrange(main_map, alt_map, 
+          ncol = 2) %>% 
+  annotate_figure(top = "Annual average UFP concentrations at mobile monitoring locations")
 
 ```
-
 
 
 Table and plots

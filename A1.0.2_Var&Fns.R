@@ -3,6 +3,8 @@
 ###################################################################################
 ################################ VARIABLES ######################################## 
 ###################################################################################
+images_path0 <- file.path("Output", "Aim 1", "Images")
+tables_path0 <- file.path("Output", "Aim 1", "Tables")
 
 #minimum percent of months required for us to consider a prediction "valid"
 min.pct <- 0.95
@@ -14,42 +16,6 @@ model.digits <- 2
 
 ###################################################################################
 ################################ FUNCTIONS ######################################## 
-###################################################################################
-####returns baseline exposure distribution 
- expo.distrib.fn <- function(dt,
-                            var.,
-                            years.description,
-                            round.int = 0
-                            ) {
-   
-  # dt=dem1
-  # var = "exp_avg10_yr"
-  # years.description="all"
-   #round.int = 0
-  
-   df <- dt %>% 
-     rename(var = var.) %>%
-    group_by(pollutant) %>%
-    drop_na(var) %>%
-    dplyr::summarize(
-      years = years.description,
-      N = n(),
-      # median = median(exp_avg10_yr),
-      # iqr = IQR(exp_avg10_yr),
-      # mean = mean(exp_avg10_yr),
-      # sd = sd(exp_avg10_yr),
-      # min = min(exp_avg10_yr),
-      # max = max(exp_avg10_yr)
-      mean_sd =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
-      median_iqr =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
-      min = min(var),
-      max = max(var)
-    )
-  
-  return(df)
-  
-}
-
 ###################################################################################
 
 #function returns Table 1 summary statistics for a given dataset, with a column name describing group 

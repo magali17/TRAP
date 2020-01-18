@@ -366,17 +366,17 @@ summary(dem.w2$age_act)
 
 Missing apoe by enrollment year
 
-Have a cut off since most recent enrollees: 
-*	tend to be those w/o apoe
-* wont contribute much to survival analysis
-* may have not-yet geocoded addresses 
+Have a cut off since most recent enrollees:    
+*	tend to be those w/o apoe    
+* wont contribute much to survival analysis    
+* may have not-yet geocoded addresses     
 
 ```{r}
 apoe_avail_ct_p <- dem.w %>%
   filter(enrollment_yr==1,
          ) %>%
   mutate(exposure_year = factor(exposure_year)) %>%
-  ggplot(aes(x=exposure_year, fill = is.na(apoe))) + 
+  ggplot(aes(x=exposure_year, fill = !is.na(apoe))) + 
   geom_bar() + 
   theme(axis.text.x = element_text( angle = 90)) + 
   labs(x = "Exposure year",
@@ -388,7 +388,7 @@ apoe_avail_prop_p <- dem.w %>%
   filter(enrollment_yr==1,
          ) %>%
   mutate(exposure_year = factor(exposure_year)) %>%
-  ggplot(aes(x=exposure_year, fill = is.na(apoe))) + 
+  ggplot(aes(x=exposure_year, fill = !is.na(apoe))) + 
   geom_bar(position = "fill") + 
   theme(axis.text.x = element_text( angle = 90)) + 
   labs(x = "Exposure year",
@@ -1372,6 +1372,8 @@ dem_10yr_hrs <- dem_10yr$hrs %>%
     )
 
  
+# dem_10yr_hrs
+
 #m2 for other exposure years
 dem_other_yrs <- data.frame()
 expo.prds <- paste0("no2_", c("1yr", "5yr", "20yr", "10yr10yrlag", "10yr20yrlag"))
@@ -1642,8 +1644,8 @@ AD
 ### Optional/time permitting 
 
 1. finer adjustments for confounders
-2. Model "1b" w/ APOE stratification
-3. calculate IPW weights based on the probability that All of the M2 predictors (not just APOE) are observed (e.g., all_covs_available ~ [predictors])
+2. calculate IPW weights based on the probability that All of the M2 predictors (not just APOE) are observed (e.g., all_covs_available ~ [predictors])
+
 
 ```{r}
 

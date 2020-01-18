@@ -19,7 +19,6 @@ r2_mse_based <- function(obs, pred) {
   max(0, r2)
   }  
 
-
 ############################################################################################## 
 #returns table of distribution of a variable
 distribution.table <- function(dt,

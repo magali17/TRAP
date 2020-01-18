@@ -394,17 +394,28 @@ save.pred.fn <- function(dt,
 # y_units = "pt/cm3"
 # latitude_name = "latitude"
 # longitude_name = "longitude"
+# map_title = NULL
+# include_monitoring_area = TRUE
+# include_study_area = T
 # maptype. = "terrain"
 # zoom_lvl = 11
 
+
 # https://www.r-bloggers.com/getting-started-stamen-maps-with-ggmap/ 
 
-map_fn <- function(dt, color_by = "ufp", color_units = "pt/cm3",
-                   map_title = NULL,
+pacman::p_load(ggmap)
+
+map_fn <- function(dt, 
+                   color_map = TRUE,
+                   color_by = "ufp", color_units = "pt/cm3",
                    latitude_name = "latitude", longitude_name = "longitude",
+                   map_title = NULL,
+                   include_monitoring_area = TRUE, monitoring_area_alpha = 0.25,
+                   include_study_area = FALSE, study_area_alpha = 0.1,
                    maptype. = "terrain", #, "toner", "toner-background", "watercolor"
                    zoom_lvl = 11
 ) {
+  
   
   #label by variable being mapped if no title is provided
   if(is.null(map_title)) {map_title <- color_by}
@@ -433,23 +444,73 @@ map_fn <- function(dt, color_by = "ufp", color_units = "pt/cm3",
   map <- suppressMessages(get_stamenmap(bbox = bbox, zoom = zoom_lvl,
                                         maptype = maptype.))
   
-  # Make the map image from the tiles
-  mymap <- ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void() +
-    geom_point(data = dt,
-               aes(x = long, y = lat), col= "black",
-               size = 2.5,
-    ) +
-    geom_point(data = dt,
-               aes(x = long, y = lat, col = y),
-               alpha = 0.8, size = 2,
-    ) +
-    scale_color_gradient(name = color_units, low = "yellow", high = "red")  +
-    theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) +
-    labs(title = map_title)
+  # Make basic map image from the tiles
+  mymap <- ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void()
+  
+  # add study area
+  if(include_study_area) {
+    study_area <- readRDS(file.path("Data", "GIS", "study_area_df.rda"))
+    
+    mymap <- mymap + 
+      geom_polygon(data = study_area, 
+                aes(x = long, y = lat, group = group, 
+                    fill = "Study"
+                    ),
+                #fill = "plum2",
+                #col = "plum2",
+                alpha = study_area_alpha,
+                size = 0.5 )
+  }
+  # add monitoring area
+  if(include_monitoring_area) {
+    monitoring_area <- readRDS(file.path("Data", "GIS", "monitoring_area_df.rda"))
+    
+    mymap <- mymap + 
+      geom_polygon(data = monitoring_area, 
+                aes(x = long, y = lat, group = group,
+                    fill = "Monitoring"
+                    ),
+                #color = 'peru',  
+                #fill = 'peru', 
+                alpha = monitoring_area_alpha,
+                size = 0.3)
+    }
+  
+  # color map
+  if(color_map) {
+    mymap <- mymap +
+      geom_point(data = dt,
+                 aes(x = long, y = lat), col= "black",
+                 size = 2.5) +
+      geom_point(data = dt,
+                 aes(x = long, y = lat, col = y),
+                 alpha = 0.8, size = 2,
+      ) +
+      scale_color_gradient(name = color_units, low = "yellow", high = "red") 
+  
+  }
+  
+  mymap <- mymap +
+    labs(title = map_title,
+         fill = "Area"
+         ) +
+    theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) 
   
   return(mymap)
   
 }
+
+
+# from geoPreprocessing script
+cov_mm0 %>%
+  map_fn(color_map = F,
+         #need this for fn to work even though not using
+         color_by = "region_nw",
+         include_monitoring_area = T, #monitoring_area_alpha = 1,
+         include_study_area = T, #study_area_alpha = 0.4,
+         map_title = "Mobile monitoring (pink) and study (purple) areas"
+  )
+
 
 #################################################################################################################
 

@@ -66,7 +66,8 @@ pacman::p_load(
 
 options(knitr.kable.NA = '')
 set.seed(1)
-source(file.path("A2.0.1_Var&Fns.R"))
+source("0.Global_Fns.R")
+source("A2.0.1_Var&Fns.R")
 
 images_path <- file.path(images_path0, "2. Annual Average")
 tables_path <- file.path(tables_path0, "2. Annual Average")
@@ -74,10 +75,9 @@ tables_path <- file.path(tables_path0, "2. Annual Average")
 #load data
 mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.w_2019-12-22.rda"))
 
-cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda")) %>%
-  select(#-contains("lambert"), -latitude, -longitude,
-         -contains("pop_"), -contains("pop90_")
-         )
+cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda")) %>%
+  select(-contains("pop_"), -contains("pop90_"))
+
 site_locations <- cov_mm %>% 
   select(
     site_id, 
@@ -889,9 +889,12 @@ tow2$diff <- tow2$max - tow2$min
 ```
 
 
-```{r, fig.height= 10}
+```{r, fig.height= 8}
 left_join(tow2, site_locations, by= "site_id") %>%
-map_fn(color_by = "diff", map_title = "Range in inter-method UFP estimates")
+map_fn(color_by = "diff", map_title = "Range in inter-method UFP estimates", 
+       #include_study_area = T
+       
+       )
 
 ```
 
@@ -1386,7 +1389,7 @@ ggarrange(p1, p2, p3, p4,
 
 Map the residuals 
 
-```{r, fig.height= 10}
+```{r, fig.height= 8}
 left_join(annual_with_LUR, site_locations, by = "site_id") %>%
   map_fn(color_by = "resid_yhat_s_tow2_tod5")
 
@@ -1510,22 +1513,12 @@ annual_ufp_and_cov <- left_join(site_locations, preds.s.tow.tod5) %>%
 #   select_if(~any(is.na(.))) %>%
 #   names()
 
-# # data for UK
-# saveRDS(annual_ufp_and_cov, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))
-# 
-# data for GIS
-# annual_ufp_and_cov %>%
-#   select(site_id, latitude, longitude, ufp, lasso.results$term) %>%
-# write.csv(., file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_some_cov.csv"),
-#             row.names = F, na = "")
-
- 
 ```
 
 Map Annual Average estimates from selected weighted and unweighted regression methods. Spatial patterns are nearly identical.
 
 
-```{r, fig.height=10}
+```{r, fig.height=8}
 
 main_map <- annual_ufp_and_cov %>% 
   map_fn(map_title = "Primary: yhat_s_tow2_tod5 estimates")
@@ -1665,4 +1658,58 @@ aqs_ufp %>%
 
 ```
 
- 
+### --> 
+
+# Sensitivity Analyses
+
+## Averaging of 1 sec data at each stop
+
+??? Use averages
+
+```{r}
+
+```
+
+## Annual averages 
+
+Trim 10% observations
+
+```{r}
+
+```
+
+Windosrize extreme stop readings 
+
+```{r}
+# #windosrized alternative 
+# ufp <- ufp %>%
+#   group_by(site_id) %>%
+#   mutate(
+#     ufp_wind = ifelse(ptrak_ct_cm3 > quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), 
+#                       ifelse(ptrak_ct_cm3 < quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), 
+#                              ptrak_ct_cm3)))
+
+
+```
+
+Use different annual averages
+- UW ?
+
+```{r}
+
+```
+
+save datasets. 
+
+```{r}
+# # data for UK
+# saveRDS(annual_ufp_and_cov, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))
+# 
+# data for GIS
+# annual_ufp_and_cov %>%
+#   select(site_id, latitude, longitude, ufp, lasso.results$term) %>%
+# write.csv(., file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_some_cov.csv"),
+#             row.names = F, na = "")
+
+```
+

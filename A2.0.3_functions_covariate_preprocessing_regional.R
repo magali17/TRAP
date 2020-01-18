@@ -32,7 +32,7 @@
 # * vars.count: numbers of excluded variables for each preprocessing step
 #==============================================================================================================================================================================
 # covars.mon = cov_mm0
-# covars.sub = cov_act_fake0
+# covars.sub = cov_act0  #cov_act_fake0
 # region = "NW"
 # common=T
 # exclude.cat.canyon = TRUE
@@ -40,10 +40,14 @@
 # exclude.census = TRUE
 # exclude.old.LUR = TRUE
 # exclude.relative.elevation = FALSE
+# remove_nonlog_dist = TRUE
 
 covariate.preprocess <- function( covars.mon, covars.sub, region,common=T,
                                   exclude.cat.canyon = TRUE, exclude.cityhall = TRUE, exclude.census = TRUE,
-                                  exclude.old.LUR = TRUE, exclude.relative.elevation = FALSE )
+                                  exclude.old.LUR = TRUE, exclude.relative.elevation = FALSE,
+                                  #added this for sensitivity analyses
+                                  remove_nonlog_dist = TRUE
+                                  )
 {
   
   # 0. Data prepration
@@ -55,17 +59,17 @@ covariate.preprocess <- function( covars.mon, covars.sub, region,common=T,
     covars.mon <- covars.mon[,!oil & !canyon & !bus]
     covars.sub <- covars.sub[,!oil & !canyon & !bus]
   } 
-  if(region=="IL"){
-    oil <- grepl("oil", names(covars.mon))                          #oil: residual oil variables for NY
-    bus <- grepl("bus", names(covars.mon))
-    covars.mon <- covars.mon[,!oil & !bus]
-    covars.sub <- covars.sub[,!oil & !bus]
-  } 
-  if(region!="CA"){
-    caline.alt <- grepl('^calinemod_alt_lt',names(covars.mon))      #caline.alt: caline alternative variables for LA
-    covars.mon <- covars.mon[,!caline.alt]                          
-    covars.sub <- covars.sub[,!caline.alt]
-  } 
+  # if(region=="IL"){
+  #   oil <- grepl("oil", names(covars.mon))                          #oil: residual oil variables for NY
+  #   bus <- grepl("bus", names(covars.mon))
+  #   covars.mon <- covars.mon[,!oil & !bus]
+  #   covars.sub <- covars.sub[,!oil & !bus]
+  # } 
+  # if(region!="CA"){
+  #   caline.alt <- grepl('^calinemod_alt_lt',names(covars.mon))      #caline.alt: caline alternative variables for LA
+  #   covars.mon <- covars.mon[,!caline.alt]                          
+  #   covars.sub <- covars.sub[,!caline.alt]
+  # } 
   
   # [make sure cohort covariates are same as the monitoring sites covariates being used; combine datasets]
   covars.sub <- covars.sub[,names(covars.mon)]
@@ -85,27 +89,27 @@ covariate.preprocess <- function( covars.mon, covars.sub, region,common=T,
   #      remove original variables
   covars.cal      <- log_transform_caline(covars.a23L, removeOrig=TRUE) #don't include
   covars.em       <- log_transform_emission(covars.a23L, removeOrig=TRUE)
-  covars.process1 <- log_transform_distance(covars.em, lowerBound=10, removeOrig=TRUE)
+  covars.process1 <- log_transform_distance(covars.em, lowerBound=10, removeOrig= remove_nonlog_dist) #removeOrig=TRUE
   
   # 2. Preprocessing 2: variable exclusion 
   
-  ## [ -----> don't include this if already properly labeled site_type? includes/excludes site_types. don't need "site_type" column if don't use this]
+  ## [KEEP - merges all data in output otherwise; OLD: Amanda: "can ignore this." don't need "site_type" column if don't use this. had originally set ACT locations to "P" and mobile monitoring locations to "FIXEX"]
   covars.process1.mon <- covars.process1[covars.process1$site_type!="P",]
   covars.process1.sub <- covars.process1[covars.process1$site_type=="P",]
 
   # 2.0. exclude distances to road types for street canyons, city halls, old LUR, census, or relative elevation variables
   ## [ -----> don't include this? WHAT IS THIS DOING?? ..something w/ NAs in columns?...]
-  covars.process2<-covars.process1
-  # [---> (?) table of counts for non-missing & missing values in each column ]
-  a<-apply(as.data.frame(!is.na(covars.process1)),2,table)
+  # covars.process2<-covars.process1
+  # # [---> (?) table of counts for non-missing & missing values in each column ]
+  # a<-apply(as.data.frame(!is.na(covars.process1)),2,table)
   
-  # [--> ADD CODE BACK IN??]
-  
+  # # [subtracting columns w/ NAs - get ERROR msgs. doing this on my own]
+  # # browser()
   # if (common==F){
   #   for (i in 1:dim(covars.process1)[2]){
   #     if (a[[i]]==0 ){
-  #     # [?? use only 1 set of bracket??]
-  #     #if (a[i]==0 ){
+  #     # [---> ?? use only 1 set of bracket??]
+  #        #if (a[i]==0 ){
   #     covars.process2<-covars.process2[,setdiff(colnames(covars.process2),names(a[i]))]
   #   }}}
   # if (common==T){
@@ -115,7 +119,9 @@ covariate.preprocess <- function( covars.mon, covars.sub, region,common=T,
   #     #if (names(a[i])[1]==F){
   #       covars.process2<-covars.process2[,setdiff(colnames(covars.process2),names(a[i]))]
   #     }}}
-  covars.process1<-covars.process2
+  
+  #covars.process1<-covars.process2
+  
   gis.vars <- c('m_to|pop|ll|ndvi|imp|em|calinemod|rlu|lu|elev|tl|intersect|oil|canyon|no2')
   initial.vars <- names(covars.process1)[grepl(gis.vars, names(covars.process1))] 
   

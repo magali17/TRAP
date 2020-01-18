@@ -1,7 +1,7 @@
 ---
 title: "Aim 2: UK"
 author: "Magali Blanco"
-date: ' `r Sys.Date()` '
+date: '`r Sys.Date()`'
 output:
   html_document:
     number_sections: yes
@@ -19,8 +19,7 @@ editor_options:
 ```{r}
 # --> to do
 # map predictions (mm & ACT) 
-# select images/tables to export
-
+ 
 
 ```
 
@@ -40,18 +39,20 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
-pacman::p_load(tidyverse, ggpubr, #dplyr, 
-               knitr, kableExtra, 
+pacman::p_load(knitr, kableExtra, 
                #descriptive statistics
                Hmisc, EnvStats, 
                   #qwraps2, #mean_sd, median_iqr
                # modeling
-               pls, geoR #gstat - alternative for UK
+               pls, geoR, #gstat - alternative for UK
+               akima, # interp() - interpolate predictions on map
+               ggpubr, tidyverse #dplyr, 
                )    
 #Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
 options(knitr.kable.NA = '')
 set.seed(1)
+source("0.Global_Fns.R")
 source("A2.0.1_Var&Fns.R")
 
 images_path <- file.path(images_path0, "3. UK")
@@ -67,8 +68,7 @@ cov_names <- annual0 %>%
   select(elev_elevation:log_m_to_a23) %>%
   names()
 
-## --> needs to be updated & geocovariates cleaned up
-geo_act <- read.csv(file.path("Data", "Aim 2", "ACT", "ACT_selected.csv"))  
+cov_act <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_log_scale_preprocessed.rda"))
 
 ```
 
@@ -96,6 +96,9 @@ geo_act <- read.csv(file.path("Data", "Aim 2", "ACT", "ACT_selected.csv"))
 Create training,  test and AQS set.
 
 ```{r, results="hide"}
+#for creating sets in data & CV later 
+k <- 3 #10
+
 # 1. fit PLS using training set to ID # features to use
 annual_all <- annual0 %>%
   select(site_id,
@@ -104,7 +107,7 @@ annual_all <- annual0 %>%
   drop_na() %>%
   #create test, train, aqs data set
   mutate(set = ifelse(grepl("MC", site_id), "aqs",
-                 sample(c(1:10), size = sum(grepl("MS", site_id)), replace = T)),
+                 sample(c(1:k), size = sum(grepl("MS", site_id)), replace = T)),
     cv_prediction = NA
          )
 
@@ -216,22 +219,16 @@ dev.off()
 
 ```
 
-10 FCV to evalute best number of PLS components.
-
-### --> ? run CV serveral times w/ diff spatial blocks to produce a range (rather than a #) of model fit estimates? May be more imp for A3 where I will be extrapolating predictions
-
-### --> ? error: phi too high when make distnace bins too small? 
+CV to evalute best number of PLS components. Folds (k) = `r k`
 
 ```{r, results="hide"}
 set.seed(1)
 ################# variables for later ###############
-# CV folds
-k <- 10
-
 # max PLS components to use in UK
-use_n_scores <- 10  
+use_n_scores <- 3  #6 
 
-dist_fract <-  c(0.05, seq(0.1, 0.5, by=0.1))
+dist_fract <-  c(0.05, 
+                 seq(0.1, 0.5, by=0.2)) # by = 0.1
 #df to save CV RMSE
 cv.eval <- data.frame(
   expand.grid(pls_comp = c(1:use_n_scores),
@@ -387,15 +384,17 @@ for(i in seq_len(use_n_scores)) {
 
 ```{r}
 ######################### select CV parameters #########################
-  min_rmse <- min(cv.eval$RMSE)
-  cv_r2 <- cv.eval$R2[cv.eval$RMSE == min_rmse] 
-  cv_comp <- cv.eval$pls_comp[cv.eval$RMSE == min_rmse]
-  cv_dist_fract <- cv.eval$dist_fract[cv.eval$RMSE == min_rmse]
+min_rmse <- min(cv.eval$RMSE)
+rmse_inx <- cv.eval$RMSE == min_rmse
+
+cv_r2 <- cv.eval$R2[rmse_inx] 
+cv_comp <- cv.eval$pls_comp[rmse_inx]
+cv_dist_fract <- cv.eval$dist_fract[rmse_inx]
   
-  cv_comp_names <- names(scores_train)[1:cv_comp]
+cv_comp_names <- names(scores_train)[1:cv_comp]
  
-  #trends
-  cv_cov_trend <-  as.formula(paste0("~ ", paste0(cv_comp_names, collapse = " + " )))
+#trends
+cv_cov_trend <-  as.formula(paste0("~ ", paste0(cv_comp_names, collapse = " + " )))
 
 ######################## Plot CV RMSE & R2 ################################## 
    
@@ -430,6 +429,33 @@ cv.eval %>%
 
 ```
 
+Map CV UK Predictions
+
+```{r, study area polygon, eval=F}
+
+```
+
+```{r, delete?, eval=F}
+### --> delete? will plot to a grid instead
+
+### --> WRONG: predictions are for last PLS & dist fraction used in CV
+# use CV predictions for now
+df_of_pred <- annual_train_test %>%
+  select(site_id, 
+         pred = cv_prediction) %>% 
+   # get UFP in native scale
+   mutate(pred = exp(pred)) %>%
+   left_join(annual0[c("site_id", "latitude", "longitude")], by = "site_id")
+
+#don't include AQS sites since these weren't used to build the model?
+ #pls_df_test_aqs[c("site_id", "pred")]
+
+df_of_pred %>%
+  map_fn(color_by = "pred", 
+         map_title = "CV UK Annual Average UFP Predictions")
+
+```
+
 # Fit final UK model to all stop data    
 * exclude AQS co-location sites
 
@@ -452,8 +478,6 @@ names(scores_train_test) <- gsub(" ", "", names(scores_train_test))
 ```
 
 Plot of PLS loadings. 
-
-### --> relabel "_stdev" into buffers. crate buffers for "_below", "_above", and "_at_elev" even though exact definitions are a little diff? 
 
 ```{r, fig.height=15}
 pls.loadings <- pls_train_test$loadings[] %>%
@@ -532,7 +556,7 @@ max.dist <- summary(geo_train_test)$distances.summary[["max"]]
 
 Residual model.   
 
-```{r, results="hide"}
+```{r, results="hide"} 
 max.plot.dist <- max.dist*cv_dist_fract
 
 ##Empirical Variogram
@@ -605,7 +629,54 @@ data.frame(
 
 ```
 
+# Map of interpolated predictions    
+
+### --->: need Puget Sound grid for predictions
+#### ---> Error: df_of_pred not found
+
+```{r, eval=F}
+# Interpolate to a regularly spaced grid and store as a list
+test_grid_interp <- with(df_of_pred, interp(x = longitude, y = latitude, z = pred ))  
+
+# expand grid to dataframe
+test_grid_dens_expand <- with (test_grid_interp, expand.grid(x=x, y=y)) %>%
+  mutate(z = as.vector(test_grid_interp$z),
+         z = ifelse(is.na(z), 0, z)) 
+
+# blank map w/ outline - NEED INTERNET ACCESS
+mymap <- test_grid_dens_expand %>%
+  map_fn(latitude_name = "y", longitude_name = "x", 
+         color_map = F, 
+         include_study_area = TRUE,
+         #default - though not using here
+         color_by = "z", 
+         map_title = "Interpolation of CV UK Annual Average UFP Predictions") 
+
+#map2 <- mymap
+
+# add concentration interpolations
+mymap + 
+  # draw 3D surface 
+  stat_contour(aes(x = x, y = y, 
+                   z = z, 
+                   fill = ..level..), 
+               alpha = 0.05,
+               #need data for fn to work w/ "z"
+               data = test_grid_dens_expand, 
+               geom = "polygon", 
+               bins = 50
+               ) +
+  scale_fill_gradient(name = "UFP (pt/cm3)", 
+                      low = "yellow", high = "red")  +
+    theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) +
+  labs()
+ 
+```
+
+
 # Out-of-sample RMSE and R2 for AQS sites 
+
+### --> ? compare against true observations (not yhat estimates)?
 
 ```{r,results="hide"}
 #AQS test set
@@ -684,70 +755,32 @@ pls_df_test_aqs %>%
 ```
 
 
+# Predict at participant homes
 
-### ?? test: interpolate/predict on grid
-
-```{r}
-pacman::p_load(akima)
-
-
-
-
-
- 
-```
-
-
-
-Predict at participant homes
-
-### --> see 556 lab 9: "2.4.5 Plotting the predictions"
-### --> need new dataset w/ same variable names. rename all variables to match training data?   
-
-```{r, eval=F}
-# geo_act %>%
-#   select_at(vars(contains("por")), ~ paste0(., "t"),
-#             vars(ends_with("air")), ~ paste0(., "p")
-#             ) %>%
-#   names()
-
- 
-# #rename differently labeled variables in this dataset 
-# t <- geo_act %>%
-#   rename_at(vars(contains("por")), ~ paste0(., "t"),
-#             #vars(ends_with("air")), ~ paste0(., "p")
-#             )  %>%
-#   rename(m_to_l_airp = m_to_l_air)
-
-
-
-#estimate scores for test set
+```{r, results="hide"}
+#estimate PLS scores using ACT geocovariate dataset
 scores_act <- predict(object = pls_train_test,
-                       newdata = geo_act,
+                       newdata = cov_act,
                        ncomp = 1:cv_comp, 
                        type = "score"
                        ) %>%
   as.data.frame()
 
-
 #take out spaces 
 names(scores_act) <- names(scores_train_test) 
 
 #add site ientifier & lat/long
-pls_df_act <- cbind(
-  # --> add cov names
-  geo_act[c("location_i",      )],
-  scores_act
-)  
+pls_df_act <- cbind(cov_act[c("site_id", "lambert_x", "lambert_y")],
+                    scores_act)  
 
 #create geodataset
+### --> duplicate locations issue?
 geo_act <- as.geodata(pls_df_act, 
                       coords.col = c("lambert_x", "lambert_y"), 
-                      #data.col = "log_ufp", 
                       covar.col = names(scores_act))
 
 #trend
-trend_act <- trend.spatial(trend = cov_trend,
+trend_act <- trend.spatial(trend = cv_cov_trend,
                            geodata = geo_act)
 #uk
 uk_act <- krige.conv(coords = geo_train_test$coords,
@@ -757,25 +790,99 @@ uk_act <- krige.conv(coords = geo_train_test$coords,
                                                 obj.model = resid_model,
                                                 trend.d= trend_train_test,
                                                 trend.l= trend_act))
+                           
 #save UK predictions
-geo_act$pred  <- uk_act$predict
+cov_act$ufp_uk_pred  <- exp(uk_act$predict)
  
 ```
 
 prediction boxplots overall and by important TRAP indicators
 
 ```{r}
+# find covariaets predictive of UFP (for plotting/tabulation purposes)
+act_cov_lasso <- lasso_fn(dt = cov_act, x_names = cov_names, y_name = "ufp_uk_pred", 
+              lambda. = 530
+              )
+
+covs_to_desc_log <- act_cov_lasso$results$cov
+  
+covs_df <- cov_act %>%
+  select(contains("ufp"), covs_to_desc_log) %>%
+  # convert log distnaces to native scale
+  mutate_at(vars(contains("log_")), ~exp(.)) %>%
+  # take out "log" in name
+  rename_at(vars(contains("log_")), ~sub("log_", "", .)) 
+   
+covs_to_desc_native <- sub("log_", "", covs_to_desc_log)
+
+new_vars <- covs_df[,covs_to_desc_native] %>%
+  rename_all(~paste0(., "_cat")) %>%
+  #categorize variables into 3 groups, up to dig.lab digits before using sci notation
+  mutate_all(~cut_interval(., n=3, dig.lab = 10))
+
+new_var_names <- names(new_vars)
+
+covs_df <- cbind(covs_df, new_vars)  
 
 ```
 
-
-Map predictions
-
-### --> see 2.4.5
+plots
 
 ```{r}
+# overall
+cov_act %>%
+  ggplot(aes(x=ufp_uk_pred)) + 
+  geom_density(aes(), fill = "black") + 
+  labs(x = "UFP Prediction (pt/cm3)",
+       title = "Distribution of UFP Predictions"
+       )
+  
+# by geocovariates  
+cov_act %>%
+  select(contains("ufp"), covs_to_desc_log) %>%
+  gather("cov", "value", -contains("ufp")) %>%
+  ggplot(aes(x=value, y=ufp_uk_pred)) + 
+  geom_point(aes(col=cov), alpha=0.1) +
+  geom_smooth() +
+  facet_wrap(~cov, scales = "free_x") + 
+  theme(legend.position = "none") + 
+  labs(x = "",
+       y = "UFP Prediction (pt/cm3)",
+       title = "UFP predictions for the ACT cohort by selected correlated covariates"
+       )
 
 ```
+
+Tables
+
+```{r, results='asis'}
+# table of overall predicted UFP distribution
+covs_df %>%
+  distribution.table(var.string = "ufp_uk_pred") %>%
+  kable(caption = "Distribution of UFP Predictions") %>%
+  kable_styling()
+
+#new_var_names
+ 
+# # delete?  too much info - plots above are clearer?
+# #only works /w results = "asis" chunk setting
+# for (i in seq_along(new_var_names)) {
+#   #i=1
+# covs_df %>%
+#   group_by(get(new_var_names[i])) %>%
+#     distribution.table(var.string = "ufp_uk_pred") %>%
+#     rename_if(grepl("new_var_names", names(.)), ~new_var_names[i]) %>%
+#     kable() %>%
+#     kable_styling() %>%
+#     print()
+# }
+
+```
+
+
+# QC  
+
+### --> 
 
 # for Aim 3: How much does the regression vs kriging contribute to your esimate?
 Paul Sampson suggestion: decompose the 2019 UK model to see how much of the prediction is generated by regression vs observed interpolations (kriging). If regression is most responsible, less worried about issues w/ smoothing back in time.
@@ -786,13 +893,99 @@ Paul Sampson suggestion: decompose the 2019 UK model to see how much of the pred
 
 ```
 
-
-# QC  
-
 Amanda: "Compare distribution of PLS scores in monitoring vs cohort. See if combination of variables is unusual. Check predicted PLS values are not super large – suggests extrapolation. If have strange points, can look to see where they are on a map (e.g., a point is in middle of lake; or strange geographic area)."
+
+### --> are scores diff b/c this is for entire cohort (outside of study area?)
+
+```{r}
+scores_train_test$site_type <- "mobile monitoring"
+scores_act$site_type <- "ACT cohort"
+
+scores_mm_act <- rbind(scores_train_test, scores_act)
+
+scores_mm_act %>%
+  gather("Component", "Score", Comp1:Comp3) %>%
+  mutate(Component = substr(Component, 5, 5)) %>%
+  ggplot(aes(x=Score, fill = site_type)) + 
+  geom_density(alpha = 0.4) + 
+  facet_wrap(~Component, labeller = "label_both") + 
+  labs(fill = "Site Type"
+       ) + 
+  theme(legend.position = "bottom")
+  
+
+```
+
+### --> ? variogram for something w/ more spatial structure, e.g., PM2.5
 
 ```{r}
 
 ```
 
-### --> ? variogram for something w/ more spatial structure, e.g., PM2.5
+### --> 
+
+# Sensitivity Analyses
+
+## Covariates used
+
+Change TRAP indicator variable [? & UFP] transformations (native to log-transformed or vise versa)
+
+```{r}
+
+
+```
+
+
+## Averaging of 1 sec data at each stop
+
+??? Use averages
+
+```{r}
+
+```
+
+## Annual averages 
+
+Trim 10% observations
+
+```{r}
+
+```
+
+Windosrize extreme stop readings 
+
+```{r}
+# #windosrized alternative 
+# ufp <- ufp %>%
+#   group_by(site_id) %>%
+#   mutate(
+#     ufp_wind = ifelse(ptrak_ct_cm3 > quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), 
+#                       ifelse(ptrak_ct_cm3 < quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), 
+#                              ptrak_ct_cm3)))
+
+
+```
+
+Use different annual averages
+- UW ?
+
+```{r}
+
+```
+
+## UK Model
+
+Differeent number of PLS components
+
+```{r}
+
+```
+
+
+? [time permitting] Normalize to the Roosevelt garage 
+
+```{r}
+
+```
+
+

@@ -36,142 +36,191 @@ knitr::opts_chunk$set(echo = F,
 
 options(knitr.kable.NA = '')
 
-pacman::p_load(tidyverse,
-               kable, kableExtra
+pacman::p_load(kable, kableExtra,
+               tidyverse
                )  
 
 set.seed(1)
 
-source(file.path("A2.0.1_Var&Fns.R"))
-source(file.path("A2.0.3_functions_covariate_preprocessing_regional.R"))
+source("A2.0.1_Var&Fns.R")
+source("A2.0.3_functions_covariate_preprocessing_regional.R")
 
 images_path <- file.path(images_path0, "0. Geocovariates")
 tables_path <- file.path(tables_path0, "0. Geocovariates")
 
-  
 cov_mm0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
 cov_act0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "cohort_covars_20200107.csv")) 
+act_in_study0 <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 2. 2019 UFP", "GIS", "ACT", "ACT_selected", "cohort_in_monitoring_area_0.04deg_buffer.csv")) %>%
+  select(location_id = location_i,
+         site_location = site_type)  %>%
+  # label locations within monitoring vs within a buffered area around the monitoring location
+  mutate(site_location = relevel(factor(ifelse(site_location == "", "additional within buffer", as.character(site_location))), ref = "monitoring"))  
+
 
 ```
 
 # Initial covariates 
-
-Length
 
 ```{r}
 initial_cov <- cov_mm0 %>%
   select(-(location_id:msa)) %>%
   names()
 
-length(initial_cov)
-
 ```
 
-names
+Length: `r length(initial_cov)`
+
 
 ```{r}
-initial_cov 
+# names
+#initial_cov 
 
 ```
+
+# Sample Size
+
+## Mobile Monitoring 
+
+```{r}
+
+cov_mm0 %>%
+  mutate(`Stop Kind` = ifelse(grepl("MS", native_id), "ACT stop", "AQS site")) %>%
+  group_by(`Stop Kind`) %>%
+    dplyr::summarize(N = n()) %>%
+  kable(caption = "Mobile monitoring stops. ACT stops are those chosen to represent the ACT cohort, AQS site stops are AQS co-location sites within the monitoring area") %>%
+  kable_styling()
+
+```
+
+
+## ACT Cohort 
+
+```{r}
+data.frame(
+  Locations = c("Entire Cohort", 
+                "In Study", 
+                "In monitoring area", 
+                "Within a buffer of the monitoring area"),
+  N = c(nrow(cov_act0), 
+        nrow(act_in_study0),
+        length(act_in_study0$site_location[act_in_study0$site_location == "monitoring"]),
+        length(act_in_study0$site_location[act_in_study0$site_location != "monitoring"])
+        )
+  ) %>%
+kable(caption = "ACT cohort locations included in this study") %>% 
+  add_indent(3:4) %>% 
+  add_footnote("buffered area is a 0.04 degree (~ 5k meter) buffer around the monitoring area") %>%
+  kable_styling()
+
+
+```
+
+Map of monitoring and study area.
+
+```{r}
+cov_mm0 %>%
+  map_fn(color_map = F, 
+         #need this for fn to work even though not using
+         color_by = "region_nw",
+         include_monitoring_area = T, #monitoring_area_alpha = 1,
+         include_study_area = T, #study_area_alpha = 0.4,
+         map_title = "Mobile monitoring and study areas"
+         )
+
+```
+
+
+
+
+# Geocovariate Processing 
 
 prepare geocovaraites for covariate.preprocess() function.
 
 ```{r}
-
-# mobile monitoring geocovariates
-cov_mm0 <- cov_mm0 %>%
+########################  mobile monitoring ######################## 
+cov_mm1 <- cov_mm0 %>%
   #drop columns if any NAs
   select_if(~!any(is.na(.))) %>%
-  select(
-    #don't need this
-    -contains("region"),
-    ) %>%
-  mutate(
-    # --> correct setting? 
-    site_type = "FIXED"
-  )
+   #don't need this
+  select(-contains("region")) %>%
+  mutate(site_type = "FIXED")
 
 #save mm location info
-locations_mm <- cov_mm0 %>%
-  select(
-    site_id = native_id,
-    latitude:lambert_y
-  )
+locations_mm <- cov_mm1 %>%
+  select(site_id = native_id,
+         latitude:lambert_y)
 
 #only keep covariates
-cov_mm0 <- cov_mm0 %>%
+cov_mm1 <- cov_mm1 %>%
   select(-c(location_id:msa, latitude:lambert_y))
 
-mm_names <- names(cov_mm0)
+mm_names <- names(cov_mm1)
 
 ```
+
 
 ```{r}
 
-# ACT
+######################## ACT ########################
 #  fake ACT cohort geocovariate dataset so names are the same across datasets
-cov_act_fake0 <- cov_mm0 %>%
-  slice(1:100) %>%
-  mutate(
-    # --> ??? Prediction sites??
-    site_type = "P"
-  )
+# cov_act_fake0 <- cov_mm1 %>% slice(1:100)  
 
-# actual data, but has too many NAs
-cov_act0 <- cov_act0 %>%
+# actual data
+cov_act1 <- cov_act0 %>%
+  #only keep locations in our study area
+  filter(location_id %in% act_in_study0$location_id) %>%
+  #don't need these
+  select(-c(X), - contains("state"), -county,
+         -contains("region")) %>%
   #drop columns w/ all NAs
   select_if(~!all(is.na(.))) %>%
-  select(
-    -c(X), - contains("state"),
-    #don't need this
-    -contains("region"),
-  ) %>%
-  mutate(
-    # ? correct setting?
-    site_type = "P"
-  )
+  #drop rows w/ NAs
+  drop_na() %>%
+  mutate(site_type = "P") 
 
-# ----> ISSUE: lot of NAs in columns
-# #number of NAs in each column
-# cov_act0 %>%
-#   summarise_all(~sum(is.na(.))) 
-   
-#save act location info
-locations_act <- cov_act0 %>%
-  select(
-    site_id = location_id,
-    latitude:lambert_y
-  )
+locations_act <- cov_act1 %>%
+  # add site_location (monitoring vs within a monitoring buffer)
+  left_join(act_in_study0, by= "location_id") %>%
+  #save act location info 
+  select(site_id = location_id,
+         latitude:lambert_y, 
+         site_location)
 
-#only keep covariates
-cov_act0 <- cov_act0 %>%
-  select(-c(location_id:county))
+cov_act1 <- cov_act1 %>%
+  #only keep covariates
+  select(-c(location_id:lambert_y))  
 
-act_names <- names(cov_act0)
+act_names <- names(cov_act1)
+
+######################## Only keep columns if in both datasets ######################## 
 
  
-# [? need to do this?] only keep variables if also in the mobile monitoring dataset
-cov_act0 <- cov_act0 %>%
-  select_if(names(.) %in% mm_names)
+# # act dataset has fewer columns
+# length(mm_names)
+# length(act_names)
 
+# variables
+keep_var <- mm_names[mm_names %in% act_names]
+cov_mm1 <- cov_mm1[,keep_var]
+cov_act1 <- cov_act1[,keep_var]
+
+# dim(cov_mm1)
+# dim(cov_act1)
 
 ```
 
-clean up geocovariates using covariate.preprocess() function (lab protocol/code)   
+clean up geocovariates using covariate.preprocess() function (lab protocol/code) and additional cleaning 
 * returns log-transformed proximity variables; drops old land use ("lu") variables; drops variables not available/ready for use in our study area
 
 ```{r}
-cov_preprocessed <- covariate.preprocess(covars.mon = cov_mm0, 
-                                         covars.sub = cov_act_fake0,  #cov_act0,
+######################## covariate.preprocess() ########################
+cov_preprocessed <- covariate.preprocess(covars.mon = cov_mm1, 
+                                         covars.sub = cov_act1, #cov_act_fake0,  #cov_act1,
                                          region = "NW")
- 
 
-```
+######################## Drop additinoal variables I won't be using ########################
+# * emissions data 
 
-Drop other variables I won't be using in this analysis
-* emissions data 
-
-```{r}
 cov_mm <- cov_preprocessed$covars.mon %>%
   # drop AP predictions (these are based on other covariate models)
   select(-contains("em_"),  -contains("no2_")) 
@@ -183,10 +232,10 @@ cov_mm <- cbind(locations_mm, cov_mm)
 
 #View(cov_mm)
 
-cov_act_fake <-cov_preprocessed$covars.sub %>%
+cov_act <- cov_preprocessed$covars.sub %>%
   select(-contains("em_"),  -contains("no2_"))
 
-#cov_act <- cbind(locations_act, cov_act)
+cov_act <- cbind(locations_act, cov_act)
 
 ```
 
@@ -281,13 +330,47 @@ cov_descrip %>% kable(caption = paste0("Geocovariates and buffers to be used in 
 ```
 
 
+# Sensitivity Analyses
+
+Change TRAP indicator variable [? & UFP] transformations (log-transformed to navtive)
+
+```{r}
+cov_preprocessed_native <- covariate.preprocess(covars.mon = cov_mm1, 
+                                         covars.sub = cov_act1, 
+                                         region = "NW", 
+                                         remove_nonlog_dist = FALSE) 
+
+cov_mm_native <- cov_preprocessed_native$covars.mon %>%
+  # drop AP predictions (these are based on other covariate models)
+  select(-contains("em_"),  -contains("no2_"), 
+         #only keep distances in native scale
+         -contains("log_")) 
+
+final_cov_native <- names(cov_mm_native)
+
+# add site info back in 
+cov_mm_native <- cbind(locations_mm, cov_mm_native)
+
+cov_act_native <-cov_preprocessed$covars.sub %>%
+  select(-contains("em_"),  -contains("no2_"), -contains("log_"))
+
+cov_act_native <- cbind(locations_act, cov_act_native)
+
+```
+
 Save datasets
 
 ```{r}
-# # geocovariates data
-# saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda"))
-# saveRDS(cov_act_fake,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_fake_preprocessed.rda"))
+
+# # proximity covariates in log scale
+# saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda"))
+# saveRDS(cov_act,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_log_scale_preprocessed.rda"))
+
+# # proximity covariates in native scale
+# saveRDS(cov_mm_native,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_native_scale_preprocessed.rda"))
+# saveRDS(cov_act_native,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_native_scale_preprocessed.rda"))
 
 ```
+
 
  

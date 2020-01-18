@@ -1,0 +1,93 @@
+---
+title: "Shapefiles"
+author: "Magali Blanco"
+date: "1/17/2020"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      fig.height = 8, fig.width = 8
+                      )  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(knitr, kableExtra,
+               # GIS
+               sf,rgdal,
+               #ggpubr, 
+               tidyverse  
+               )    
+ 
+
+```
+ 
+Monitoring area
+
+```{r}
+# get shapefile
+#rgdal::readOGR(file.path("..", "Mobile Monitoring", "GIS", "driving regions selected", "driving_regions_selected.shp")) 
+
+monitoring_area <- rgdal::readOGR(file.path("..",  "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "Driving Regions", "monitoring_area.shp")) 
+  
+# make df
+monitoring_area_df <- fortify(monitoring_area)
+
+# ################## --> need ?? ##################
+# # get map projection string 
+# region_proj <- proj4string(region)
+# 
+# # convert to spatialPointsDataFrame
+# region_spdf <- region_df
+# coordinates(region_spdf) <- ~ long + lat
+# proj4string(region_spdf) <- CRS(region_proj)
+# ######################################################
+
+
+```
+ 
+Study area (buffered monitoring area)
+
+```{r}
+study_area <- rgdal::readOGR(file.path("..",  "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "Driving Regions", "monitoring_area_0.04deg_buffer.shp")) 
+  
+# make df
+study_area_df <- fortify(study_area)
+
+```
+
+? Routes
+```{r}
+#GIS/routes 190910/All routes.shp 
+routes <- rgdal::readOGR(file.path("..",  "Mobile Monitoring", "GIS", "routes 190910", "All routes.shp")) 
+  
+# make df
+routes_df <- fortify(routes)
+
+
+```
+
+ 
+ 
+Save datasets.
+
+```{r}
+
+# saveRDS(monitoring_area_df, file = file.path("Data", "GIS", "monitoring_area_df.rda"))
+# saveRDS(study_area_df, file = file.path("Data", "GIS", "study_area_df.rda"))
+# saveRDS(routes_df, file = file.path("Data", "GIS", "routes_df.rda"))
+
+```
+
+ 

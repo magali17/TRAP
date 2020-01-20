@@ -36,7 +36,7 @@ editor_options:
 
 
 
-
+### --> ? EROR: ptrak_means have lot of NAs
 
 ### --> ? drop AQS sites that are not representative of ACT cohort (will be using site_id for annual avg prediction model)? so plots and tables will be representative of data we are actually using to estimate annual averages
 
@@ -86,16 +86,18 @@ cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_
   select(-contains("pop_"), -contains("pop90_"))
 
 site_locations <- cov_mm %>% 
-  select(
-    site_id, 
-    contains("lambert"), latitude, longitude)
+  select(site_id, contains("lambert"), latitude, longitude)
 
 cov_mm <- cov_mm %>% select(-contains("lambert"), -latitude, -longitude)
 cov_names <- names(cov_mm)[!names(cov_mm) %in% c("site_id")]
 
 ufp0 <- mm.wide %>% 
   select(date:site_no,
-         ptrak = ptrak_pt_cm3_median) %>%
+         #ptrak = ptrak_pt_cm3_median
+         ptrak_pt_cm3_median,
+         # for sensitivity analyses
+         ptrak_pt_cm3_mean
+         ) %>%
   mutate(
     site_id = factor(site_id),  
     # New Hour Binning
@@ -110,20 +112,37 @@ ufp0 <- mm.wide %>%
     #selected this break b/c: 1) UFP values rise during warmer daytime hours; 2) mixing ht is higher during day; 3) "daytime" = typical business as usual mm campaigns
     tod2 = factor(ifelse(hour %in% seq(9, 17), "9_17", "18_08"), 
                          levels= c("9_17", "18_08")),
-    stop_type = ifelse(grepl("MC", site_id), "AQS", "ACT")
-    ) %>%
-  #remove NAs
-  drop_na(ptrak) %>%
+    stop_type = ifelse(grepl("MC", site_id), "AQS", "ACT")) %>%
   left_join(cov_mm, by = "site_id") %>%
   #drop winter for now
-  filter(season != "winter")
-  
-#trim data (5% top/bottom)
+  filter(season != "winter") # %>%
+
+# SENSITIVITY ANALYSIS: means (vs median) stop readings
+ufp0_mean <- ufp0 %>%
+  select(-contains("median")) %>%
+  drop_na(contains("ptrak")) %>%
+  rename(ptrak = ptrak_pt_cm3_mean)
+
+# dataset used for other analyses & sensitivity analyses datasets
+ufp0 <- ufp0 %>%
+  select(-contains("mean")) %>%
+  drop_na(contains("ptrak")) %>%
+  rename(ptrak = ptrak_pt_cm3_median)
+   
 ufp <- ufp0 %>%
+  #trim data (5% top/bottom)
   group_by(site_id) %>%
   filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
          ptrak >= quantile(ptrak, (trim_quantile), na.rm = T)) %>%
   ungroup()  
+
+# SENSITIVITY ANALYSIS: means (vs median) stop readings
+## trim data (5% top/bottom)
+ufp_mean <- ufp0_mean %>%
+  group_by(site_id) %>%
+  filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
+         ptrak >= quantile(ptrak, (trim_quantile), na.rm = T)) %>%
+  ungroup()
 
 # SENSITIVITY ANALYSIS: Trim 10% top/bottom of data
 ufp_trim10 <- ufp0 %>%
@@ -1679,33 +1698,29 @@ aqs_ufp %>%
 
 ```
 
-### --> 
-
 # Sensitivity Analyses
 
 ## covariates used
 
 Use UFP and proximity covariaets in the native scale.
 
-####  --> ? or take annual_ufp_and_cov & exponentiate if contains("log_"), rename proximity vars? 
+Note that distances < 10 m are converted to 10 m b/c we do not believe any sites are < 10 m from the center of a roadway.
 
 ```{r}
-# # use native scale transformations
-# 
+annual_ufp_and_cov_native_scale <- annual_ufp_and_cov %>%
+  mutate_at(vars(contains("log_")), ~exp(.)) %>%
+  rename_at(vars(contains("log_")), ~substr(., 5, nchar(.)) )
+
+## repeate for ACT covariates?
 # cov_mm_native_scale <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_native_scale_preprocessed.rda")) %>% 
 #   select(-contains("pop_"), -contains("pop90_"),
 #   -contains("lambert"), -latitude, -longitude) 
 # 
 # # link to selectd UFP
-# 
-# 
 # annual_ufp_and_cov_native_scale <- left_join(site_locations, preds.s.tow.tod5) %>%
 #   rename(ufp = contains("yhat")) %>%
 #   left_join(cov_mm_native_scale)  %>%
 #   drop_na()
-
-
-
 
 ```
 
@@ -1714,33 +1729,7 @@ Use UFP and proximity covariaets in the native scale.
 [?? do?] 
 
 ```{r}
-ufp0_mean <- mm.wide %>% 
-  select(date:site_no,
-         ptrak = ptrak_pt_cm3_mean) %>%
-  mutate(
-    site_id = factor(site_id),  
-    # New Hour Binning
-    tod5 = factor(ifelse(hour %in% seq(3,8), "3_8",
-                                       ifelse(hour %in% seq(9,11), "9_11", 
-                                              ifelse(hour %in% seq(12,15), "12_15",
-                                                     ifelse(hour %in% seq(16,20), "16_20", "21_2")))),
-                         levels= c("3_8", "9_11", "12_15", "16_20", "21_2")),
-    stop_type = ifelse(grepl("MC", site_id), "AQS", "ACT")) %>%
-  #remove NAs
-  drop_na(ptrak) %>%
-  left_join(cov_mm, by = "site_id") %>%
-  #drop winter for now
-  filter(season != "winter")
-  
-#trim data (5% top/bottom)
-ufp_mean <- ufp0_mean %>%
-  group_by(site_id) %>%
-  filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
-         ptrak >= quantile(ptrak, (trim_quantile), na.rm = T)) %>%
-  ungroup()  
-
 stop_mean_results <- estimate_annual_avg(dt = ufp_mean)
-summary(stop_mean_results$annual_estimates)
 
 ```
 
@@ -1753,10 +1742,10 @@ trim10_results <- estimate_annual_avg(dt = ufp_trim10)
 
 ```
 
-Windosrize extreme stop readings 
+Windosrize extreme stop readings (top/bottom 5%) 
 
 ```{r}
-ufp_windsorized_results <- estimate_annual_avg(dt = ufp_windsorized)
+windsorized_results <- estimate_annual_avg(dt = ufp_windsorized)
 
 ```
 
@@ -1764,7 +1753,7 @@ Use different annual averages
 
 ```{r}
 # estimate unweighted annual averages
-ufp_uw_results <- estimate_annual_avg(dt = ufp_windsorized, 
+uw_results <- estimate_annual_avg(dt = ufp, 
                                       lm_x_names = "site_id")
 
 ```
@@ -1773,9 +1762,28 @@ save datasets.
 
 ```{r}
 # # data for UK
+# # primary analysis
 # saveRDS(annual_ufp_and_cov, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))
 # 
-# data for GIS
+# # native scale covariates (and UFP)
+# saveRDS(annual_ufp_and_cov_native_scale, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov_native_scale.rda"))
+# 
+# # using stop means
+# saveRDS(stop_mean_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_stop_means.rda"))
+# 
+# # trim 10% top/bottom stop observations
+# saveRDS(trim10_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_trim10.rda"))
+# 
+# # Windosrize extremes
+# saveRDS(windsorized_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_windsorized.rda"))
+# 
+# # different regression to estimate annual average
+# saveRDS(uw_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_uw_means.rda"))
+
+```
+
+```{r}
+# #data for GIS
 # annual_ufp_and_cov %>%
 #   select(site_id, latitude, longitude, ufp, lasso.results$term) %>%
 # write.csv(., file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_some_cov.csv"),

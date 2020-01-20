@@ -747,6 +747,350 @@ estimate_annual_avg <- function(dt,
 }
 
 #################################################################################################################
-#################################################################################################################
+################################################# UK ########################################################
+
+#1. returns CV RMSE and R2 for a series of PLS components and maximum variogram plotting distances. "dt2" includes y outcome (UFP) and covariates (no lat/long - this is included in "site_locations.").
+pls_uk_cv_eval <- function(dt2 = annual_train_test,
+                           max_pls_comp = 3,
+                           dist_fract = c(0.05, seq(0.1, 0.5, by=0.2)),
+                           # to be passed to pls_uk_cv_predictions()
+                           y_name.. = "log_ufp",
+                           cov_names.. = cov_names,
+                           #CV folds
+                           k. = 10,
+                           site_locations.. = site_locations
+                           ) {
+  
+  #df to save CV model eval
+  cv.eval <- data.frame(
+    expand.grid(pls_comp = c(1:max_pls_comp),
+                dist_fract = dist_fract),
+    RMSE = NA,
+    R2 = NA)
+  
+  ################## CV loops ##################################
+  # estimate CV RMSE and r2 for diff number of PLS components
+  for(i in seq_len(max_pls_comp)) {
+    #i=1
+
+    for(j in dist_fract) {
+      #j = 0.05
+      #10FCV for each PLS-distance fraction combination
+      cv_prediction <- pls_uk_cv_predictions(dt = dt2, 
+                                             dist_fract. = j,
+                                             use_n_scores. = i, 
+                                             
+                                             y_name = y_name.., 
+                                             cov_names. = cov_names.., 
+                                             k = k., 
+                                             site_locations. = site_locations..
+                                             )
+      
+      # ? calculate performance statistics on native scale (?? what we care about?)
+      cv.eval$RMSE[cv.eval$pls_comp== i & cv.eval$dist_fract==j] <- rmse(obs = exp(dt2$log_ufp), 
+                                                                         pred = exp(cv_prediction))
+      cv.eval$R2[cv.eval$pls_comp== i & cv.eval$dist_fract==j] <-  r2_mse_based(obs = exp(dt2$log_ufp), 
+                                                                                pred = exp(cv_prediction))
+    }
+  }
+  
+  ######################### select CV parameters #########################
+  cv_rmse <- min(cv.eval$RMSE)  
+  rmse_inx <- cv.eval$RMSE == cv_rmse
+    
+  cv_r2 <- cv.eval$R2[rmse_inx] 
+  cv_comp <- cv.eval$pls_comp[rmse_inx]
+  cv_dist_fract <- cv.eval$dist_fract[rmse_inx]
+  
+  #cv_comp_names <- paste0("Comp", c(1:cv_comp))
+  
+  # #trends
+  # cv_cov_trend <-  as.formula(paste0("~ ", paste0(cv_comp_names, collapse = " + " )))
+  
+  cv_table <- data.frame(PLS_Components = cv_comp,
+                         Variogram_Distance_Fraction = cv_dist_fract,
+                         RMSE = cv_rmse,
+                         R2 = cv_r2
+                         )
+  
+  eval_results <- list(cv.eval = cv.eval,
+                       cv_table = cv_table
+                       )
+  
+  return(eval_results) 
+}
+
+
+# [fn used in pls_uk_cv_eval()]
+# returns CV predictions for a selected number of PLS components and maximum variogram plotting distance. "dt" includes y outcome (UFP) and covariates (no lat/long - this is included in "site_locations.").    
+pls_uk_cv_predictions <- function(dt = annual_train_test,
+                                  y_name = "log_ufp",
+                                  cov_names. = cov_names,
+                                  #CV folds
+                                  k = 10,
+                                  # max PLS components to evaluate
+                                  use_n_scores. = 3, 
+                                  # variogram maximum distance fraction to model
+                                  dist_fract. = 0.1, #dist_fract, 
+                                  #dist_fract_index = 1,
+                                  # lat/long for UK
+                                  site_locations. = site_locations
+) {  
+  dt <- dt %>% rename(y_name = y_name)
+  
+  score_n_names <- paste0("Comp", 1:use_n_scores.)
+  
+  # create folds for test/train sets
+  dt <- dt %>%
+    select(site_id,
+           y_name,
+           cov_names.) %>%
+    drop_na() %>%
+    # ? only use stop sites to build the model? for comparison vs primary analysis
+    filter(grepl("MS", site_id)) %>%
+    #create folds for test/train set
+    mutate(set = sample(c(1:k), size = nrow(.), replace = T),
+           #cv_prediction = NA
+    )
+  
+  # vector to save CV predictions
+  cv_prediction <- numeric(nrow(dt))
+  
+  for(f in seq_len(k)) {
+    #f=1
+    train_grp <- dt$set != f
+    
+    dt_train <- dt %>% filter(train_grp)  
+    
+    dt_test <- dt %>% filter(!train_grp)   
+    
+    #fit PLS to training data
+    pls_train <- plsr(y_name ~.,
+                      data=dt_train[,c("y_name", cov_names.)], 
+                      ncomp = use_n_scores.,
+                      scale=T)
+    
+    # extract scores for UK
+    scores_train <- scores(pls_train)[,c(1:use_n_scores.)] %>% 
+      as.data.frame()
+    scores_test <- predict(object = pls_train,
+                           newdata = dt_test,
+                           ncomp = 1:use_n_scores.,
+                           type = "score") %>%
+      as.data.frame()
+    
+    # take out spaces in names
+    names(scores_train) <- score_n_names
+    names(scores_test) <- score_n_names
+    
+    # dataset w/ UFP measurements, geocovariates, location
+    pls_df_train <- cbind(
+      dt_train[c("site_id", "y_name")],
+      scores_train) %>%
+      left_join(site_locations., by = "site_id") 
+    
+    pls_df_test <- cbind(
+      dt_test[c("site_id", "y_name")],
+      scores_test) %>%
+      left_join(site_locations.,by = "site_id")
+    
+    ################################ UK ################################
+    geo_train <- as.geodata(pls_df_train, 
+                            coords.col = c("lambert_x", "lambert_y"), 
+                            data.col = "y_name", 
+                            covar.col = score_n_names)
+    geo_test <- as.geodata(pls_df_test, 
+                           coords.col = c("lambert_x", "lambert_y"), 
+                           data.col = "y_name", 
+                           covar.col = score_n_names)
+    
+    ##trend
+    cov_trend <-  as.formula(paste0("~ ", paste0(score_n_names,  collapse = " + " )))
+    
+    max.dist <- summary(geo_train)$distances.summary[["max"]]
+    
+    max.plot.dist <- max.dist*dist_fract. #[dist_fract_index] 
+    
+    ############################ model residuals ###################################### 
+    ##Empirical Variogram
+    brk_pt <- 1000
+    by1_pt <- 300
+    by2_pt <- 1000
+    
+    variog_train <- variog(geo_train,
+                           uvec=c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
+                           #UK
+                           trend = cov_trend, 
+                           messages = F)
+    
+    #use geoR try to estimate intitial range & sill values. using WLS and an exponential fit
+    wls_ests_train <- variofit(variog_train, cov.model = "exp", 
+                               messages = F)
+    
+    resid_model_train <- variofit(vario = variog_train, 
+                                  ini = wls_ests_train, 
+                                  cov.model = "exp",
+                                  #weights = "equal", #ols
+                                  weights = "npairs",#wls
+                                  messages = F) 
+    
+    #trend
+    train_trend <- trend.spatial(trend = cov_trend, geo_train)
+    test_trend <- trend.spatial(trend = cov_trend, geo_test)
+    
+    ############################# Predict #############################
+    kc_cv <- krige.conv(coords = geo_train$coords,
+                        data = geo_train$data,
+                        locations = geo_test$coords,
+                        krige = krige.control(type = "ok",
+                                              obj.model = resid_model_train, 
+                                              trend.d = train_trend,
+                                              trend.l = test_trend))
+    
+    #save CV predictions
+    cv_prediction[!train_grp] <- kc_cv$predict
+  }
+  
+  return(cv_prediction)
+}
+
+
+
+# 2. returns UK predictions for new locations. Fits PLS to a modeling dataset using a selected number of PLS components, variogram distance fraction; creates geodatasets; predicts at new locations using UK. 
+uk_predictions <- function ( 
+  #data used to build PLS model and for kriging
+  dt = annual_train_test,
+  dt_locations = site_locations,
+  #df w/ location & covariate info for new location where predictions should be made
+  cov_loc_new = cov_act,
+  # for PLS model/kriging
+  y_name = "log_ufp",
+  cov_names. = cov_names,
+  pls_comp,# = t$cv_table$PLS_Components,
+  variogram_dist_fract # = t$cv_table$Variogram_Distance_Fraction
+) {
+  
+  dt <- rename(dt, y_name = y_name)
+  
+  # #trends
+  pls_comp_names <- paste0("Comp", 1:pls_comp)
+  
+  ##################################### fit PLS & extract scores #####################################
+  # fit model to all data
+  pls_model <- plsr(y_name ~.,
+                    data=dt[,c("y_name", cov_names.)], 
+                    ncomp = pls_comp,
+                    scale=T
+  )
+  
+  # extract scores for UK
+  scores_dt <- scores(pls_model)[,c(1:pls_comp)] %>%
+    as.data.frame()
+  
+  scores_new <- predict(object = pls_model,
+                        newdata = cov_loc_new,
+                        ncomp = 1:pls_comp,
+                        type = "score") %>%
+    as.data.frame()
+  
+  # take out spaces/dots in names
+  names(scores_dt) <- cv_comp_names
+  names(scores_new) <- cv_comp_names
+  
+  ##################################### create geodatasets & other UK inputs #####################################
+  
+  # add site_id, ufp & lat/long
+  scores_loc_dt <- cbind(dt[c("site_id", "y_name")],
+                         scores_dt) %>%
+    left_join(dt_locations) 
+  
+  scores_loc_new <- cbind(cov_loc_new[c("site_id", "lambert_x", "lambert_y")],
+                          scores_new)
+  
+  # create geodatasets
+  geo_dt <- as.geodata(scores_loc_dt, 
+                       coords.col = c("lambert_x", "lambert_y"), 
+                       data.col = "y_name", 
+                       covar.col = cv_comp_names)
+  
+  geo_new <- as.geodata(scores_loc_new,
+                        coords.col = c("lambert_x", "lambert_y"),
+                        covar.col = cv_comp_names)
+  
+  
+  # trend
+  cv_cov_trend <- as.formula(paste0("~ ", paste0(cv_comp_names, collapse = " + " )))
+  
+  trend_dt <- trend.spatial(trend = cv_cov_trend,
+                            geodata = geo_dt)
+  
+  trend_new <- trend.spatial(trend = cv_cov_trend,
+                             geodata = geo_new)
+  
+  # residual model
+  max.dist <- summary(geo_dt)$distances.summary[["max"]]
+  max.plot.dist <- max.dist*variogram_dist_fract
+  
+  ##Empirical Variogram
+  variog_dt <- variog(geo_dt,
+                      max.dist=max.plot.dist,
+                      #UK
+                      trend = cv_cov_trend)
+  
+  #estimate range & sill values. using WLS and an exponential fit
+  wls_ests <- variofit(vario = variog_dt, cov.model = "exp", messages = F)
+  
+  # ols: equal; wls: npairs
+  resid_model <- variofit(vario = variog_dt, 
+                          ini=wls_ests, 
+                          cov.model = "exp",
+                          #weights="equal") #ols
+                          weights = "npairs", 
+                          messages = F) #wls
+  
+  
+  # partial sill: sigma sq
+  # range: phi, 
+  # nugget: tau sq
+  resid_model.s <- summary(resid_model)
+  
+  ## residual model parameters
+  residual_model_table <- data.frame(
+    method = c("OLS"),
+    Partial_Sill = resid_model.s$estimated.pars[["sigmasq"]],
+    Range_m = resid_model.s$estimated.pars[["phi"]],
+    Nugget = resid_model.s$estimated.pars[["tausq"]]
+  ) #%>% 
+  # kable(caption = "Residual model parameters for final model",  
+  #       col.names = c("Method", "Partial Sill", "Range (m)", "Nugget"),
+  #       digits = 4) %>%
+  # kable_styling()
+  
+  ############################################# predict at participant homes #############################################
+  
+  uk_new <- krige.conv(coords = geo_dt$coords,
+                       data = geo_dt$data,
+                       locations = geo_new$coords,
+                       krige=krige.control(type = "ok",
+                                           obj.model = resid_model,
+                                           trend.d= trend_dt,
+                                           trend.l= trend_new))
+  
+  #save predictions
+  cov_loc_new$uk_pred  <- exp(uk_new$predict)
+  
+  predictions <- cov_loc_new %>% select(
+    site_id, latitude, longitude, contains("lambert"),
+    uk_pred
+    )
+  
+  results <- list(predictions = predictions,
+                  residual_model_table = residual_model_table
+                  )
+  
+  
+  return(results)
+  
+}
 
 

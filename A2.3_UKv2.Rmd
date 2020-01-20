@@ -18,17 +18,23 @@ editor_options:
 
 ```{r}
 # --> to do
-# map predictions (mm & ACT) 
- 
+# map predictions on grid
+# how else should the models be evaluated?
 
 ```
+
+# Notes
+
+
+
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE,
-                      fig.height = 8, fig.width = 8
+                      fig.height = 6, fig.width = 8
                       )  
 
 # Clear workspace of all objects and unload all extra (non-base) packages
@@ -372,8 +378,9 @@ for(i in seq_len(use_n_scores)) {
     annual_train_test$cv_prediction[!train_grp] <- kc_cv$predict
   
   }
-   cv.eval$RMSE[cv.eval$pls_comp== i & cv.eval$dist_fract==dist_fract[j]] <- rmse(obs = annual_train_test$log_ufp, pred = annual_train_test$cv_prediction)
-  cv.eval$R2[cv.eval$pls_comp== i & cv.eval$dist_fract==dist_fract[j]] <-  r2_mse_based(obs = annual_train_test$log_ufp , pred = annual_train_test$cv_prediction) 
+   # ? calculate performance statistics on native scale - what we care about? 
+    cv.eval$RMSE[cv.eval$pls_comp== i & cv.eval$dist_fract==dist_fract[j]] <- rmse(obs = exp(annual_train_test$log_ufp), pred = exp(annual_train_test$cv_prediction))
+   cv.eval$R2[cv.eval$pls_comp== i & cv.eval$dist_fract==dist_fract[j]] <-  r2_mse_based(obs = exp(annual_train_test$log_ufp), pred = exp(annual_train_test$cv_prediction))
     
     }
 
@@ -381,6 +388,7 @@ for(i in seq_len(use_n_scores)) {
 
 ```
 
+Performance statistics calculated for UFP on native scale (exp(log UFP)).
 
 ```{r}
 ######################### select CV parameters #########################
@@ -398,7 +406,7 @@ cv_cov_trend <-  as.formula(paste0("~ ", paste0(cv_comp_names, collapse = " + " 
 
 ######################## Plot CV RMSE & R2 ################################## 
    
-fit_info <- paste0("Min RMSE: ", round(min_rmse, 3),
+fit_info <- paste0("Min RMSE: ", round(min_rmse, 0),
                    "\nR2: ", round(cv_r2, 2),
                    "\nPLS Components: ", cv_comp,
                    "\nFraction of maximum distance plotted in variogram: ", cv_dist_fract
@@ -429,32 +437,6 @@ cv.eval %>%
 
 ```
 
-Map CV UK Predictions
-
-```{r, study area polygon, eval=F}
-
-```
-
-```{r, delete?, eval=F}
-### --> delete? will plot to a grid instead
-
-### --> WRONG: predictions are for last PLS & dist fraction used in CV
-# use CV predictions for now
-df_of_pred <- annual_train_test %>%
-  select(site_id, 
-         pred = cv_prediction) %>% 
-   # get UFP in native scale
-   mutate(pred = exp(pred)) %>%
-   left_join(annual0[c("site_id", "latitude", "longitude")], by = "site_id")
-
-#don't include AQS sites since these weren't used to build the model?
- #pls_df_test_aqs[c("site_id", "pred")]
-
-df_of_pred %>%
-  map_fn(color_by = "pred", 
-         map_title = "CV UK Annual Average UFP Predictions")
-
-```
 
 # Fit final UK model to all stop data    
 * exclude AQS co-location sites
@@ -629,51 +611,6 @@ data.frame(
 
 ```
 
-# Map of interpolated predictions    
-
-### --->: need Puget Sound grid for predictions
-#### ---> Error: df_of_pred not found
-
-```{r, eval=F}
-# Interpolate to a regularly spaced grid and store as a list
-test_grid_interp <- with(df_of_pred, interp(x = longitude, y = latitude, z = pred ))  
-
-# expand grid to dataframe
-test_grid_dens_expand <- with (test_grid_interp, expand.grid(x=x, y=y)) %>%
-  mutate(z = as.vector(test_grid_interp$z),
-         z = ifelse(is.na(z), 0, z)) 
-
-# blank map w/ outline - NEED INTERNET ACCESS
-mymap <- test_grid_dens_expand %>%
-  map_fn(latitude_name = "y", longitude_name = "x", 
-         color_map = F, 
-         include_study_area = TRUE,
-         #default - though not using here
-         color_by = "z", 
-         map_title = "Interpolation of CV UK Annual Average UFP Predictions") 
-
-#map2 <- mymap
-
-# add concentration interpolations
-mymap + 
-  # draw 3D surface 
-  stat_contour(aes(x = x, y = y, 
-                   z = z, 
-                   fill = ..level..), 
-               alpha = 0.05,
-               #need data for fn to work w/ "z"
-               data = test_grid_dens_expand, 
-               geom = "polygon", 
-               bins = 50
-               ) +
-  scale_fill_gradient(name = "UFP (pt/cm3)", 
-                      low = "yellow", high = "red")  +
-    theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) +
-  labs()
- 
-```
-
-
 # Out-of-sample RMSE and R2 for AQS sites 
 
 ### --> ? compare against true observations (not yhat estimates)?
@@ -719,8 +656,8 @@ uk_test_aqs <- krige.conv(coords = geo_train_test$coords,
 pls_df_test_aqs$pred  <- uk_test_aqs$predict
 
 #calculate out-of-sample RMSE and R2
-rmse_test_aqs <- rmse(obs =  pls_df_test_aqs$log_ufp, pred = pls_df_test_aqs$pred)
-r2_test_aqs <- r2_mse_based(obs =  pls_df_test_aqs$log_ufp, pred = pls_df_test_aqs$pred)
+rmse_test_aqs <- rmse(obs =  exp(pls_df_test_aqs$log_ufp), pred = exp(pls_df_test_aqs$pred))
+r2_test_aqs <- r2_mse_based(obs =  exp(pls_df_test_aqs$log_ufp), pred = exp(pls_df_test_aqs$pred))
 
 ```
 
@@ -826,6 +763,32 @@ covs_df <- cbind(covs_df, new_vars)
 
 ```
 
+Tables
+
+```{r, results='asis'}
+# table of overall predicted UFP distribution
+covs_df %>%
+  distribution.table(var.string = "ufp_uk_pred") %>%
+  kable(caption = "Distribution of UFP Predictions for the ACT cohort") %>%
+  kable_styling()
+
+#new_var_names
+ 
+# # delete?  too much info - plots above are clearer?
+# #only works /w results = "asis" chunk setting
+# for (i in seq_along(new_var_names)) {
+#   #i=1
+# covs_df %>%
+#   group_by(get(new_var_names[i])) %>%
+#     distribution.table(var.string = "ufp_uk_pred") %>%
+#     rename_if(grepl("new_var_names", names(.)), ~new_var_names[i]) %>%
+#     kable() %>%
+#     kable_styling() %>%
+#     print()
+# }
+
+```
+
 plots
 
 ```{r}
@@ -853,49 +816,122 @@ cov_act %>%
 
 ```
 
-Tables
 
-```{r, results='asis'}
-# table of overall predicted UFP distribution
-covs_df %>%
-  distribution.table(var.string = "ufp_uk_pred") %>%
-  kable(caption = "Distribution of UFP Predictions") %>%
-  kable_styling()
+# Map of interpolated predictions    
 
-#new_var_names
- 
-# # delete?  too much info - plots above are clearer?
-# #only works /w results = "asis" chunk setting
-# for (i in seq_along(new_var_names)) {
-#   #i=1
-# covs_df %>%
-#   group_by(get(new_var_names[i])) %>%
-#     distribution.table(var.string = "ufp_uk_pred") %>%
-#     rename_if(grepl("new_var_names", names(.)), ~new_var_names[i]) %>%
-#     kable() %>%
-#     kable_styling() %>%
-#     print()
-# }
+### --->: replace ACT w/ Puget Sound grid for predictions
+
+Point map
+
+```{r, delete?, eval=T}
+act_predictions <- cov_act %>%
+  select(site_id, ufp_uk_pred,
+         latitude, longitude)  
+
+# dot map
+act_predictions %>%
+  map_fn(color_by = "ufp_uk_pred", 
+         map_title = "Annual Average UFP Predictions for the ACT Cohort", 
+         include_study_area = T
+         )
+
 
 ```
 
+Interpolation surface 
+
+```{r }
+# Interpolate to a regularly spaced grid and store as a list
+interpolation_grid <- with(act_predictions, interp(x = longitude, y = latitude, z = ufp_uk_pred))  
+
+# expand grid to dataframe
+grid_dens_expand <- with (interpolation_grid, expand.grid(x=x, y=y)) %>%
+  mutate(z = as.vector(interpolation_grid$z),
+         z = ifelse(is.na(z), 0, z)) 
+
+# base map works WORKS
+base_map_pred <- grid_dens_expand %>%
+  #mutate_all(as.numeric) %>%
+  map_base(latitude_name = "y", longitude_name = "x",
+           include_study_area = T,
+           map_title = "Interpolation of Annual Average UFP Predictions") 
+
+base_map_pred +
+  # don't include monitoring/study area of this to work
+  stat_contour(aes(x = x, y = y, 
+                   z = z, 
+                    fill = ..level..,
+                   ), 
+               alpha = 0.05,
+               geom = "polygon", 
+               bins = 50,
+               data = grid_dens_expand
+               ) +
+  scale_fill_gradient(name = "UFP (pt/cm3)",
+                      low = "yellow", high = "red")
+
+
+```
 
 # QC  
 
-### --> 
-
-# for Aim 3: How much does the regression vs kriging contribute to your esimate?
+## for Aim 3: How much does the regression vs kriging contribute to your esimate?    
 Paul Sampson suggestion: decompose the 2019 UK model to see how much of the prediction is generated by regression vs observed interpolations (kriging). If regression is most responsible, less worried about issues w/ smoothing back in time.
 
-*kriging* + error = Yhat – xB 
+UK Yhat = regression_prediction + kriging + error
+
+* the regression prediction (yhat_regression) from UK excludes kriging and model error 
+* the UK prediction (yhat_uk) includes the regression prediction, kriging and model error (final estimate used)
 
 ```{r}
+# save UK betas
+uk_betas <- uk_act$beta.est 
+beta_names <- names(uk_betas)
+beta_no <- length(beta_names)
+
+uk_decompose <- scores_act %>%
+  mutate(
+    uk_prediction = uk_act$predict,
+    regression_prediction = 
+      uk_act$beta.est[["beta0"]] + 
+      uk_act$beta.est[["beta1"]]*Comp1 + 
+      uk_act$beta.est[["beta2"]]*Comp2 +
+      uk_act$beta.est[["beta3"]]*Comp3,
+    # error: structured & unstructured
+    krige_and_error = uk_prediction - regression_prediction,
+    #krige_var = uk_act$krige.var,
+    reg_prediction_normalized =regression_prediction/uk_prediction 
+  )
+  
+uk_decompose %>%
+colo.plot(x.variable = "uk_prediction", x.label = "UK Prediction",
+          y.variable = "regression_prediction", y.label = "Regression Prediction",
+          rmse.digits = 2,
+          coef_digits = 2
+          ) 
+  
+uk_decompose %>%
+  ggplot(aes(x=reg_prediction_normalized)) + 
+  geom_histogram() + 
+  labs(title = "Distribution of regression predictions normalized to UK predictions",
+       subtitle = "(yhat_regression) / (yhat_uk)",
+       x = "Normalized regression prediction"
+      )
+
+uk_decompose %>%
+  distribution.table(var.string = "reg_prediction_normalized", round.int = 2) %>%
+  mutate(Q5 = quantile(uk_decompose$reg_prediction_normalized, probs = 0.05),
+         Q95 = quantile(uk_decompose$reg_prediction_normalized, probs = 0.95)
+         ) %>%
+  kable(caption = "Distribution of regression predictions normalized to UK predictions (yhat_regression/yhat_uk)", 
+        digits = 2) %>%
+  add_footnote("the regression prediction (yhat_regression) from UK excludes kriging and model error ") %>%
+  add_footnote("the UK prediction (yhat_uk) includes the regression prediction, kriging and model error (final estimate used)") %>%
+  kable_styling()
 
 ```
 
-Amanda: "Compare distribution of PLS scores in monitoring vs cohort. See if combination of variables is unusual. Check predicted PLS values are not super large – suggests extrapolation. If have strange points, can look to see where they are on a map (e.g., a point is in middle of lake; or strange geographic area)."
-
-### --> are scores diff b/c this is for entire cohort (outside of study area?)
+## Compare distribution of PLS scores in monitoring vs cohort. See if combination of variables is unusual. Check predicted PLS values are not super large – suggests extrapolation.  
 
 ```{r}
 scores_train_test$site_type <- "mobile monitoring"
@@ -909,7 +945,8 @@ scores_mm_act %>%
   ggplot(aes(x=Score, fill = site_type)) + 
   geom_density(alpha = 0.4) + 
   facet_wrap(~Component, labeller = "label_both") + 
-  labs(fill = "Site Type"
+  labs(fill = "Site Type",
+       title = "Distribution of PLS component scores for the ACT cohort and mobile monitoring stops"
        ) + 
   theme(legend.position = "bottom")
   
@@ -931,6 +968,9 @@ scores_mm_act %>%
 Change TRAP indicator variable [? & UFP] transformations (native to log-transformed or vise versa)
 
 ```{r}
+
+
+
 
 
 ```
@@ -988,4 +1028,17 @@ Differeent number of PLS components
 
 ```
 
+# All results
+
+Table of all results
+e.g. model, CV R2, RMSE
+```{r}
+
+```
+
+#### --> add maps to show prediction differences; have a "difference" in predictions map?
+
+```{r}
+
+```
 

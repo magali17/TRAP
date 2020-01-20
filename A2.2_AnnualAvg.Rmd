@@ -31,6 +31,13 @@ editor_options:
 
 ```
 
+# Notes
+
+
+
+
+
+
 ### --> ? drop AQS sites that are not representative of ACT cohort (will be using site_id for annual avg prediction model)? so plots and tables will be representative of data we are actually using to estimate annual averages
 
 ```{r setup, include=FALSE}
@@ -86,7 +93,6 @@ site_locations <- cov_mm %>%
 cov_mm <- cov_mm %>% select(-contains("lambert"), -latitude, -longitude)
 cov_names <- names(cov_mm)[!names(cov_mm) %in% c("site_id")]
 
-
 ufp0 <- mm.wide %>% 
   select(date:site_no,
          ptrak = ptrak_pt_cm3_median) %>%
@@ -112,12 +118,28 @@ ufp0 <- mm.wide %>%
   #drop winter for now
   filter(season != "winter")
   
-#trim data 
+#trim data (5% top/bottom)
 ufp <- ufp0 %>%
   group_by(site_id) %>%
   filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
          ptrak >= quantile(ptrak, (trim_quantile), na.rm = T)) %>%
   ungroup()  
+
+# SENSITIVITY ANALYSIS: Trim 10% top/bottom of data
+ufp_trim10 <- ufp0 %>%
+  group_by(site_id) %>%
+  filter(ptrak <= quantile(ptrak, (1-0.1), na.rm = T),
+         ptrak >= quantile(ptrak, (0.1), na.rm = T)) %>%
+  ungroup()  
+
+# SENSITIVITY ANALYSIS: windosrized top/bottom 5% of data
+ufp_windsorized <- ufp %>%
+  group_by(site_id) %>%
+  mutate(
+    ufp_wind = ifelse(ptrak > quantile(ptrak, (1-trim_quantile), na.rm = T), quantile(ptrak, (1-trim_quantile), na.rm = T),
+                      ifelse(ptrak < quantile(ptrak, (trim_quantile), na.rm = T), quantile(ptrak, (trim_quantile), na.rm = T),
+                             ptrak)))
+
 
 #no. months sampled
 months.sampled <- month.abb[3:12]
@@ -1493,7 +1515,6 @@ myquant <- 0.98
 ```
 
 
-
 # Final annual average UFP concentrations
 
 Select an estimate to use.
@@ -1662,11 +1683,64 @@ aqs_ufp %>%
 
 # Sensitivity Analyses
 
-## Averaging of 1 sec data at each stop
+## covariates used
 
-??? Use averages
+Use UFP and proximity covariaets in the native scale.
+
+####  --> ? or take annual_ufp_and_cov & exponentiate if contains("log_"), rename proximity vars? 
 
 ```{r}
+# # use native scale transformations
+# 
+# cov_mm_native_scale <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_native_scale_preprocessed.rda")) %>% 
+#   select(-contains("pop_"), -contains("pop90_"),
+#   -contains("lambert"), -latitude, -longitude) 
+# 
+# # link to selectd UFP
+# 
+# 
+# annual_ufp_and_cov_native_scale <- left_join(site_locations, preds.s.tow.tod5) %>%
+#   rename(ufp = contains("yhat")) %>%
+#   left_join(cov_mm_native_scale)  %>%
+#   drop_na()
+
+
+
+
+```
+
+## Averaging of 1 sec data at each stop (vs median)
+
+[?? do?] 
+
+```{r}
+ufp0_mean <- mm.wide %>% 
+  select(date:site_no,
+         ptrak = ptrak_pt_cm3_mean) %>%
+  mutate(
+    site_id = factor(site_id),  
+    # New Hour Binning
+    tod5 = factor(ifelse(hour %in% seq(3,8), "3_8",
+                                       ifelse(hour %in% seq(9,11), "9_11", 
+                                              ifelse(hour %in% seq(12,15), "12_15",
+                                                     ifelse(hour %in% seq(16,20), "16_20", "21_2")))),
+                         levels= c("3_8", "9_11", "12_15", "16_20", "21_2")),
+    stop_type = ifelse(grepl("MC", site_id), "AQS", "ACT")) %>%
+  #remove NAs
+  drop_na(ptrak) %>%
+  left_join(cov_mm, by = "site_id") %>%
+  #drop winter for now
+  filter(season != "winter")
+  
+#trim data (5% top/bottom)
+ufp_mean <- ufp0_mean %>%
+  group_by(site_id) %>%
+  filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
+         ptrak >= quantile(ptrak, (trim_quantile), na.rm = T)) %>%
+  ungroup()  
+
+stop_mean_results <- estimate_annual_avg(dt = ufp_mean)
+summary(stop_mean_results$annual_estimates)
 
 ```
 
@@ -1675,27 +1749,23 @@ aqs_ufp %>%
 Trim 10% observations
 
 ```{r}
+trim10_results <- estimate_annual_avg(dt = ufp_trim10)
 
 ```
 
 Windosrize extreme stop readings 
 
 ```{r}
-# #windosrized alternative 
-# ufp <- ufp %>%
-#   group_by(site_id) %>%
-#   mutate(
-#     ufp_wind = ifelse(ptrak_ct_cm3 > quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), 
-#                       ifelse(ptrak_ct_cm3 < quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), 
-#                              ptrak_ct_cm3)))
-
+ufp_windsorized_results <- estimate_annual_avg(dt = ufp_windsorized)
 
 ```
 
 Use different annual averages
-- UW ?
 
 ```{r}
+# estimate unweighted annual averages
+ufp_uw_results <- estimate_annual_avg(dt = ufp_windsorized, 
+                                      lm_x_names = "site_id")
 
 ```
 

@@ -24,6 +24,11 @@ params:
 
 ```
 
+# Notes
+
+
+
+
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -42,6 +47,7 @@ pacman::p_load(kable, kableExtra,
 
 set.seed(1)
 
+source("0.Global_Fns.R")
 source("A2.0.1_Var&Fns.R")
 source("A2.0.3_functions_covariate_preprocessing_regional.R")
 
@@ -50,7 +56,7 @@ tables_path <- file.path(tables_path0, "0. Geocovariates")
 
 cov_mm0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
 cov_act0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "cohort_covars_20200107.csv")) 
-act_in_study0 <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 2. 2019 UFP", "GIS", "ACT", "ACT_selected", "cohort_in_monitoring_area_0.04deg_buffer.csv")) %>%
+act_in_study0 <- read.csv(file.path("..", "GIS", "Shapefiles", "ACT", "ACT_selected", "cohort_in_monitoring_area_0.04deg_buffer.csv")) %>%
   select(location_id = location_i,
          site_location = site_type)  %>%
   # label locations within monitoring vs within a buffered area around the monitoring location
@@ -124,7 +130,7 @@ cov_mm0 %>%
          color_by = "region_nw",
          include_monitoring_area = T, #monitoring_area_alpha = 1,
          include_study_area = T, #study_area_alpha = 0.4,
-         map_title = "Mobile monitoring and study areas"
+         map_title = "Monitoring and study areas"
          )
 
 ```
@@ -361,11 +367,12 @@ cov_act_native <- cbind(locations_act, cov_act_native)
 Save datasets
 
 ```{r}
+#dim (cov_act)
 
 # # proximity covariates in log scale
 # saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda"))
 # saveRDS(cov_act,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_log_scale_preprocessed.rda"))
-
+# 
 # # proximity covariates in native scale
 # saveRDS(cov_mm_native,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_native_scale_preprocessed.rda"))
 # saveRDS(cov_act_native,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_native_scale_preprocessed.rda"))

@@ -9,6 +9,7 @@ editor_options:
 
 ```{r}
 # ---> TO DO:
+# --> ask Tim/Edmund if missing any imp tables/figures
 # estimate BC from 5 channel readings
 # select images/tables to export
 
@@ -19,6 +20,14 @@ editor_options:
 #BC = 880 nm (IR); 625 nm (Red); 528 nm (Green); 470 nm (Blue); and 375 nm (UV);  
 
 ```
+
+# Notes
+
+
+
+
+
+
 
 #### --> update file later: there are 310 site_ids and in mm_full. There should be 309. We stopped sampling MS0398 and switched to MS0601 which is fairly close
 
@@ -677,7 +686,11 @@ empiric fraction of overall mean: `r empir_frac_mean`
 empiric fraction of overall median: `r empir_frac_median`
 
 
-Save datasets for quicker access later. 
+ 
+
+
+
+Save datasets.
 
 ````{r}
 # saveRDS(mm, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_2019-12-22.rda"))

@@ -1161,7 +1161,7 @@ ANOVA - what is responsible for the variability in exposure estimates?
 dem.w %>%
 filter(enrollment_yr == 1) %>%  
   as.data.frame() %>%
-VCA::anovaVCA(no2_10yr ~ exposure_year + birth_cohort + degree + race + income_cat, Data = .)  
+ VCA::anovaVCA(no2_10yr ~ exposure_year + birth_cohort + degree + race + income_cat, Data = .)  
 
 # anova(no2.exposure) %>% kable() %>%
 #   kable_styling()
@@ -1348,6 +1348,8 @@ dem_10yr <- models.fn(mydata = dem.w,
                 surv.event = "dementia_now", 
                 no2.var = "no2_10yr",
                 pm25.var = "pm25_10yr")
+
+#dem_10yr$raw_model_output[7]
 
 dem_10yr_hrs <- dem_10yr$hrs %>%
   mutate(

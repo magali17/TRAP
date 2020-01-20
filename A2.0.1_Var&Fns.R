@@ -137,68 +137,6 @@ split_cov_name <- function(dt, cov) {
   return(dt)
 }
 
-################################# correlation plot Wide format ####################################
-
-colo.plot <- function(data.wide=mm.wide, 
-                      x.variable, x.label = "",
-                      y.variable, y.label = "",
-                      col.by = "",
-                      mytitle = "", title_width = 60,
-                      mysubtitle = NULL,
-                      mycaption = NULL,
-                      coef_digits = 0, 
-                      r2.digits = 2, 
-                      rmse.digits = 0) {
-  # x.variable = "mean_s_tow2" 
-  # y.variable = "LUR_mean_s_tow2"
-  # x.label = ""
-  # y.label = ""
-  # col.by = ""
-  # mytitle = ""
-  # coef_digits = 0
-  # r2.digits = 2
-  # rmse.digits = 0
-  
-  #if label is left blank, use variable name
-  if(x.label == ""){x.label <- x.variable}
-  if(y.label == ""){y.label <- y.variable}
-  
-  data.wide <- data.wide %>% drop_na(x.variable, y.variable)  
-           
-           lm1 <- lm(formula(paste(y.variable, "~", x.variable)), data = data.wide)
-           
-           #rmse
-           rmse <- rmse(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>% 
-             round(digits = rmse.digits)
-           
-           r2 <- r2_mse_based(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>%
-             round(r2.digits)
-           
-           fit.info <- paste0("y = ", round(coef(lm1)[1], coef_digits), " + ", round(coef(lm1)[2], coef_digits), 
-                              "x \nR2 = ", r2, #round(summary(lm1)$r.squared, r2.digits), 
-                              "\nRMSE = ", rmse,
-                              "\nno. pairs = ", nrow(data.wide))
-           #compare  
-           p <- data.wide %>%
-             ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
-             geom_point(alpha=0.3, aes(col = data.wide[[col.by]]
-                                       )) + 
-             geom_abline(intercept = 0, slope = 1) +
-             #geom_smooth(aes(fill="loess")) + 
-             geom_smooth(method = "lm", aes(fill="LS")) + 
-             labs(title = wrapper(mytitle, width = title_width),
-                  subtitle = mysubtitle,
-                  caption = mycaption,
-                  x = x.label,
-                  y = y.label,
-                  col = col.by,
-                  fill = "fit"
-                  ) +
-             annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1)  
-           
-           return(p)
-           
-}
 
 #################################### temporal variables ####################################
 
@@ -366,7 +304,8 @@ save.pred.fn <- function(dt,
                          x_names) {
   
   lm1 <- lm(formula(paste0(y_name, "~", 
-                           paste(x_names, sep = " + ")
+                           # --> used to say "sep ="  ?
+                           paste(x_names, collapse = " + ")
                            )), data = dt)
   
   #needed when there are NAs in a df & want to save predictions in correct index
@@ -405,6 +344,126 @@ save.pred.fn <- function(dt,
 
 pacman::p_load(ggmap)
 
+# returns a base map (2D)
+map_base <- function(dt,
+                   latitude_name = "latitude", longitude_name = "longitude",
+                   map_title = NULL,
+                   include_monitoring_area = FALSE, monitoring_area_alpha = 0.25,
+                   include_study_area = FALSE, study_area_alpha = 0.1,
+                   maptype. = "terrain", #, "toner", "toner-background", "watercolor"
+                   zoom_lvl = 11
+) {
+  
+  dt <- rename(dt, 
+               lat = latitude_name,
+               long = longitude_name) 
+  
+  # dimensions of data 
+  height <- max(dt$lat) - min(dt$lat)
+  width <- max(dt$long) - min(dt$long)
+  
+  # make map boundaries little larger than data dimensions
+  bbox <- c(
+    min(dt$long) - 0.5*width,
+    min(dt$lat) - 0.1*height,
+    max(dt$long) + 0.5*width,
+    max(dt$lat) + 0.1*height
+  )
+  
+  names(bbox) <- c("left", "bottom", "right", "top")
+  
+  # Make a map base layer of "Stamen" tiles
+  map <- suppressMessages(get_stamenmap(bbox = bbox, zoom = zoom_lvl,
+                                        maptype = maptype.))
+  
+  # Make basic map image from the tiles
+  mymap <- ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void()
+  
+  # add study area
+  if(include_study_area) {
+    study_area <- readRDS(file.path("Data", "GIS", "study_area_df.rda"))
+    
+    mymap <- mymap + 
+      geom_polygon(data = study_area, 
+                   aes(x = long, y = lat, group = group, 
+                       #col = "Study" #used to be fill = , but has issues w/ stat_contour() which also uses fill
+                   ),
+                   #fill = "plum2",
+                   #col = "plum2",
+                   alpha = study_area_alpha,
+                   size = 0.5 )
+  }
+  # add monitoring area
+  if(include_monitoring_area) {
+    monitoring_area <- readRDS(file.path("Data", "GIS", "monitoring_area_df.rda"))
+    
+    mymap <- mymap + 
+      geom_polygon(data = monitoring_area, 
+                   aes(x = long, y = lat, group = group,
+                       #col = "Monitoring"
+                   ),
+                   #color = 'peru',  
+                   #fill = 'peru', 
+                   alpha = monitoring_area_alpha,
+                   size = 0.3)
+  }
+  
+  mymap <- mymap +
+    labs(title = map_title,
+         col = "Area"
+         ) + 
+    theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) 
+  
+  return(mymap)
+  
+}
+
+#################
+
+# dt = grid_dens_expand
+# color_by = "z"
+# latitude_name. = "y"
+# longitude_name. = "x"
+# map_title = NULL
+
+# colors the base map by a variable (3D)
+map_color <- function(dt, 
+                   color_by = "ufp", color_units = "pt/cm3",
+                   latitude_name = "latitude", longitude_name = "longitude",
+                   map_title = NULL
+                   ) {
+  
+  #label by variable being mapped if no title is provided
+  if(is.null(map_title)) {map_title <- color_by}
+  
+  dt <- rename(dt,
+               y = color_by,
+               lat = latitude_name,
+               long = longitude_name) 
+  
+  mymap <- dt %>%
+    map_base(latitude_name = "lat", longitude_name = "long") +
+    # color map
+    geom_point(data = dt,
+                 aes(x = long, y = lat), col= "black",
+                 size = 2.5) +
+      geom_point(data = dt,
+                 aes(x = long, y = lat, col = y),
+                 alpha = 0.8, size = 2) +
+      scale_color_gradient(name = color_units, low = "yellow", high = "red") +
+    labs(title = map_title
+         #fill = "Area"
+         )
+  
+  #+ theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) 
+  
+  return(mymap)
+  
+}
+
+
+#################
+# combines map_base() and map_color() fns. but fills by study and monitoring regions (basemap does not - works better for e.g. stat_contour() which uses fill)
 map_fn <- function(dt, 
                    color_map = TRUE,
                    color_by = "ufp", color_units = "pt/cm3",
@@ -432,9 +491,9 @@ map_fn <- function(dt,
   
   # make map boundaries little larger than data dimensions
   bbox <- c(
-    min(dt$long) - 0.2*width,
+    min(dt$long) - 0.5*width,
     min(dt$lat) - 0.1*height,
-    max(dt$long) + 0.2*width,
+    max(dt$long) + 0.5*width,
     max(dt$lat) + 0.1*height
   )
   
@@ -493,7 +552,7 @@ map_fn <- function(dt,
   mymap <- mymap +
     labs(title = map_title,
          fill = "Area"
-         ) +
+         ) + 
     theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) 
   
   return(mymap)
@@ -501,17 +560,193 @@ map_fn <- function(dt,
 }
 
 
-# from geoPreprocessing script
-cov_mm0 %>%
-  map_fn(color_map = F,
-         #need this for fn to work even though not using
-         color_by = "region_nw",
-         include_monitoring_area = T, #monitoring_area_alpha = 1,
-         include_study_area = T, #study_area_alpha = 0.4,
-         map_title = "Mobile monitoring (pink) and study (purple) areas"
+#################################################################################################################
+#################################################################################################################
+
+# returns annual average site estimates for "ptrak" variable from repeated stop-level observations. Also returns summary tables and figures. 
+
+estimate_annual_avg <- function(dt,
+                                var = "ptrak",
+                                # model used to estimate annual averages
+                                lm_x_names = c("site_id", "season", "time_of_week", "tod5")
+                                ) {
+  #rename variables
+  dt <- dt %>%
+    rename(var = var)
+  
+  ##########################################################################################
+  #################### characterize stop-level concentrations at sites ####################
+  ##########################################################################################
+  
+  # table of distribution
+  t_stops_distribution <- dt %>% ungroup() %>%
+    distribution.table(var.string = "var") %>%
+    mutate(time = "Overall") %>%
+    select(time, everything()) %>%
+    kable(caption = "Distribution of stop-level UFP concentrations") %>%
+    kable_styling()
+  
+  # density plot
+  p_stops_density <- dt %>%
+    ggplot(aes(x=var)) + 
+    geom_density() + 
+    labs(title = "Distribution of stop-level UFP concentrations",
+         x = "UFP (pt/cm3)")
+  
+  # plots over time
+  #by time
+  p0_hour <- dt %>% 
+    mutate(hour = factor(hour)) %>%
+    ggplot(aes(x=hour, y=var)) + 
+    geom_boxplot() +
+    labs(x = "hour") + 
+    labs(y="")
+  
+  p0_tod5 <- dt %>% 
+    #mutate(hour = factor(hour)) %>%
+    ggplot(aes(x=tod5, y=var)) + 
+    geom_boxplot() +
+    labs(x = "Time of Day (hour)",
+         y = "",
+         fill = "Time of day") 
+  
+  p0_day <- dt %>%
+    ggplot(aes(x=day, y=var)) + 
+    geom_boxplot() + 
+    labs(y="")
+  
+  p0_season <- dt %>%
+    ggplot(aes(x=season, y=var)) + 
+    geom_boxplot() + 
+    labs(y="")
+  
+  p_stop_concs_over_time <- ggarrange(p0_hour, p0_tod5, p0_day, p0_season, 
+                                      common.legend = T, legend = "bottom") %>%
+    annotate_figure(left = "UFP (pt/cm3)", 
+                    fig.lab = "Stop-level UFP concentrations")
+  
+  ##########################################################################################
+  #################################### stop sample size ####################################
+  ##########################################################################################
+  
+  ## table of stop counts/site overall & stratified
+  t_stop_count <- dt %>%
+    dplyr::group_by(site_id) %>%
+    # no. samples/site
+    dplyr::summarize(N = n()) %>%
+    # distribution of no. samples
+    distribution.table(var.string = "N") %>%
+    mutate(Time = "Overall") %>%
+    select(Time, everything()) %>%
+    kable(caption = "Number of stop samples per site (after trimming; N = No. sites sampled)") %>%
+    kable_styling()
+  
+  ##########################################################################################
+  #################################### annual averages ####################################
+  ##########################################################################################
+  # lm_x_names = c("site_id", "season", "time_of_week", "tod5")
+  # lm_x_names <- c("site_id", "season")
+  
+  ## grid to save predictions
+  lm_pred0 <- expand.grid(
+    #include all possible variables
+    site_id = unique(dt$site_id), 
+    season = unique(dt$season),
+    time_of_week = unique(dt$time_of_week),
+    tod2 = unique(dt$tod2),
+    tod5 = unique(dt$tod5)) %>%
+    mutate(tod5_wt = recode(tod5, 
+                     "3_8" = 6,
+                     "9_11" = 3,
+                     "12_15" = 4,
+                     "16_20" = 5,
+                     "21_2" = 6
+                     )/24,
+           tod2_wt = recode(tod2, 
+                         "9_17" = 9,
+                         "18_08" = 15
+                         )/24,
+          season_wt = 1/length(unique(dt$season)),
+          time_of_week_wt = ifelse(time_of_week == "weekday", 5/7, 2/7)) %>%
+    # only keep variable names used to estimate annual avg
+    select(matches(paste0(lm_x_names, collapse = "|"))) %>%
+    #may have multiple rows per combination
+    unique()
+  
+    lm_fit0 <- lm(formula(paste0("var ~", paste(lm_x_names, collapse = " + "))), data = dt)
+    
+    lm_pred0$yhat <- predict(lm_fit0, lm_pred0) 
+    
+    # weigh temporally-specific predictions
+    if("season" %in% lm_x_names) {
+    lm_pred0 <- lm_pred0 %>%
+      mutate(yhat = yhat*season_wt)
+    }
+    
+    if("time_of_week" %in% lm_x_names) {
+      lm_pred0 <- lm_pred0 %>%
+        mutate(yhat = yhat*time_of_week_wt)
+    }
+    
+    if("tod2" %in% lm_x_names) {
+      lm_pred0 <- lm_pred0 %>%
+        mutate(yhat = yhat*tod2_wt)
+    }
+    
+    if("tod5" %in% lm_x_names) {
+      lm_pred0 <- lm_pred0 %>%
+        mutate(yhat = yhat*tod5_wt)
+    }
+    
+    lm_pred <- lm_pred0 %>%
+    group_by(site_id) %>%
+    dplyr::summarize(yhat = sum(yhat))
+  
+  # table of UFP distribution
+  t_annual_distribution <- lm_pred %>%
+    distribution.table(var.string = "yhat") %>%
+    kable(caption = "Distribution of annual average estimates") %>%
+    kable_styling()
+  
+  ## plot of UFP distribution
+  p_annual_density <- lm_pred %>%
+    ggplot(aes(x=yhat)) + 
+    geom_density() + 
+    labs(x = "UPF (pt/cm3)",
+         title = "Distribution of annual average estimates")
+  
+  ## --> need to add lat/long if want to plot here
+  ## map of annual estimates
+  # annual_map <- dt %>% map_fn(map_title = "Annual average estimates")
+  
+  ##########################################################################################
+  #################################### results ############################################
+  ##########################################################################################
+  
+  # list to return
+  results <- list( 
+    #stop-level concentrations
+    t_stops_distribution = t_stops_distribution,
+    p_stops_density = p_stops_density,
+    p_stop_concs_over_time =  p_stop_concs_over_time,
+    
+    # stop sample size
+    t_stop_count = t_stop_count,
+    
+    # annual averages
+    annual_estimates = lm_pred,
+    t_annual_distribution = t_annual_distribution,
+    p_annual_density = p_annual_density
+    
+    # map estimates
+    # #annual_map
   )
+  
+  return(results)
+  
+}
 
-
+#################################################################################################################
 #################################################################################################################
 
 

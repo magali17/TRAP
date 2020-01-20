@@ -46,6 +46,73 @@ wrapper <- function(x, ...) {
 
 ############################################################################################## 
 
+################################# correlation plot Wide format ####################################
+
+# x.variable = "mean_s_tow2" 
+# y.variable = "LUR_mean_s_tow2"
+# x.label = ""
+# y.label = ""
+# col.by = ""
+# mytitle = ""
+# coef_digits = 0
+# r2.digits = 2
+# rmse.digits = 0
+
+colo.plot <- function(data.wide=mm.wide, 
+                      x.variable, x.label = "",
+                      y.variable, y.label = "",
+                      col.by = "",
+                      mytitle = "", title_width = 60,
+                      mysubtitle = NULL,
+                      mycaption = NULL,
+                      coef_digits = 0, 
+                      r2.digits = 2, 
+                      rmse.digits = 0) {
+  
+  #if label is left blank, use variable name
+  if(x.label == ""){x.label <- x.variable}
+  if(y.label == ""){y.label <- y.variable}
+  
+  data.wide <- data.wide %>% drop_na(x.variable, y.variable)  
+  
+  lm1 <- lm(formula(paste(y.variable, "~", x.variable)), data = data.wide)
+  
+  #rmse
+  rmse <- rmse(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>% 
+    round(digits = rmse.digits)
+  
+  r2 <- r2_mse_based(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>%
+    round(r2.digits)
+  
+  fit.info <- paste0("y = ", round(coef(lm1)[1], coef_digits), " + ", round(coef(lm1)[2], coef_digits), 
+                     "x \nR2 = ", r2,  
+                     "\nRMSE = ", rmse,
+                     "\nno. pairs = ", nrow(data.wide))
+  #compare  
+  p <- data.wide %>%
+    ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
+    geom_point(alpha=0.3, aes(col = data.wide[[col.by]]
+    )) + 
+    coord_fixed() +
+    geom_abline(intercept = 0, slope = 1) +
+    #geom_smooth(aes(fill="loess")) +
+    geom_smooth(method = "lm", aes(fill="LS")) +
+    labs(title = wrapper(mytitle, width = title_width),
+         subtitle = mysubtitle,
+         caption = mycaption,
+         x = x.label,
+         y = y.label,
+         col = col.by,
+         fill = "fit"
+    ) +
+    annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1)
+
+  return(p)
+  
+}
+
+# issues/notes: 
+# coord_fixed() and theme(aspect.ration =1) don't do anything??
 
 ############################################################################################## 
 ############################################ lasso ############################################ 

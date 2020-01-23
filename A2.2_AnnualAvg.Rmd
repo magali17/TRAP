@@ -31,15 +31,16 @@ editor_options:
 
 ```
 
-# Notes
+# Methods
+
+
+
+# Key Findings
 
 
 
 
-### --> ? EROR: ptrak_means have lot of NAs
-
-### --> ? drop AQS sites that are not representative of ACT cohort (will be using site_id for annual avg prediction model)? so plots and tables will be representative of data we are actually using to estimate annual averages
-
+ 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
@@ -93,11 +94,9 @@ cov_names <- names(cov_mm)[!names(cov_mm) %in% c("site_id")]
 
 ufp0 <- mm.wide %>% 
   select(date:site_no,
-         #ptrak = ptrak_pt_cm3_median
          ptrak_pt_cm3_median,
          # for sensitivity analyses
-         ptrak_pt_cm3_mean
-         ) %>%
+         ptrak_pt_cm3_mean) %>%
   mutate(
     site_id = factor(site_id),  
     # New Hour Binning
@@ -137,7 +136,6 @@ ufp <- ufp0 %>%
   ungroup()  
 
 # SENSITIVITY ANALYSIS: means (vs median) stop readings
-## trim data (5% top/bottom)
 ufp_mean <- ufp0_mean %>%
   group_by(site_id) %>%
   filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
@@ -152,10 +150,10 @@ ufp_trim10 <- ufp0 %>%
   ungroup()  
 
 # SENSITIVITY ANALYSIS: windosrized top/bottom 5% of data
-ufp_windsorized <- ufp %>%
+ufp_windsorized <- ufp0 %>%
   group_by(site_id) %>%
   mutate(
-    ufp_wind = ifelse(ptrak > quantile(ptrak, (1-trim_quantile), na.rm = T), quantile(ptrak, (1-trim_quantile), na.rm = T),
+    ptrak = ifelse(ptrak > quantile(ptrak, (1-trim_quantile), na.rm = T), quantile(ptrak, (1-trim_quantile), na.rm = T),
                       ifelse(ptrak < quantile(ptrak, (trim_quantile), na.rm = T), quantile(ptrak, (trim_quantile), na.rm = T),
                              ptrak)))
 
@@ -271,32 +269,36 @@ rbind(
 
 Plots
 
-### --> make stop_type boxplots next to eachother?
 
 ```{r}
 #by time
 p.hour <- ufp %>% 
   mutate(hour = factor(hour)) %>%
-  ggplot(aes(x=hour, y=ptrak,  fill=stop_type)) + 
+  ggplot(aes(x=hour, y=ptrak #, # fill=stop_type
+             )) + 
   geom_boxplot() +
-  labs(x = "hour") + 
-  labs(y="")
+  labs(x = "hour",
+       y = "") 
 
 p.tod5 <- ufp %>% 
   #mutate(hour = factor(hour)) %>%
-  ggplot(aes(x=stop_type, y=ptrak,  fill=tod5)) + 
+  ggplot(aes(#x=stop_type, 
+             y=ptrak,  x=tod5)) + 
   geom_boxplot() +
-  labs(x = "Stop type",
-       y = "",
-       fill = "Time of day") 
+  labs(x = "Time of Day",
+       y = ""
+       #fill = "Time of day"
+       ) 
     
 p.day <- ufp %>%
-  ggplot(aes(x=day, y=ptrak,  fill=stop_type)) + 
+  ggplot(aes(x=day, y=ptrak#,  fill=stop_type
+             )) + 
   geom_boxplot() + 
   labs(y="")
 
 p.season <- ufp %>%
-  ggplot(aes(x=season, y=ptrak,  fill=stop_type)) + 
+  ggplot(aes(x=season, y=ptrak#,  fill=stop_type
+             )) + 
   geom_boxplot() + 
   labs(y="")
 
@@ -312,15 +314,7 @@ ggarrange(p.hour, p.tod5,
 
 ```
 
-
-### --> ? Drop dissimilar AQS sites before proceding w/ rest of analysis (tables, plots, regression)
-
-```{r}
-
-```
-
 # Sample size 
-
 
 ```{r}
 ## table of stop counts/site overall & stratified
@@ -897,8 +891,6 @@ ufp_by_method(dt = annual.l.tow2,
 # Characterize sites w/ smallest & largest inter-method differences 
 
 - sites w/ high inter-method variabiitly have high extreme values, while those w/ low inter-method variability have either: a) no or b) both high and low extreme values
-
-### --> ? drop AQS sites
 
 ```{r}
 # TOD2
@@ -1511,12 +1503,6 @@ myquant <- 0.98
 ```
 
 
-### --> ? delete? 
-
-![Map of poorly performing sites. Gray = stop with high inter-method variation. Green = high LUR residual (above `r myquant` quantile). Other colored dots are UFP concentrations estimates at all sites - darker red indicates higher concentrations. "MC" locations indicate AQS sites.](../Write Up/1. Proposal/Aim 2. 2019 UFP/Images/resid_yhat_s_tow2_tod2_q0.98.png)
-
-### --> ? 3D/correlation plot of most correlated covariates?
-
 ```{r}
 # # annual average estimates   
 
@@ -1579,11 +1565,12 @@ Table and plots
 
 ```{r}
 annual_ufp_and_cov %>%
-  mutate(stop = ifelse(grepl("MS", site_id), "ACT", "AQS")) %>%
-  group_by(stop) %>%
+  # mutate(stop = ifelse(grepl("MS", site_id), "ACT", "AQS")) %>%
+  # group_by(stop) %>%
   distribution.table(var.string = "ufp") %>%
   kable(caption = "Annual average UFP concentrations to be used in UK", 
-        col.names = c("Stop kind", "N", "Mean (SD)", "Median (IQR)", "Min", "Max")
+        col.names = c(#"Stop kind", 
+          "N", "Mean (SD)", "Median (IQR)", "Min", "Max")
         ) %>%
   kable_styling()
 
@@ -1726,37 +1713,124 @@ annual_ufp_and_cov_native_scale <- annual_ufp_and_cov %>%
 
 ## Averaging of 1 sec data at each stop (vs median)
 
-[?? do?] 
-
 ```{r}
 stop_mean_results <- estimate_annual_avg(dt = ufp_mean)
+
 
 ```
 
 ## Annual averages 
 
-Trim 10% observations
-
 ```{r}
+# Trim 10% observations
 trim10_results <- estimate_annual_avg(dt = ufp_trim10)
 
-```
-
-Windosrize extreme stop readings (top/bottom 5%) 
-
-```{r}
+# Windosrize extreme stop readings (top/bottom 5%) 
 windsorized_results <- estimate_annual_avg(dt = ufp_windsorized)
 
-```
-
-Use different annual averages
-
-```{r}
-# estimate unweighted annual averages
+# Use different annual averages
+# # estimate unweighted annual averages
 uw_results <- estimate_annual_avg(dt = ufp, 
                                       lm_x_names = "site_id")
 
 ```
+
+### --> summarize all sensitivity analyses 
+### --> ? don't include native scale? 
+
+```{r}
+join_dfs_by <- c("site_id", "yhat")
+  
+all_annual <- annual_ufp_and_cov %>% 
+  select(site_id, latitude, longitude, 
+         primary_annual = ufp) %>%
+  #native scale
+  left_join(annual_ufp_and_cov_native_scale[,c("site_id", "ufp")], by = "site_id") %>%
+  rename(native_scale_annual = ufp) %>%
+  # stop means
+  left_join(stop_mean_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
+  rename(means_annual = yhat) %>%
+  # trim 10%
+  left_join(trim10_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
+  rename(trim10_annual = yhat) %>%
+  # windsorized
+  left_join(windsorized_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
+  rename(windsorize_annual = yhat) %>%
+  # windsorized
+  left_join(uw_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
+  rename(uw_annual = yhat)  
+
+annual_names <- names(all_annual)[grepl("annual", names(all_annual))]
+
+all_annual_l <- all_annual %>% gather("analysis", "prediction", contains("annual")) %>%
+  mutate(analysis = str_replace(analysis, "_annual", ""),
+         analysis = relevel(factor(analysis), ref = "primary")) 
+
+# table 
+all_annual_l %>%
+  group_by(analysis) %>%
+  distribution.table(var.string = "prediction") %>%
+  kable(caption = "Distribution of annual UFP concentrations (pt/cm3) for primary and sensitivity analyses") %>%
+  kable_styling()
+
+# density plot
+all_annual_l %>%
+  ggplot(aes(x=prediction, fill = analysis)) + 
+  geom_density(alpha = 0.2) + 
+  labs(fill = "Analysis",
+       title = "Distribution of annual UFP concentrations (pt/cm3) for primary and sensitivity analyses")
+   
+```
+
+Scatterplots around 1-1 line
+
+```{r}
+max_plot <- max(all_annual_l$prediction)
+min_plot <- min(all_annual_l$prediction)
+  
+all_annual %>%
+  gather("analysis", "prediction", contains("annual"), -contains("primary")) %>%
+  mutate(analysis = str_replace(analysis, "_annual", "")) %>% 
+  ggplot(aes(x = primary_annual, y = prediction, group = analysis, col = analysis)) + 
+  geom_point(aes(col = analysis), alpha = 0.2) + 
+  geom_abline(intercept = 0, slope = 1) + 
+  geom_smooth() +
+  xlim(min_plot, max_plot) +
+  ylim(min_plot, max_plot) +
+  labs(x = "Primary Analysis",
+       y = "Sensitivity Analysis",
+       title = "UFP concentration (pt/cm3) from different estimation methods") + 
+  facet_wrap(~analysis)
+  
+```
+
+Maps
+ 
+```{r, fig.height=10}
+# dot map
+#list to store maps
+dot_maps <-list()
+
+for(i in seq_along(annual_names)) {
+  #i=1
+  mymap <- all_annual %>% map_fn(color_by = annual_names[i], map_title = "")
+  
+  dot_maps[i] <- list(mymap)
+  names(dot_maps)[i] <- annual_names[i]
+}
+
+ggarrange(plotlist = dot_maps,
+          ncol = 3, nrow = 2,
+          common.legend = T, legend = "right",
+          labels = annual_names
+          ) %>%
+  annotate_figure(top = "Annual average UFP estimates from different methods" ) 
+   
+
+ 
+
+```
+
 
 save datasets. 
 
@@ -1765,7 +1839,7 @@ save datasets.
 # # primary analysis
 # saveRDS(annual_ufp_and_cov, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))
 # 
-# # native scale covariates (and UFP)
+# # [? DELETE? already have code in UK.Rmd] native scale covariates (and UFP)
 # saveRDS(annual_ufp_and_cov_native_scale, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov_native_scale.rda"))
 # 
 # # using stop means

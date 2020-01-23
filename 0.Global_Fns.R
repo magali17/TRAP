@@ -88,6 +88,10 @@ colo.plot <- function(data.wide=mm.wide,
                      "x \nR2 = ", r2,  
                      "\nRMSE = ", rmse,
                      "\nno. pairs = ", nrow(data.wide))
+  
+  max_plot <- max(max(data.wide[[x.variable]]), max(data.wide[[y.variable]]) )
+  min_plot <- min(min(data.wide[[x.variable]]), min(data.wide[[y.variable]]) )
+    
   #compare  
   p <- data.wide %>%
     ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
@@ -97,14 +101,15 @@ colo.plot <- function(data.wide=mm.wide,
     geom_abline(intercept = 0, slope = 1) +
     #geom_smooth(aes(fill="loess")) +
     geom_smooth(method = "lm", aes(fill="LS")) +
+    xlim(min_plot, max_plot) +
+    ylim(min_plot, max_plot) +
     labs(title = wrapper(mytitle, width = title_width),
          subtitle = mysubtitle,
          caption = mycaption,
          x = x.label,
          y = y.label,
          col = col.by,
-         fill = "fit"
-    ) +
+         fill = "fit") +
     annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1)
 
   return(p)

@@ -64,22 +64,62 @@ images_path <- file.path(images_path0, "3. UK")
 tables_path <- file.path(tables_path0, "3. UK")
 
 #read in data
-annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda")) 
+annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))  
           
-site_locations <- annual0 %>%
-  select(site_id, contains("lambert")) #latitude, longitude
+loc_vars <- c("lambert_x", "lambert_y")
 
+site_locations <- annual0 %>%
+  select(site_id, loc_vars) #latitude, longitude
+
+site_locations_stops <- site_locations$site_id[grepl("MS", site_locations$site_id)]
+  
 cov_names <- annual0 %>%
   select(elev_elevation:log_m_to_a23) %>%
   names()
 
 cov_act <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_log_scale_preprocessed.rda"))
 
+############################### SENSITIVITY ANALYSES ###############################
 
-# # SENSITIVITY ANALYSIS: native scale proximity covariates
+# native scale proximity covariates
+annual_native_scale <- annual0 %>%
+  select(-log_ufp) %>%
+  mutate_at(vars(contains("log_")), ~exp(.)) %>%
+  rename_at(vars(contains("log_")), ~substr(., 5, nchar(.)) )
+
 cov_act_native_scale <- cov_act %>%
   mutate_at(vars(contains("log_")), ~exp(.)) %>%
   rename_at(vars(contains("log_")), ~substr(., 5, nchar(.)) )
+
+cov_names_native <- annual_native_scale %>%
+  select(elev_elevation:m_to_a23) %>%
+  names()
+
+# using stop means
+stop_means <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_stop_means.rda")) %>%
+  # log-transform predictions (proximity covariates also in log format)
+  mutate(log_ufp = log(yhat)) %>%
+  # add stop location and geocovariates
+  left_join(annual0[,c("site_id", loc_vars, cov_names)], by = "site_id") %>%
+  drop_na()
+
+# trim 10% top/bottom stop observations
+trim10 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_trim10.rda")) %>%
+  mutate(log_ufp = log(yhat)) %>%
+  left_join(annual0[,c("site_id", loc_vars, cov_names)], by = "site_id")%>%
+  drop_na()
+
+# Windosrize extremes
+windsorized <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_windsorized.rda")) %>%
+  mutate(log_ufp = log(yhat)) %>%
+  left_join(annual0[,c("site_id", loc_vars, cov_names)], by = "site_id")%>%
+  drop_na()
+
+# different regression to estimate annual average
+uw <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_uw_means.rda")) %>%
+  mutate(log_ufp = log(yhat)) %>%
+  left_join(annual0[,c("site_id", loc_vars, cov_names)], by = "site_id")%>%
+  drop_na()
 
 
 ```
@@ -109,11 +149,12 @@ Create training,  test and AQS set.
 
 ```{r, results="hide"}
 #for creating sets in data & CV later 
-k <- 3 #10
+k <- 10
 
 # 1. fit PLS using training set to ID # features to use
 annual_all <- annual0 %>%
   select(site_id,
+         loc_vars,
          log_ufp,
          cov_names) %>%
   drop_na() %>%
@@ -167,10 +208,9 @@ for(i in seq_len(use_n_scores)) {
   
   # dataset w/ UFP measurements, geocovariates, location
   pls_df_train_test <- cbind(
-    annual_train_test[c("site_id", "log_ufp")],
+    annual_train_test, #[c("site_id", "log_ufp")],
     scores_train_test
-  ) %>%
-    left_join(site_locations, by = "site_id") 
+  ) #%>% left_join(site_locations, by = "site_id") 
 
   ################################ UK ################################
    geo_train_test <- as.geodata(pls_df_train_test, 
@@ -237,18 +277,14 @@ CV to evalute best number of PLS components. Folds (k) = `r k`
 set.seed(1)
 ################# variables for later ###############
 # max PLS components to use in UK
-use_n_scores <- 3  #6 
+use_n_scores <- 5 
 
-dist_fract <-  c(0.05, 
-                 seq(0.1, 0.5, by=0.2)) # by = 0.1
-
-
+dist_fract <-  c(0.05, seq(0.1, 0.4, by=0.1))  
 
 #df to save CV RMSE
 cv.eval <- data.frame(
   expand.grid(pls_comp = c(1:use_n_scores),
-            dist_fract = dist_fract
-            ),
+            dist_fract = dist_fract),
   RMSE = NA,
   R2 = NA
   )
@@ -298,14 +334,12 @@ for(i in seq_len(use_n_scores)) {
   
   # dataset w/ UFP measurements, geocovariates, location
   pls_df_train <- cbind(
-    annual_train[c("site_id", "log_ufp")],
-    scores_train) %>%
-    left_join(site_locations,by = "site_id") 
+    annual_train, #[c("site_id", "log_ufp")],
+    scores_train) #%>% left_join(site_locations,by = "site_id") 
   
   pls_df_test <- cbind(
-    annual_test[c("site_id", "log_ufp")],
-    scores_test) %>%
-    left_join(site_locations,by = "site_id")
+    annual_test, #[c("site_id", "log_ufp")],
+    scores_test) #%>% left_join(site_locations,by = "site_id")
 
   ################################ UK ################################
    geo_train <- as.geodata(pls_df_train, 
@@ -397,13 +431,14 @@ Performance statistics calculated for UFP on native scale (exp(log UFP)).
 
 ```{r}
 ######################### select CV parameters #########################
-rmse_inx <- cv.eval$RMSE == min(cv.eval$RMSE)
+min_rmse <- min(cv.eval$RMSE)
+rmse_inx <- cv.eval$RMSE == min_rmse
 
 cv_r2 <- cv.eval$R2[rmse_inx] 
 cv_comp <- cv.eval$pls_comp[rmse_inx]
 cv_dist_fract <- cv.eval$dist_fract[rmse_inx]
   
-cv_comp_names <- names(scores_train)[1:cv_comp]
+cv_comp_names <- paste0("Comp", c(1:cv_comp)) 
  
 #trends
 cv_cov_trend <-  as.formula(paste0("~ ", paste0(cv_comp_names, collapse = " + " )))
@@ -459,7 +494,7 @@ scores_train_test <- scores(pls_train_test)[,c(1:cv_comp)] %>%
   as.data.frame()
 
 # take out spaces in names
-names(scores_train_test) <- gsub(" ", "", names(scores_train_test))
+names(scores_train_test) <- cv_comp_names
 
 ```
 
@@ -481,7 +516,6 @@ pls.loadings.l  <- pls.loadings %>%
   gather(key = "Component", value = "Loading", contains("Comp")) %>%
   mutate(Component = as.numeric(substr(Component, 6, nchar(Component))))  
    
-#first 4 components 
 pls.loadings.l  %>%
   #drop these in first points
   drop_na(buffer) %>%
@@ -824,8 +858,7 @@ cov_act %>%
 # Map of interpolated predictions    
 
 ### --->: replace ACT w/ Puget Sound grid for predictions
-### --> ? does this help?? only for plot()? locations.inside(interpolation_grid, act_predictions$borders)
-#             #https://www.stat.washington.edu/peter/591/geoR_sln.html
+### --> ? does this help?? only for plot()? locations.inside(interpolation_grid, act_predictions$borders) https://www.stat.washington.edu/peter/591/geoR_sln.html
           
 Point map
 
@@ -891,13 +924,31 @@ beta_no <- length(beta_names)
 
 uk_decompose <- scores_act %>%
   mutate(
-    uk_prediction = uk_act$predict,
-    regression_prediction = 
-      uk_act$beta.est[["beta0"]] + 
-      uk_act$beta.est[["beta1"]]*Comp1 + 
-      uk_act$beta.est[["beta2"]]*Comp2 +
-      uk_act$beta.est[["beta3"]]*Comp3,
+    uk_prediction = uk_act$predict) #,
+
+uk_decompose$regression_prediction <- uk_act$beta.est[["beta0"]] + uk_act$beta.est[["beta1"]]*scores_act$Comp1 
+
+if("beta2" %in% beta_names) {
+  uk_decompose$regression_prediction <- uk_decompose$regression_prediction + uk_act$beta.est[["beta2"]]*scores_act$Comp2 
+}
+if("beta3" %in% beta_names) {
+  uk_decompose$regression_prediction <- uk_decompose$regression_prediction + uk_act$beta.est[["beta3"]]*scores_act$Comp3
+  }
+if("beta4" %in% beta_names) {
+  uk_decompose$regression_prediction <- uk_decompose$regression_prediction + uk_act$beta.est[["beta4"]]*scores_act$Comp4
+}
+if("beta5" %in% beta_names) {
+  uk_decompose$regression_prediction <- uk_decompose$regression_prediction + uk_act$beta.est[["beta5"]]*scores_act$Comp5
+  }
+
+    # regression_prediction = 
+    #   uk_act$beta.est[["beta0"]] + 
+    #   uk_act$beta.est[["beta1"]]*Comp1 + 
+    #   uk_act$beta.est[["beta2"]]*Comp2 +
+    #   uk_act$beta.est[["beta3"]]*Comp3,
     # error: structured & unstructured
+uk_decompose <- uk_decompose %>% 
+  mutate(
     krige_and_error = uk_prediction - regression_prediction,
     #krige_var = uk_act$krige.var,
     reg_prediction_normalized =regression_prediction/uk_prediction 
@@ -940,7 +991,7 @@ scores_act$site_type <- "ACT cohort"
 scores_mm_act <- rbind(scores_train_test, scores_act)
 
 scores_mm_act %>%
-  gather("Component", "Score", Comp1:Comp3) %>%
+  gather("Component", "Score", contains("Comp")) %>%
   mutate(Component = substr(Component, 5, 5)) %>%
   ggplot(aes(x=Score, fill = site_type)) + 
   geom_density(alpha = 0.4) + 
@@ -959,159 +1010,431 @@ scores_mm_act %>%
 
 ```
 
-### --> 
 
 # Sensitivity Analyses
 
-######################################################################################################################################################################################### developing functions ###################################################
-
-## read in data  
-
 ```{r}
-#read in data
-# annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda")) 
+ 
+# # using stop means
+# stop_means 
+# 
+# # trim 10% top/bottom stop observations
+# trim10 
+# 
+# # Windosrize extremes
+# windsorized 
+# 
+# # different regression to estimate annual average
+# uw 
+
 
 
 ```
 
 ## CV 
+only using stops (excluding AQS sites)
+ 
+```{r}
+set.seed(1)
+## --> update these later
+max_pls_comp. <- 5
+dist_fract. <- c(0.05, seq(0.1, 0.4, by=0.1))
+folds <- k
+ 
+```
 
-# --> update w/ new datasets
+Native Scale UFP and proximity variables
 
 ```{r, results="hide"}
-set.seed(1)
 
-# TEST w/ same dataset
-## get CV: RMSE, R2, comp no., dist_fract
-t <- pls_uk_cv_eval(dt2 = annual_train_test,
-                           max_pls_comp = 5,
-                           dist_fract = c(0.05, seq(0.1, 0.4, by=0.1)),  # <-- update
-                           # to be passed to pls_uk_cv_predictions()
-                           y_name.. = "log_ufp",
-                           cov_names.. = cov_names,
-                           #CV folds
-                           k. = 10,
-                           site_locations.. = site_locations
-                           )
-  
+# dt2 = annual_native_scale
+# max_pls_comp = max_pls_comp.
+# dist_fract = dist_fract.
+# # to be passed to pls_uk_cv_predictions()
+# y_name.. = "ufp"
+# cov_names.. = cov_names_native
+# #CV folds
+# k. = 3
+# exponentiate_obs_and_pred = F
+# site_locations.. = site_locations
+
+
+# primary analysis
+  #%>% left_join(site_locations, by = "site_id") %>%
+primary_analysis_cv <-  pls_uk_cv_eval(dt2 = annual_train_test,
+               max_pls_comp = max_pls_comp.,
+               dist_fract = dist_fract., 
+               y_name.. = "log_ufp",
+               cov_names.. = cov_names, 
+               k. = folds,
+               exponentiate_obs_and_pred = T) 
+################3
+# t <- annual_train_test %>% left_join(site_locations, by = "site_id")
+# dt2 = t
+# max_pls_comp = max_pls_comp.
+#  dist_fract = dist_fract.
+#  y_name.. = "log_ufp"
+#  cov_names.. = cov_names
+#  k. = folds
+#  exponentiate_obs_and_pred = T
+
+
+###################
+
+# native scale 
+native_scale_cv <- pls_uk_cv_eval(dt2 = annual_native_scale,
+               max_pls_comp = max_pls_comp.,
+               dist_fract = dist_fract., 
+               # to be passed to pls_uk_cv_predictions()
+               y_name.. = "ufp",
+               cov_names.. = cov_names_native,
+               #CV folds
+               k. = folds,
+               # already in native scale
+               exponentiate_obs_and_pred = F)
+
+#using stop means 
+means_cv <- pls_uk_cv_eval(dt2 = stop_means,
+               max_pls_comp = max_pls_comp.,
+               dist_fract = dist_fract., 
+               y_name.. = "log_ufp",
+               cov_names.. = cov_names, 
+               k. = folds,
+               exponentiate_obs_and_pred = T) 
+
+#trim 10
+trim10_cv <- pls_uk_cv_eval(dt2 = trim10 ,
+               max_pls_comp = max_pls_comp.,
+               dist_fract = dist_fract., 
+               y_name.. = "log_ufp",
+               cov_names.. = cov_names, 
+               k. = folds,
+               exponentiate_obs_and_pred = T) 
+
+# Windosrize extremes 
+windsorize_cv <- pls_uk_cv_eval(dt2 = windsorized,
+               max_pls_comp = max_pls_comp.,
+               dist_fract = dist_fract., 
+               y_name.. = "log_ufp",
+               cov_names.. = cov_names, 
+               k. = folds,
+               exponentiate_obs_and_pred = T) 
+
+# unweighted annual averages
+uw_cv <- pls_uk_cv_eval(dt2 = uw,
+               max_pls_comp = max_pls_comp.,
+               dist_fract = dist_fract., 
+               y_name.. = "log_ufp",
+               cov_names.. = cov_names, 
+               k. = folds,
+               exponentiate_obs_and_pred = T) 
+```
+
+PLS components and variogram distance fraction selected via cross-validation
+
+```{r}
+# compare results 
+Analysis = c("Primary analysis: using stop medians; trimming 5%; regression to estimate season-, TOW2- and TOD5-adjusted UFP; log-transformed UFP and proximity covariates",
+              "Native scale predictions and proximity variables (vs log-transformed)",
+             "Using stop means (vs medians)",
+             "Trim 10% of each site's highest and lowest stop readings (vs 5%)",
+             "Windsorize each site's highest and lowest 5% stop readings (vs trimming)",
+             "Use site-specific, unweighted annual averages (vs season-, TOW2-, TOD5-adjusted)"
+             )
+
+cbind(Analysis, 
+      rbind(
+        primary_analysis_cv$cv_table,
+        native_scale_cv$cv_table,
+        means_cv$cv_table,
+        trim10_cv$cv_table,
+        windsorize_cv$cv_table,
+        uw_cv$cv_table
+        )) %>%   
+  mutate(RMSE = round(RMSE),
+         R2 = round(R2, 2)
+         ) %>%
+  kable(caption = "PLS components and variogram distance fraction selected via cross-validation for sensitivity analyses") %>%
+  kable_styling()
 
 ```
 
 # fit model to all data & make predictions at ACT locations
 
-```{r}
-# y_name = "log_ufp"
-# cov_names. = cov_names
-# dt = annual_train_test
-# pls_comp = t$cv_table$PLS_Components
-# variogram_dist_fract = t$cv_table$Variogram_Distance_Fraction
-# dt_locations = site_locations
-# cov_loc_new = cov_act
+### --> see native scale partial sill - why so large?
 
-# example of fn to use
-t2 <- uk_predictions(pls_comp = t$cv_table$PLS_Components,
-  variogram_dist_fract = t$cv_table$Variogram_Distance_Fraction
-  )
+```{r, results = "hide"}
+set.seed(1)
 
+  #%>% left_join(site_locations, by = "site_id") %>%
+primary_analysis_uk <-  uk_predictions(dt = annual_train_test,
+                 cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+                  y_name = "log_ufp",
+                  cov_names. = cov_names,
+                  pls_comp = primary_analysis_cv$cv_table$PLS_Components, 
+                  variogram_dist_fract = primary_analysis_cv$cv_table$Variogram_Distance_Fraction)
 
-```
-
-
-
-######################################################################################################################################################################################################################################################################
-
-## Covariates used
-
-Change TRAP indicator variable [? & UFP] transformations (native to log-transformed or vise versa)
-
-```{r}
+native_scale_uk <- uk_predictions(dt = annual_native_scale,
+                                  cov_loc_new = cov_act_native_scale,
+                                  y_name = "ufp",
+                                  cov_names. = cov_names_native,
+                                  pls_comp = native_scale_cv$cv_table$PLS_Components, 
+                                  variogram_dist_fract = native_scale_cv$cv_table$Variogram_Distance_Fraction)
+###########
+#native_scale_uk$residual_model_table
 
 
 
+########
 
+means_uk <- uk_predictions(dt = stop_means,
+                                                      # don't include prediction from main analysis
+                                cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+                                y_name = "log_ufp",
+                                cov_names. = cov_names,
+                                pls_comp = means_cv$cv_table$PLS_Components, 
+                                variogram_dist_fract = means_cv$cv_table$Variogram_Distance_Fraction)
+ 
+trim10_uk <- uk_predictions(dt = trim10,
+                                cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+                                y_name = "log_ufp",
+                                cov_names. = cov_names,
+                                pls_comp = trim10_cv$cv_table$PLS_Components, 
+                                variogram_dist_fract = trim10_cv$cv_table$Variogram_Distance_Fraction)
 
-```
-
-
-## Averaging of 1 sec data at each stop
-
-??? Use averages
-
-```{r}
-
-```
-
-## Annual averages 
-
-Trim 10% observations
-
-```{r}
-
-```
-
-Windosrize extreme stop readings 
-
-```{r}
-# #windosrized alternative 
-# ufp <- ufp %>%
-#   group_by(site_id) %>%
-#   mutate(
-#     ufp_wind = ifelse(ptrak_ct_cm3 > quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (1-trim_quantile), na.rm = T), 
-#                       ifelse(ptrak_ct_cm3 < quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), quantile(ptrak_ct_cm3, (trim_quantile), na.rm = T), 
-#                              ptrak_ct_cm3)))
-
+windsorize_uk <- uk_predictions(dt = windsorized,
+                                cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+                                y_name = "log_ufp",
+                                cov_names. = cov_names,
+                                pls_comp = windsorize_cv$cv_table$PLS_Components, 
+                                variogram_dist_fract = windsorize_cv$cv_table$Variogram_Distance_Fraction)
+ 
+uw_uk <- uk_predictions(dt = uw,
+                        cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+                        y_name = "log_ufp",
+                        cov_names. = cov_names,
+                        pls_comp = uw_cv$cv_table$PLS_Components, 
+                        variogram_dist_fract = uw_cv$cv_table$Variogram_Distance_Fraction)
 
 ```
 
-Use different annual averages
-- UW ?
+Residual model parameters for final UK models
 
 ```{r}
-
-```
-
-## UK Model
-
-Differeent number of PLS components
-
-```{r}
-
-```
-
-
-? [time permitting] Normalize to the Roosevelt garage 
-
-```{r}
+cbind(Analysis, 
+      rbind(
+        primary_analysis_uk$residual_model_table, 
+        native_scale_uk$residual_model_table, 
+        means_uk$residual_model_table, 
+        trim10_uk$residual_model_table, 
+        windsorize_uk$residual_model_table, 
+        uw_uk$residual_model_table 
+        )) %>%   
+  mutate(Range_m = round(Range_m),
+         # Partial_Sill = round(Partial_Sill, 3),
+         # Nugget = round(Nugget, 3)
+         
+         ) %>%
+  kable(caption = "Final UK residual model parameters for sensitivity analyses", 
+        digits = 3
+        ) %>%
+  kable_styling()
 
 ```
 
 # All results
 
-Table 
-e.g. model, distribution of predictions, CV R2, RMSE, 
-```{r}
+# Predictions
 
+combine all results 
+
+```{r}
+join_dfs_by <- c("site_id", "uk_pred")
+  
+all_predictions <- primary_analysis_uk$dt %>% 
+  select(site_id, latitude, longitude, 
+         primary_uk = uk_pred) %>%
+  #native scale
+  left_join(native_scale_uk$dt[,join_dfs_by], by = "site_id") %>%
+  rename(native_scale_uk = uk_pred) %>%
+  # stop means
+  left_join(means_uk$dt[,join_dfs_by], by = "site_id") %>%
+  rename(means_uk = uk_pred) %>%
+  # trim 10%
+  left_join(trim10_uk$dt[,join_dfs_by], by = "site_id") %>%
+  rename(trim10_uk = uk_pred) %>%
+  # windsorized
+  left_join(windsorize_uk$dt[,join_dfs_by], by = "site_id") %>%
+  rename(windsorize_uk = uk_pred) %>%
+  # windsorized
+  left_join(uw_uk$dt[,join_dfs_by], by = "site_id") %>%
+  rename(uw_uk = uk_pred) %>%
+  # estimates on native scale if not already
+  mutate_at(vars(contains("uk"), -contains("native")) , ~exp(.))
+
+uk_names <- names(all_predictions)[grepl("uk", names(all_predictions))]
+
+```
+
+UFP prediction distribution 
+ 
+```{r}
+all_predictions_l <- all_predictions %>% gather("analysis", "prediction", contains("uk")) %>%
+  mutate(analysis = str_replace(analysis, "_uk", ""),
+         analysis = relevel(factor(analysis), ref = "primary")) 
+
+# table 
+all_predictions_l %>%
+  group_by(analysis) %>%
+  distribution.table(var.string = "prediction") %>%
+  kable(caption = "Distribution of UFP predictions (pt/cm3) for primary and sensitivity analyses") %>%
+  kable_styling()
+
+# density plot
+all_predictions_l %>%
+  ggplot(aes(x=prediction, fill = analysis)) + 
+  geom_density(alpha = 0.2) + 
+  labs(fill = "Analysis",
+       title = "Distribution of UFP predictions (pt/cm3) for primary and sensitivity analyses")
+   
 ```
 
 Scatterplots around 1-1 line
 
 ```{r}
+max_plot <- max(all_predictions_l$prediction)
+min_plot <- min(all_predictions_l$prediction)
+  
+all_predictions %>%
+  gather("analysis", "prediction", contains("uk"), -contains("primary")) %>%
+  mutate(analysis = str_replace(analysis, "_uk", "")) %>% 
+  ggplot(aes(x = primary_uk, y = prediction, group = analysis, col = analysis)) + 
+  geom_point(aes(col = analysis), alpha = 0.2) + 
+  geom_abline(intercept = 0, slope = 1) + 
+  geom_smooth() +
+  xlim(min_plot, max_plot) +
+  ylim(min_plot, max_plot) +
+  labs(x = "Primary Analysis",
+       y = "Sensitivity Analysis",
+       title = "UFP predictions (pt/cm3) from different UK models") + 
+  facet_wrap(~analysis)
+  
+```
+
+Maps
+ 
+```{r, fig.height=10}
+# dot map
+#list to store maps
+dot_maps <-list()
+
+for(i in seq_along(uk_names)) {
+  #i=1
+  mymap <- all_predictions %>% map_fn(color_by = uk_names[i], map_title = "")
+  
+  dot_maps[i] <- list(mymap)
+  names(dot_maps)[i] <- uk_names[i]
+}
+
+ggarrange(plotlist = dot_maps,
+          # dot_maps$primary_uk,
+          # dot_maps$native_scale_uk, 
+          # dot_maps$means_uk,
+          # dot_maps$trim10_uk,
+          # dot_maps$windsorize_uk,
+          # dot_maps$uw_uk,
+          ncol = 3, nrow = 2,
+          common.legend = T, legend = "right",
+          labels = uk_names
+          ) %>%
+  annotate_figure(top = "Annual average UFP predictions from different UK models" ) 
+   
+```
+
+```{r, interpolation code exp}
+### --> ?edit? - example of interpolation code
+
+# # Interpolate to a regularly spaced grid and store as a list
+# interpolation_grid <- with(act_predictions, interp(x = longitude, y = latitude, z = ufp_uk_pred))  
+# 
+# # expand grid to dataframe
+# grid_dens_expand <- with (interpolation_grid, expand.grid(x=x, y=y)) %>%
+#   mutate(z = as.vector(interpolation_grid$z),
+#          z = ifelse(is.na(z), 0, z)) 
+# 
+# # base map 
+# base_map_pred <- grid_dens_expand %>%
+#   #mutate_all(as.numeric) %>%
+#   map_base(latitude_name = "y", longitude_name = "x",
+#            include_study_area = T,
+#            map_title = "Interpolation of Annual Average UFP Predictions") 
+# 
+# base_map_pred + stat_contour(aes(x = x, y = y,
+#                                  z = z, fill = ..level..,),
+#                              alpha = 0.05,
+#                             geom = "polygon", 
+#                             bins = 50,
+#                             data = grid_dens_expand) +
+#   scale_fill_gradient(name = "UFP (pt/cm3)",
+#                       low = "yellow", high = "red")
 
 ```
 
-
-
-Map predictions   
-- dot plot   
-- interpolation plot   
+## Prediction differences 
 
 ```{r}
+# calculate difference between sensitivity & primary estimates
+pred_differences <- all_predictions %>%
+  mutate_at(vars(contains("uk"), -contains("primary")), ~.-primary_uk) %>%
+  select(-primary_uk)
+
+#density plot
+pred_differences %>% gather("analysis", "prediction_diff", contains("uk")) %>%
+  ggplot(aes(x = prediction_diff, fill = analysis)) + 
+  geom_density(alpha = 0.3) + 
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_wrap(~analysis, 
+             #scales = "free"
+             ) +
+  labs(x = "UFP prediction differnce (pt/cm3)",
+       title = "Difference in annual average UFP predictions relative to primary UK model"
+       )
+
+# distribution table
+pred_differences %>% gather("analysis", "prediction_diff", contains("uk")) %>%
+  group_by(analysis) %>%
+  distribution.table(var.string = "prediction_diff") %>%
+  kable(caption = "Difference in annual average UFP predictions relative to primary UK model") %>%
+  kable_styling()
 
 ```
 
-Map prediction differences 
+Maps
 
-```{r}
+```{r, fig.height=10}
 
+difference_maps <-list()
+
+for(i in seq_along(uk_names[2:length(uk_names)])) {
+  #i=2
+  pred_differences$color_by <- pred_differences[[uk_names[i+1]]]
+  
+  mymap <- pred_differences %>% map_base() +
+    geom_point(data = pred_differences,
+               aes(x = longitude, y = latitude, col = color_by),
+               alpha = 0.3, size = 2) +
+    scale_color_gradient(name = "pt/cm3")  
+  
+  difference_maps[i] <- list(mymap)
+  names(difference_maps)[i] <- uk_names[i+1]
+}
+
+ggarrange(plotlist = difference_maps,
+          ncol = 3, nrow = 2,
+          common.legend = T, legend = "right",
+          labels = uk_names[2:length(uk_names)]
+          ) %>%
+  annotate_figure(top = "Difference in annual average UFP predictions relative to primary UK model" ) 
+ 
 ```
 

@@ -56,6 +56,7 @@ pacman::p_load(tidyverse,
                )   
 
 # source global variables & functions
+source("0.Global_Fns.R")
 source(file.path("A2.0.1_Var&Fns.R"))
 source(file.path("ONA smoothing_5_channels.R"))
 
@@ -599,14 +600,14 @@ Make wide format.
 mm.w.median <- mm %>%
   select(-mean_value) %>%
   spread(variable, median_value) %>%  #
-  rename_at(vars(contains("ptrak"), contains("ma200"), contains("scan")), ~(paste0(., "_median"))) 
+  rename_at(vars(contains("ptrak"), contains("ona"), contains("scan")), ~(paste0(., "_median"))) 
 
 mm.w.mean <- mm %>%
   select(-median_value) %>%
   spread(variable, mean_value) %>%  #
-  rename_at(vars(contains("ptrak"), contains("ma200"), contains("scan")), ~(paste0(., "_mean"))) 
+  rename_at(vars(contains("ptrak"), contains("ona"), contains("scan")), ~(paste0(., "_mean"))) 
 
-mm.w <- left_join(mm.w.median, mm.w.mean)
+mm.w <- full_join(mm.w.median, mm.w.mean)
  
 ```
 

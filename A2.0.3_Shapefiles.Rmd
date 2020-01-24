@@ -39,7 +39,7 @@ Monitoring area
 # get shapefile
 #rgdal::readOGR(file.path("..", "Mobile Monitoring", "GIS", "driving regions selected", "driving_regions_selected.shp")) 
 
-monitoring_area <- rgdal::readOGR(file.path("..",  "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "Driving Regions", "monitoring_area.shp")) 
+monitoring_area <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Study Area", "monitoring_area_filled_in_land.shp")) 
   
 # make df
 monitoring_area_df <- fortify(monitoring_area)
@@ -60,17 +60,30 @@ monitoring_area_df <- fortify(monitoring_area)
 Study area (buffered monitoring area)
 
 ```{r}
-study_area <- rgdal::readOGR(file.path("..",  "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "Driving Regions", "monitoring_area_0.04deg_buffer.shp")) 
+pacman::p_load(maptools) #? may be required by fortify?
+
+study_area <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Study Area",
+                                       #"oval_around_monitoring_area_land.shp"
+                                       "oval_around_monitoring_area_land_clean.shp"
+                                       
+                                       # these look worse
+                                       #"oval_around_monitoring_area.shp"
+                                       #"oval_test.shp"
+                                       )) 
   
 # make df
-study_area_df <- fortify(study_area)
+study_area_df <- fortify(study_area) #%>%
+  # doesn't help?
+ # mutate_at(vars(piece:group),  ~as.numeric(.))
+
+saveRDS(study_area_df, file = file.path("Data", "GIS", "study_area_df.rda"))
 
 ```
 
 ? Routes
 ```{r}
 #GIS/routes 190910/All routes.shp 
-routes <- rgdal::readOGR(file.path("..",  "Mobile Monitoring", "GIS", "routes 190910", "All routes.shp")) 
+routes <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Routes 190910", "All routes.shp")) 
   
 # make df
 routes_df <- fortify(routes)

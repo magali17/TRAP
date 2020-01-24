@@ -49,13 +49,13 @@ knitr::opts_chunk$set(echo = F,
                       fig.height = 6, fig.width = 10
                       )  
 
-# Clear workspace of all objects and unload all extra (non-base) packages
-rm(list = ls(all = TRUE))
-if (!is.null(sessionInfo()$otherPkgs)) {
-  res <- suppressWarnings(
-    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
-      detach, character.only=TRUE, unload=TRUE, force=TRUE))
-}
+# # Clear workspace of all objects and unload all extra (non-base) packages
+# rm(list = ls(all = TRUE))
+# if (!is.null(sessionInfo()$otherPkgs)) {
+#   res <- suppressWarnings(
+#     lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+#       detach, character.only=TRUE, unload=TRUE, force=TRUE))
+# }
 
 pacman::p_load(
   #plots & tables
@@ -1687,6 +1687,13 @@ aqs_ufp %>%
 
 # Sensitivity Analyses
 
+### -->    
+## Study/Monitoring areas   
+
+```{r}
+
+```
+
 ## covariates used
 
 Use UFP and proximity covariaets in the native scale.
@@ -1714,8 +1721,9 @@ annual_ufp_and_cov_native_scale <- annual_ufp_and_cov %>%
 ## Averaging of 1 sec data at each stop (vs median)
 
 ```{r}
-stop_mean_results <- estimate_annual_avg(dt = ufp_mean)
+stop_mean_results <- estimate_annual_avg(dt = ufp_mean, estimate_label = "stop_means")
 
+ 
 
 ```
 
@@ -1723,47 +1731,43 @@ stop_mean_results <- estimate_annual_avg(dt = ufp_mean)
 
 ```{r}
 # Trim 10% observations
-trim10_results <- estimate_annual_avg(dt = ufp_trim10)
+trim10_results <- estimate_annual_avg(dt = ufp_trim10, estimate_label = "trim10")
 
 # Windosrize extreme stop readings (top/bottom 5%) 
-windsorized_results <- estimate_annual_avg(dt = ufp_windsorized)
+windsorized_results <- estimate_annual_avg(dt = ufp_windsorized, estimate_label = "windsorize")
 
 # Use different annual averages
 # # estimate unweighted annual averages
 uw_results <- estimate_annual_avg(dt = ufp, 
-                                      lm_x_names = "site_id")
+                                  lm_x_names = "site_id", 
+                                  estimate_label = "uw")
 
 ```
 
-### --> summarize all sensitivity analyses 
-### --> ? don't include native scale? 
-
 ```{r}
-join_dfs_by <- c("site_id", "yhat")
+#join_dfs_by <- c("site_id", "ufp")
   
 all_annual <- annual_ufp_and_cov %>% 
   select(site_id, latitude, longitude, 
-         primary_annual = ufp) %>%
-  #native scale
-  left_join(annual_ufp_and_cov_native_scale[,c("site_id", "ufp")], by = "site_id") %>%
-  rename(native_scale_annual = ufp) %>%
+         primary_ufp = ufp) %>%
   # stop means
-  left_join(stop_mean_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
-  rename(means_annual = yhat) %>%
+  left_join(stop_mean_results$annual_estimates, by = "site_id") %>%
+  #rename(means_ufp = ufp) %>%
   # trim 10%
-  left_join(trim10_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
-  rename(trim10_annual = yhat) %>%
+  left_join(trim10_results$annual_estimates, #[,join_dfs_by], 
+            by = "site_id") %>%
+  #rename(trim10_ufp = ufp) %>%
   # windsorized
-  left_join(windsorized_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
-  rename(windsorize_annual = yhat) %>%
+  left_join(windsorized_results$annual_estimates, by = "site_id") %>%
+  #rename(windsorize_ufp = ufp) %>%
   # windsorized
-  left_join(uw_results$annual_estimates[,join_dfs_by], by = "site_id") %>%
-  rename(uw_annual = yhat)  
+  left_join(uw_results$annual_estimates, by = "site_id") #%>%
+  #rename(uw_ufp = ufp)  
 
-annual_names <- names(all_annual)[grepl("annual", names(all_annual))]
+annual_names <- names(all_annual)[grepl("ufp", names(all_annual))]
 
-all_annual_l <- all_annual %>% gather("analysis", "prediction", contains("annual")) %>%
-  mutate(analysis = str_replace(analysis, "_annual", ""),
+all_annual_l <- all_annual %>% gather("analysis", "prediction", contains("ufp")) %>%
+  mutate(analysis = str_replace(analysis, "_ufp", ""),
          analysis = relevel(factor(analysis), ref = "primary")) 
 
 # table 
@@ -1789,9 +1793,9 @@ max_plot <- max(all_annual_l$prediction)
 min_plot <- min(all_annual_l$prediction)
   
 all_annual %>%
-  gather("analysis", "prediction", contains("annual"), -contains("primary")) %>%
-  mutate(analysis = str_replace(analysis, "_annual", "")) %>% 
-  ggplot(aes(x = primary_annual, y = prediction, group = analysis, col = analysis)) + 
+  gather("analysis", "prediction", contains("ufp"), -contains("primary")) %>%
+  mutate(analysis = str_replace(analysis, "_ufp", "")) %>% 
+  ggplot(aes(x = primary_ufp, y = prediction, group = analysis, col = analysis)) + 
   geom_point(aes(col = analysis), alpha = 0.2) + 
   geom_abline(intercept = 0, slope = 1) + 
   geom_smooth() +
@@ -1826,15 +1830,79 @@ ggarrange(plotlist = dot_maps,
           ) %>%
   annotate_figure(top = "Annual average UFP estimates from different methods" ) 
    
+```
 
+## Prediction differences 
+
+```{r}
+# calculate difference between sensitivity & primary estimates
+pred_differences <- all_annual %>%
+  mutate_at(vars(contains("ufp"), -contains("primary")), ~.-primary_ufp) %>%
+  select(-contains("primary"))
+
+#density plot
+pred_differences %>% gather("analysis", "prediction_diff", contains("ufp")) %>%
+  ggplot(aes(x = prediction_diff, fill = analysis)) + 
+  geom_density(alpha = 0.3) + 
+  geom_vline(xintercept = 0, linetype = "dashed") +
+  facet_wrap(~analysis, 
+             #scales = "free"
+             ) +
+  labs(x = "UFP estimate differnce (pt/cm3)",
+       title = "Difference in annual average UFP estimate relative to primary method"
+       )
+
+# distribution table
+pred_differences %>% gather("analysis", "prediction_diff", contains("ufp")) %>%
+  group_by(analysis) %>%
+  distribution.table(var.string = "prediction_diff") %>%
+  kable(caption = "Difference in annual average UFP estimate relative to primary method") %>%
+  kable_styling()
+
+```
+
+Maps
+
+### --> map coloring seems off - wrong? trim10 estimates should be lower. legend should show < 0
+
+```{r, fig.height=10}
+
+difference_maps <-list()
+
+for(i in seq_along(annual_names[2:length(annual_names)])) {
+  #i=2
+  pred_differences$color_by <- pred_differences[[annual_names[i+1]]]
+  
+  mymap <- pred_differences %>% map_base() +
+    geom_point(data = pred_differences,
+               aes(x = longitude, y = latitude, col = color_by),
+               alpha = 0.3, size = 2) +
+    scale_color_gradient(name = "pt/cm3")  
+  
+  difference_maps[i] <- list(mymap)
+  names(difference_maps)[i] <- annual_names[i+1]
+}
+
+ggarrange(plotlist = difference_maps,
+          ncol = 3, nrow = 2,
+          common.legend = T, legend = "right",
+          labels = annual_names[2:length(annual_names)]
+          ) %>%
+  annotate_figure(top = "Difference in annual average UFP estimate relative to primary method" ) 
  
-
 ```
 
 
 save datasets. 
 
 ```{r}
+# all annual estimates
+#saveRDS(all_annual, file.path("Data", "Aim 2", "Mobile Monitoring", "all_annual_estimates.rda"))
+ 
+
+
+
+###  ---> OLD. DELETE??
 # # data for UK
 # # primary analysis
 # saveRDS(annual_ufp_and_cov, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))

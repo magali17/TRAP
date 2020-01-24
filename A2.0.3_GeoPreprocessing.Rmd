@@ -56,11 +56,11 @@ tables_path <- file.path(tables_path0, "0. Geocovariates")
 
 cov_mm0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
 cov_act0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "cohort_covars_20200107.csv")) 
-act_in_study0 <- read.csv(file.path("..", "GIS", "Shapefiles", "ACT", "ACT_selected", "cohort_in_monitoring_area_0.04deg_buffer.csv")) %>%
+act_in_study0 <- read.csv(file.path("..", "GIS", "Shapefiles", "ACT", "ACT_selected", "act_in_study_area.csv")) %>%
   select(location_id = location_i,
-         site_location = site_type)  %>%
+         site_location = location)  %>%
   # label locations within monitoring vs within a buffered area around the monitoring location
-  mutate(site_location = relevel(factor(ifelse(site_location == "", "additional within buffer", as.character(site_location))), ref = "monitoring"))  
+  mutate(site_location = relevel(site_location, ref = "monitoring"))  
 
 
 ```
@@ -104,18 +104,24 @@ cov_mm0 %>%
 ```{r}
 data.frame(
   Locations = c("Entire Cohort", 
-                "In Study", 
-                "In monitoring area", 
-                "Within a buffer of the monitoring area"),
+                "Spatiotemporal modeling area",
+                "Study area", 
+                "Mobile monitoring area" 
+                #"Surrounding monitoring area"
+                ),
   N = c(nrow(cov_act0), 
+        NA,
         nrow(act_in_study0),
-        length(act_in_study0$site_location[act_in_study0$site_location == "monitoring"]),
-        length(act_in_study0$site_location[act_in_study0$site_location != "monitoring"])
+        length(act_in_study0$site_location[act_in_study0$site_location == "monitoring"])
+        #length(act_in_study0$site_location[act_in_study0$site_location == "study"])
         )
+) %>%
+  mutate(Proportion_of_total_loc = N/nrow(cov_act0)
   ) %>%
-kable(caption = "ACT cohort locations included in this study") %>% 
-  add_indent(3:4) %>% 
-  add_footnote("buffered area is a 0.04 degree (~ 5k meter) buffer around the monitoring area") %>%
+kable(caption = "ACT cohort locations included in this study",
+      digits = 2
+      ) %>% 
+  #add_indent(3:4) %>% 
   kable_styling()
 
 
@@ -123,15 +129,20 @@ kable(caption = "ACT cohort locations included in this study") %>%
 
 Map of monitoring and study area.
 
+### --> study area plotting issue
+
 ```{r}
 cov_mm0 %>%
-  map_fn(color_map = F, 
-         #need this for fn to work even though not using
-         color_by = "region_nw",
-         include_monitoring_area = T, #monitoring_area_alpha = 1,
-         include_study_area = T, #study_area_alpha = 0.4,
-         map_title = "Monitoring and study areas"
-         )
+  # map_fn(color_map = F,
+  #        color_by = "region_nw",
+  #   include_monitoring_area = T, #monitoring_area_alpha = 1,
+  #          include_study_area = T, #study_area_alpha = 0.4,     
+  #        )
+
+  map_base(include_monitoring_area = T, #monitoring_area_alpha = 1,
+           include_study_area = T, #study_area_alpha = 0.4,
+           map_title = "Monitoring and study areas"
+           )
 
 ```
 
@@ -339,6 +350,8 @@ cov_descrip %>% kable(caption = paste0("Geocovariates and buffers to be used in 
 # Sensitivity Analyses
 
 Change TRAP indicator variable [? & UFP] transformations (log-transformed to navtive)
+
+## --> ? delete? using exponentiated log_scale dataset. has the additional adv that min proximity will be 10 m (similar to log-transformed values)
 
 ```{r}
 cov_preprocessed_native <- covariate.preprocess(covars.mon = cov_mm1, 

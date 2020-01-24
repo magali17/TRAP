@@ -18,7 +18,7 @@ editor_options:
 
 ```{r}
 # --> to do
- 
+# ? switch from geoR to ___ after general 
 
 ```
 
@@ -26,7 +26,21 @@ editor_options:
 
 
 
+# Approach    
 
+1. Split up the data (~ 308 locations) into a validation (10%), training/test (90%) set.
+
+2. Conduct cross-validation using the training/test set to select the number of PLS components, variogram plotting distance, and residual model for UK.
+
+3. Fit a semi-final model to all of the training and test set data with the selected parameters. Use this model to estimate the out-of-sample model performance on the validation set.
+
+4. Fit a final model to all of the data. 
+
+5. Predict at ACT participant locations.
+
+6. Repeate for various sensitivity analyses.
+
+### --> pop10 not in covariates...others missing??
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
@@ -63,23 +77,85 @@ source("A2.0.1_Var&Fns.R")
 images_path <- file.path(images_path0, "3. UK")
 tables_path <- file.path(tables_path0, "3. UK")
 
+# act geocovariates
+cov_act <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_log_scale_preprocessed.rda"))
+
+#### NEW  ####
+# all annual estimates
+all_annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_annual_estimates.rda"))
+
+#covariates
+cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda")) %>%
+  select(-contains("pop_"), -contains("pop90_"))
+
+site_loc_vars <- cov_mm %>%select(site_id:lambert_y) %>% names()
+
+#variable names in log and native scale
+non_proximity_vars <- names(cov_mm)[!grepl("m_to_", names(cov_mm)) & !names(cov_mm) %in% site_loc_vars]
+proximity_vars_log <- names(cov_mm)[grepl("m_to_", names(cov_mm))]
+proximity_vars_native <- str_replace(string = proximity_vars_log, pattern = "log_", replacement = "")
+cov_names_log <- append(non_proximity_vars, proximity_vars_log)
+cov_names_native <- append(non_proximity_vars, proximity_vars_native)
+
+proximity_vars_native <- cov_mm %>%
+  select(site_id, proximity_vars_log) %>%
+  mutate_at(proximity_vars_log, ~exp(.)) %>%
+  rename_at(proximity_vars_log, ~sub(x = ., "log_", ""))
+
+all_annual <- all_annual0 %>%
+  #convert to log
+  mutate_at(vars(contains("ufp")), ~log(.)) %>%
+  mutate(native_scale_ufp = exp(primary_ufp)) %>%
+  left_join(cov_mm) %>%
+  # add native scale proximity variables
+  left_join(proximity_vars_native)
+
+ufp_names <- names(all_annual)[grepl("ufp", names(all_annual))]
+
+# add native proximity variables to act
+proximity_vars_native_act <- cov_act %>%
+  select(site_id, proximity_vars_log) %>%
+  mutate_at(proximity_vars_log, ~exp(.)) %>%
+  rename_at(proximity_vars_log, ~sub(x = ., "log_", ""))
+
+cov_act <- left_join(cov_act, proximity_vars_native_act)
+
+##########################
+# create validation index
+validation_idx <- sample(c(TRUE, FALSE), replace = T,  
+                         size = nrow(all_annual), 
+                         prob = c(.1, .9))
+
+k <- 10
+
+##########
+
+```
+
+
+
+
+
+
+# ---> ? delete ?
+
+```{r}
+
 #read in data
-annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))  
+annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda")) %>%
+  drop_na()
           
 loc_vars <- c("lambert_x", "lambert_y")
 
+# [may not need if use fns]
 site_locations <- annual0 %>%
   select(site_id, loc_vars) #latitude, longitude
 
-site_locations_stops <- site_locations$site_id[grepl("MS", site_locations$site_id)]
-  
 cov_names <- annual0 %>%
   select(elev_elevation:log_m_to_a23) %>%
   names()
 
-cov_act <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_log_scale_preprocessed.rda"))
-
-############################### SENSITIVITY ANALYSES ###############################
+###########33
 
 # native scale proximity covariates
 annual_native_scale <- annual0 %>%
@@ -124,32 +200,16 @@ uw <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_uw_mea
 
 ```
 
-# Approach    
-
-1. use 10 folds to split up the data (annual averages and geocovariates for ~ 308 locations) into a training (90%) and validation (10%) dataset 
-  
-2. Run PLS on the training set to calculate the scores for various components (start with 1 component).
-
-3. Fit UK models to the training data with the selected number of PLS components and variogram settings (e.g., max distance)
-
-4. Repeat steps 2-3 nine more times to calculate cross-validated RMSE and R2
-
-5. Repeat steps 2-4 with an increasing numbber of PLS components (e.g., 1-10) and for different variogram settings
-
-6. Fit a final model with the selected parameters (number of PLS components, residual model) and all of the data.
-
-7. Estimate the out-of-sample RMSE and R2 for AQS sites using the final UK model.
-
-8. Predict at ACT participant locations.
-
 
 # PLS to create summary features of geocovariates. 
 
 Create training,  test and AQS set.
 
+### --> don't need this if using code at end. coding is slightly different (e.g. dealing w/ AQS sites).
+
 ```{r, results="hide"}
 #for creating sets in data & CV later 
-k <- 10
+
 
 # 1. fit PLS using training set to ID # features to use
 annual_all <- annual0 %>%
@@ -233,11 +293,12 @@ for(i in seq_len(use_n_scores)) {
     #j=1
     max.plot.dist <- max.dist*dist_fractions[j]
 
-  
+ 
+    
   ##Empirical Variogram
   variog_train_test <- variog(geo_train_test,
                          #create equally spaced bins for all distances plotted
-                         uvec=c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
+                        uvec =c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
                         #UK
                         trend = cov_trend, 
                         messages = F  
@@ -245,6 +306,11 @@ for(i in seq_len(use_n_scores)) {
 
   #plot(variog_train)
   
+  # # delete? trying to create bins w/ same # of observations/bin. but wont work for diff distances plotted?
+   # t <- variog(geo_train_test, option = "cloud", max.dist = max.dist)
+   # hist(t$u)
+  # cut_number(t$u, n = 10)
+   
   wls_ests_train_test <- variofit(variog_train_test, cov.model = "exp",
                                               messages = F)
   
@@ -554,10 +620,9 @@ Geodataset.
 ############################# UK #############################
 # add site_id, ufp & lat/long
 pls_df_train_test <- cbind(
-  annual_train_test[c("site_id", "log_ufp")],
+  annual_train_test, #[c("site_id", "log_ufp")],
   scores_train_test
-) %>%
-  left_join(site_locations) 
+) #%>% left_join(site_locations) 
 
 # create geodata for test set
 geo_train_test <- as.geodata(pls_df_train_test , 
@@ -916,6 +981,8 @@ UK Yhat = regression_prediction + kriging + error
 * the regression prediction (yhat_regression) from UK excludes kriging and model error 
 * the UK prediction (yhat_uk) includes the regression prediction, kriging and model error (final estimate used)
 
+### --> map the high values for which UK has greater influence on
+
 ```{r}
 # save UK betas
 uk_betas <- uk_act$beta.est 
@@ -960,6 +1027,10 @@ colo.plot(y.variable = "uk_prediction", y.label = "UK Prediction",
           rmse.digits = 2,
           coef_digits = 2
           ) 
+
+```
+
+```{r}
   
 uk_decompose %>%
   ggplot(aes(x=reg_prediction_normalized)) + 
@@ -1013,128 +1084,21 @@ scores_mm_act %>%
 
 # Sensitivity Analyses
 
-```{r}
- 
-# # using stop means
-# stop_means 
-# 
-# # trim 10% top/bottom stop observations
-# trim10 
-# 
-# # Windosrize extremes
-# windsorized 
-# 
-# # different regression to estimate annual average
-# uw 
-
-
-
-```
+### --> add diff study/monitoring areas
 
 ## CV 
-only using stops (excluding AQS sites)
- 
+
 ```{r}
 set.seed(1)
 ## --> update these later
-max_pls_comp. <- 5
-dist_fract. <- c(0.05, seq(0.1, 0.4, by=0.1))
-folds <- k
- 
-```
+max_pls_comp. <- 3
+dist_fract. <- c(#0.05, 
+  seq(0.1, 0.3, by=0.2))
+folds <- 2 #k
 
-Native Scale UFP and proximity variables
+analysis_names <- str_replace(ufp_names, "_ufp", "")
 
-```{r, results="hide"}
-
-# dt2 = annual_native_scale
-# max_pls_comp = max_pls_comp.
-# dist_fract = dist_fract.
-# # to be passed to pls_uk_cv_predictions()
-# y_name.. = "ufp"
-# cov_names.. = cov_names_native
-# #CV folds
-# k. = 3
-# exponentiate_obs_and_pred = F
-# site_locations.. = site_locations
-
-
-# primary analysis
-  #%>% left_join(site_locations, by = "site_id") %>%
-primary_analysis_cv <-  pls_uk_cv_eval(dt2 = annual_train_test,
-               max_pls_comp = max_pls_comp.,
-               dist_fract = dist_fract., 
-               y_name.. = "log_ufp",
-               cov_names.. = cov_names, 
-               k. = folds,
-               exponentiate_obs_and_pred = T) 
-################3
-# t <- annual_train_test %>% left_join(site_locations, by = "site_id")
-# dt2 = t
-# max_pls_comp = max_pls_comp.
-#  dist_fract = dist_fract.
-#  y_name.. = "log_ufp"
-#  cov_names.. = cov_names
-#  k. = folds
-#  exponentiate_obs_and_pred = T
-
-
-###################
-
-# native scale 
-native_scale_cv <- pls_uk_cv_eval(dt2 = annual_native_scale,
-               max_pls_comp = max_pls_comp.,
-               dist_fract = dist_fract., 
-               # to be passed to pls_uk_cv_predictions()
-               y_name.. = "ufp",
-               cov_names.. = cov_names_native,
-               #CV folds
-               k. = folds,
-               # already in native scale
-               exponentiate_obs_and_pred = F)
-
-#using stop means 
-means_cv <- pls_uk_cv_eval(dt2 = stop_means,
-               max_pls_comp = max_pls_comp.,
-               dist_fract = dist_fract., 
-               y_name.. = "log_ufp",
-               cov_names.. = cov_names, 
-               k. = folds,
-               exponentiate_obs_and_pred = T) 
-
-#trim 10
-trim10_cv <- pls_uk_cv_eval(dt2 = trim10 ,
-               max_pls_comp = max_pls_comp.,
-               dist_fract = dist_fract., 
-               y_name.. = "log_ufp",
-               cov_names.. = cov_names, 
-               k. = folds,
-               exponentiate_obs_and_pred = T) 
-
-# Windosrize extremes 
-windsorize_cv <- pls_uk_cv_eval(dt2 = windsorized,
-               max_pls_comp = max_pls_comp.,
-               dist_fract = dist_fract., 
-               y_name.. = "log_ufp",
-               cov_names.. = cov_names, 
-               k. = folds,
-               exponentiate_obs_and_pred = T) 
-
-# unweighted annual averages
-uw_cv <- pls_uk_cv_eval(dt2 = uw,
-               max_pls_comp = max_pls_comp.,
-               dist_fract = dist_fract., 
-               y_name.. = "log_ufp",
-               cov_names.. = cov_names, 
-               k. = folds,
-               exponentiate_obs_and_pred = T) 
-```
-
-PLS components and variogram distance fraction selected via cross-validation
-
-```{r}
-# compare results 
-Analysis = c("Primary analysis: using stop medians; trimming 5%; regression to estimate season-, TOW2- and TOD5-adjusted UFP; log-transformed UFP and proximity covariates",
+Analysis_description = c("Primary analysis: using stop medians; trimming 5%; regression to estimate season-, TOW2- and TOD5-adjusted UFP; log-transformed UFP and proximity covariates",
               "Native scale predictions and proximity variables (vs log-transformed)",
              "Using stop means (vs medians)",
              "Trim 10% of each site's highest and lowest stop readings (vs 5%)",
@@ -1142,103 +1106,469 @@ Analysis = c("Primary analysis: using stop medians; trimming 5%; regression to e
              "Use site-specific, unweighted annual averages (vs season-, TOW2-, TOD5-adjusted)"
              )
 
-cbind(Analysis, 
-      rbind(
-        primary_analysis_cv$cv_table,
-        native_scale_cv$cv_table,
-        means_cv$cv_table,
-        trim10_cv$cv_table,
-        windsorize_cv$cv_table,
-        uw_cv$cv_table
-        )) %>%   
+
+#annual_ufp_names <- ifelse(analysis_names %in% c("primary", "native_scale"), "ufp", "yhat")
+
+```
+
+### --> warning msgs: In variofit(vario = variog_train, ini = wls_ests_train,  ... : unreasonable initial value for sigmasq (too high)
+
+PLS components and variogram distance fraction selected via cross-validation on train/test set
+
+```{r, results="hide"}
+cv_results <- data.frame()
+
+for (i in seq_along(ufp_names)) {
+  #i=6
+  # non-nataive scale analyses
+  if(!grepl("native_scale", ufp_names[i])) {
+    df_cv <-  pls_uk_cv_eval(dt2 = all_annual[!validation_idx,],
+                   max_pls_comp = max_pls_comp.,
+                   dist_fract = dist_fract., 
+                   y_name.. = ufp_names[i],
+                   k. = folds,
+                   # diff than if statement below
+                   cov_names.. = cov_names_log, 
+                   exponentiate_obs_and_pred = T)
+    
+    cv_results <- rbind(cv_results, df_cv)
+  }
+  
+  #native scale analyses
+  if(grepl("native_scale", ufp_names[i])) {
+    df_cv <-  pls_uk_cv_eval(dt2 = all_annual[!validation_idx,],
+                   max_pls_comp = max_pls_comp.,
+                   dist_fract = dist_fract., 
+                   y_name.. = ufp_names[i],
+                   k. = folds,
+                   # diff than if statement above
+                   cov_names.. = cov_names_native,
+                   exponentiate_obs_and_pred = F)
+    
+    cv_results <- rbind(cv_results, df_cv)
+    
+    }
+}
+
+cv_results <- cbind(Analysis = ufp_names,
+      Description = Analysis_description,
+      cv_results) %>%
   mutate(RMSE = round(RMSE),
-         R2 = round(R2, 2)
-         ) %>%
+         R2 = round(R2, 2)) 
+
+cv_results %>%
   kable(caption = "PLS components and variogram distance fraction selected via cross-validation for sensitivity analyses") %>%
   kable_styling()
 
 ```
 
-# fit model to all data & make predictions at ACT locations
+```{r}
 
-### --> see native scale partial sill - why so large?
+############### DELETE? HAVE LOOP ABOVE ###############
+# primary_analysis_cv <-  pls_uk_cv_eval(dt2 = annual0[!validation_idx,],
+#                max_pls_comp = max_pls_comp.,
+#                dist_fract = dist_fract., 
+#                y_name.. = "log_ufp",
+#                cov_names.. = cov_names, 
+#                k. = folds,
+#                exponentiate_obs_and_pred = T) 
+# 
+# ################
+#  
+# 
+# ###################
+# 
+# # native scale 
+# native_scale_cv <- pls_uk_cv_eval(dt2 = annual_native_scale[!validation_idx,],
+#                max_pls_comp = max_pls_comp.,
+#                dist_fract = dist_fract., 
+#                # to be passed to pls_uk_cv_predictions()
+#                y_name.. = "ufp",
+#                cov_names.. = cov_names_native,
+#                #CV folds
+#                k. = folds,
+#                # already in native scale
+#                exponentiate_obs_and_pred = F)
+# 
+# #using stop means 
+# means_cv <- pls_uk_cv_eval(dt2 = stop_means[!validation_idx,],
+#                max_pls_comp = max_pls_comp.,
+#                dist_fract = dist_fract., 
+#                y_name.. = "log_ufp",
+#                cov_names.. = cov_names, 
+#                k. = folds,
+#                exponentiate_obs_and_pred = T) 
+# 
+# #trim 10
+# trim10_cv <- pls_uk_cv_eval(dt2 = trim10[!validation_idx,],
+#                max_pls_comp = max_pls_comp.,
+#                dist_fract = dist_fract., 
+#                y_name.. = "log_ufp",
+#                cov_names.. = cov_names, 
+#                k. = folds,
+#                exponentiate_obs_and_pred = T) 
+# 
+# # Windosrize extremes 
+# windsorize_cv <- pls_uk_cv_eval(dt2 = windsorized[!validation_idx,],
+#                max_pls_comp = max_pls_comp.,
+#                dist_fract = dist_fract., 
+#                y_name.. = "log_ufp",
+#                cov_names.. = cov_names, 
+#                k. = folds,
+#                exponentiate_obs_and_pred = T) 
+# 
+# # unweighted annual averages
+# uw_cv <- pls_uk_cv_eval(dt2 = uw[!validation_idx,],
+#                max_pls_comp = max_pls_comp.,
+#                dist_fract = dist_fract., 
+#                y_name.. = "log_ufp",
+#                cov_names.. = cov_names, 
+#                k. = folds,
+#                exponentiate_obs_and_pred = T) 
+```
+
+```{r}
+# compare results 
+# Analysis = c("Primary analysis: using stop medians; trimming 5%; regression to estimate season-, TOW2- and TOD5-adjusted UFP; log-transformed UFP and proximity covariates",
+#               "Native scale predictions and proximity variables (vs log-transformed)",
+#              "Using stop means (vs medians)",
+#              "Trim 10% of each site's highest and lowest stop readings (vs 5%)",
+#              "Windsorize each site's highest and lowest 5% stop readings (vs trimming)",
+#              "Use site-specific, unweighted annual averages (vs season-, TOW2-, TOD5-adjusted)"
+#              )
+
+# cbind(Analysis, 
+#       rbind(
+#         primary_analysis_cv$cv_table,
+#         native_scale_cv$cv_table,
+#         means_cv$cv_table,
+#         trim10_cv$cv_table,
+#         windsorize_cv$cv_table,
+#         uw_cv$cv_table
+#         )) %>%   
+#   mutate(RMSE = round(RMSE),
+#          R2 = round(R2, 2)
+#          ) %>%
+#   kable(caption = "PLS components and variogram distance fraction selected via cross-validation for sensitivity analyses") %>%
+#   kable_styling()
+
+```
+
+# Out of sample model fit on validation set
+
+```{r}
+out_of_sample_valid <- data.frame(ufp_names,
+                                  RMSE = NA,
+                                  R2 = NA)
+
+for (i in seq_along(ufp_names)) {
+  #i=1
+  # get validation results
+  pls_components <- cv_results$PLS_Components[i]
+  pls_variogram_dist <- cv_results$Variogram_Distance_Fraction[i]
+  
+  if(!grepl("native_scale", ufp_names[i])) {
+    
+    df <-  uk_predictions(dt = all_annual[!validation_idx,],
+                     cov_loc_new = all_annual[validation_idx,],
+                      y_name = ufp_names[i],
+                      cov_names. = cov_names_log,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist
+                     )
+    
+    obs <- all_annual[validation_idx, ufp_names[i]] %>% exp()
+    uk_pred <- df$dt$uk_pred %>% exp()
+    
+    out_of_sample_valid$RMSE[i] <- rmse(obs = obs, pred = uk_pred)
+    out_of_sample_valid$R2[i] <- r2_mse_based(obs = obs, pred = uk_pred)
+    }
+  
+  #native scale analyses
+  #i=6
+    if(grepl("native_scale", ufp_names[i])) {
+      
+      df <-  uk_predictions(dt = all_annual[!validation_idx,],
+                     cov_loc_new = all_annual[validation_idx,],
+                      y_name = ufp_names[i],
+                      cov_names. = cov_names_native,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist
+                     )
+    
+    obs <- all_annual[validation_idx, ufp_names[i]]  
+    uk_pred <- df$dt$uk_pred  
+    
+    out_of_sample_valid$RMSE[i] <- rmse(obs = obs, pred = uk_pred)
+    out_of_sample_valid$R2[i] <- r2_mse_based(obs = obs, pred = uk_pred)
+  
+    }
+}
+
+out_of_sample_valid %>%
+  mutate(RMSE = round(RMSE)) %>%
+  kable(caption = "Out-of-sample RMSE and R2 using model parameters from CV  (calculated on validation set).",
+        digits = 2) %>%
+  kable_styling()
+
+```
+
+```{r}
+
+
+
+
+
+##########
+
+# primary_analysis_valid <-  uk_predictions(dt = annual0[!validation_idx,],
+#                  cov_loc_new = annual0[validation_idx,],
+#                   y_name = "log_ufp",
+#                   cov_names. = cov_names,
+#                   pls_comp = primary_analysis_cv$cv_table$PLS_Components, 
+#                   variogram_dist_fract = primary_analysis_cv$cv_table$Variogram_Distance_Fraction)
+# 
+# 
+# 
+# 
+# native_scale_valid <- uk_predictions(dt = annual_native_scale[!validation_idx,],
+#                                   cov_loc_new = annual_native_scale[validation_idx,],
+#                                   y_name = "ufp",
+#                                   cov_names. = cov_names_native,
+#                                   pls_comp = native_scale_cv$cv_table$PLS_Components, 
+#                                   variogram_dist_fract = native_scale_cv$cv_table$Variogram_Distance_Fraction)
+# ###########
+# #native_scale_uk$residual_model_table
+# 
+# 
+# 
+# ########
+# 
+# means_valid <- uk_predictions(dt = stop_means[!validation_idx,],
+#                                 cov_loc_new = stop_means[validation_idx,],
+#                                 y_name = "log_ufp",
+#                                 cov_names. = cov_names,
+#                                 pls_comp = means_cv$cv_table$PLS_Components, 
+#                                 variogram_dist_fract = means_cv$cv_table$Variogram_Distance_Fraction)
+#  
+# trim10_valid <- uk_predictions(dt = trim10[!validation_idx,],
+#                                 cov_loc_new = trim10[validation_idx,],
+#                                 y_name = "log_ufp",
+#                                 cov_names. = cov_names,
+#                                 pls_comp = trim10_cv$cv_table$PLS_Components, 
+#                                 variogram_dist_fract = trim10_cv$cv_table$Variogram_Distance_Fraction)
+# 
+# windsorize_valid <- uk_predictions(dt = windsorized[!validation_idx,],
+#                                 cov_loc_new = windsorized[validation_idx,],
+#                                 y_name = "log_ufp",
+#                                 cov_names. = cov_names,
+#                                 pls_comp = windsorize_cv$cv_table$PLS_Components, 
+#                                 variogram_dist_fract = windsorize_cv$cv_table$Variogram_Distance_Fraction)
+#  
+# uw_valid <- uk_predictions(dt = uw[!validation_idx,],
+#                         cov_loc_new = uw[validation_idx,],
+#                         y_name = "log_ufp",
+#                         cov_names. = cov_names,
+#                         pls_comp = uw_cv$cv_table$PLS_Components, 
+#                         variogram_dist_fract = uw_cv$cv_table$Variogram_Distance_Fraction)
+
+```
+
+```{r}
+# #Out of sample model RMSE and R2 using validation set
+
+# valid_list <- list(primary_analysis_valid,
+#                    native_scale_valid,
+#                    means_valid,
+#                    trim10_valid,
+#                    windsorize_valid,
+#                    uw_valid
+#                    )
+# 
+# names(valid_list) <- analysis_names
+# 
+# valid_df <- data.frame(analisis_name = analysis_names,
+#                  RMSE = NA,
+#                  R2 = NA
+#                  )
+# for (i in seq_along(analysis_names)) {
+# #i=3
+# 
+# dt <- valid_list[[i]]$dt
+# #valid_list[[analysis_names[1]]]$dt
+# 
+# ufp_obs <- dt$ufp
+# 
+# # exponentiate UFP prediction if not in native scale
+# if(analysis_names[i] == "native_scale") {
+#   uk_pred <- dt$uk_pred
+# } else {
+#   uk_pred <- exp(dt$uk_pred)
+# }
+# 
+# valid_df$RMSE[i] <- rmse(obs = ufp_obs, pred = uk_pred)
+# valid_df$R2[i] <- r2_mse_based(obs = ufp_obs, pred = uk_pred)
+# 
+# }
+
+```
+
+
+
+
+
+# fit model to all data & make predictions at ACT locations
 
 ```{r, results = "hide"}
 set.seed(1)
 
-  #%>% left_join(site_locations, by = "site_id") %>%
-primary_analysis_uk <-  uk_predictions(dt = annual_train_test,
-                 cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
-                  y_name = "log_ufp",
-                  cov_names. = cov_names,
-                  pls_comp = primary_analysis_cv$cv_table$PLS_Components, 
-                  variogram_dist_fract = primary_analysis_cv$cv_table$Variogram_Distance_Fraction)
+uk_names <- paste0(analysis_names, "_uk")
 
-native_scale_uk <- uk_predictions(dt = annual_native_scale,
-                                  cov_loc_new = cov_act_native_scale,
-                                  y_name = "ufp",
-                                  cov_names. = cov_names_native,
-                                  pls_comp = native_scale_cv$cv_table$PLS_Components, 
-                                  variogram_dist_fract = native_scale_cv$cv_table$Variogram_Distance_Fraction)
-###########
-#native_scale_uk$residual_model_table
+# empty columns to save predictions
+cov_act[,uk_names] <- NA
+residual_model_param <- data.frame() #uk_names,
+                                   # Method = NA,
+                                   # Partial_Sill = NA,
+                                   # Range_m = NA,
+                                   # Nugget = NA)
+
+for (i in seq_along(ufp_names)) {
+  #i=1
+  # validation results
+  pls_components <- cv_results$PLS_Components[i]
+  pls_variogram_dist <- cv_results$Variogram_Distance_Fraction[i]
+  
+  if(!grepl("native_scale", ufp_names[i])) {
+    
+    df <-  uk_predictions(dt = all_annual,
+                     cov_loc_new = cov_act,
+                      y_name = ufp_names[i],
+                      cov_names. = cov_names_log,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist)
+    
+    # save predictions in native scale
+    cov_act[uk_names[i]] <- exp(df$dt$uk_pred)
+    # save final residual model parameters
+    residual_model_param <- rbind(residual_model_param, df$residual_model_table)
+    
+    }
+  
+  #native scale analyses
+  #i=6
+    if(grepl("native_scale", ufp_names[i])) {
+      
+      df <-  uk_predictions(dt = all_annual,
+                     cov_loc_new = cov_act,
+                      y_name = ufp_names[i],
+                      cov_names. = cov_names_native,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist)
+      
+    cov_act[uk_names[i]] <- df$dt$uk_pred
+    residual_model_param <- rbind(residual_model_param, df$residual_model_table)
+    }
+}
+
+residual_model_param1 <- cbind(uk_names, residual_model_param) 
+
+residual_model_param1 %>%   
+  mutate(Range_m = round(Range_m)) %>%
+  kable(caption = "Final UK residual model parameters for primary and sensitivity analyses", 
+        digits = 3) %>%
+  kable_styling()
 
 
 
-########
 
-means_uk <- uk_predictions(dt = stop_means,
-                                                      # don't include prediction from main analysis
-                                cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
-                                y_name = "log_ufp",
-                                cov_names. = cov_names,
-                                pls_comp = means_cv$cv_table$PLS_Components, 
-                                variogram_dist_fract = means_cv$cv_table$Variogram_Distance_Fraction)
- 
-trim10_uk <- uk_predictions(dt = trim10,
-                                cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
-                                y_name = "log_ufp",
-                                cov_names. = cov_names,
-                                pls_comp = trim10_cv$cv_table$PLS_Components, 
-                                variogram_dist_fract = trim10_cv$cv_table$Variogram_Distance_Fraction)
 
-windsorize_uk <- uk_predictions(dt = windsorized,
-                                cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
-                                y_name = "log_ufp",
-                                cov_names. = cov_names,
-                                pls_comp = windsorize_cv$cv_table$PLS_Components, 
-                                variogram_dist_fract = windsorize_cv$cv_table$Variogram_Distance_Fraction)
- 
-uw_uk <- uk_predictions(dt = uw,
-                        cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
-                        y_name = "log_ufp",
-                        cov_names. = cov_names,
-                        pls_comp = uw_cv$cv_table$PLS_Components, 
-                        variogram_dist_fract = uw_cv$cv_table$Variogram_Distance_Fraction)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+#   #%>% left_join(site_locations, by = "site_id") %>%
+# primary_analysis_uk <-  uk_predictions(dt = annual_train_test,
+#                  cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+#                   y_name = "log_ufp",
+#                   cov_names. = cov_names,
+#                   pls_comp = primary_analysis_cv$cv_table$PLS_Components, 
+#                   variogram_dist_fract = primary_analysis_cv$cv_table$Variogram_Distance_Fraction)
+# 
+# native_scale_uk <- uk_predictions(dt = annual_native_scale,
+#                                   cov_loc_new = cov_act_native_scale,
+#                                   y_name = "ufp",
+#                                   cov_names. = cov_names_native,
+#                                   pls_comp = native_scale_cv$cv_table$PLS_Components, 
+#                                   variogram_dist_fract = native_scale_cv$cv_table$Variogram_Distance_Fraction)
+# ###########
+# #native_scale_uk$residual_model_table
+# 
+# 
+# 
+# ########
+# 
+# means_uk <- uk_predictions(dt = stop_means,
+#                                                       # don't include prediction from main analysis
+#                                 cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+#                                 y_name = "log_ufp",
+#                                 cov_names. = cov_names,
+#                                 pls_comp = means_cv$cv_table$PLS_Components, 
+#                                 variogram_dist_fract = means_cv$cv_table$Variogram_Distance_Fraction)
+#  
+# trim10_uk <- uk_predictions(dt = trim10,
+#                                 cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+#                                 y_name = "log_ufp",
+#                                 cov_names. = cov_names,
+#                                 pls_comp = trim10_cv$cv_table$PLS_Components, 
+#                                 variogram_dist_fract = trim10_cv$cv_table$Variogram_Distance_Fraction)
+# 
+# windsorize_uk <- uk_predictions(dt = windsorized,
+#                                 cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+#                                 y_name = "log_ufp",
+#                                 cov_names. = cov_names,
+#                                 pls_comp = windsorize_cv$cv_table$PLS_Components, 
+#                                 variogram_dist_fract = windsorize_cv$cv_table$Variogram_Distance_Fraction)
+#  
+# uw_uk <- uk_predictions(dt = uw,
+#                         cov_loc_new = cov_act[,names(cov_act) != "ufp_uk_pred"],
+#                         y_name = "log_ufp",
+#                         cov_names. = cov_names,
+#                         pls_comp = uw_cv$cv_table$PLS_Components, 
+#                         variogram_dist_fract = uw_cv$cv_table$Variogram_Distance_Fraction)
 
 ```
 
 Residual model parameters for final UK models
 
 ```{r}
-cbind(Analysis, 
-      rbind(
-        primary_analysis_uk$residual_model_table, 
-        native_scale_uk$residual_model_table, 
-        means_uk$residual_model_table, 
-        trim10_uk$residual_model_table, 
-        windsorize_uk$residual_model_table, 
-        uw_uk$residual_model_table 
-        )) %>%   
-  mutate(Range_m = round(Range_m),
-         # Partial_Sill = round(Partial_Sill, 3),
-         # Nugget = round(Nugget, 3)
-         
-         ) %>%
-  kable(caption = "Final UK residual model parameters for sensitivity analyses", 
-        digits = 3
-        ) %>%
-  kable_styling()
+# cbind(Analysis, 
+#       rbind(
+#         primary_analysis_uk$residual_model_table, 
+#         native_scale_uk$residual_model_table, 
+#         means_uk$residual_model_table, 
+#         trim10_uk$residual_model_table, 
+#         windsorize_uk$residual_model_table, 
+#         uw_uk$residual_model_table 
+#         )) %>%   
+#   mutate(Range_m = round(Range_m),
+#          # Partial_Sill = round(Partial_Sill, 3),
+#          # Nugget = round(Nugget, 3)
+#          
+#          ) %>%
+#   kable(caption = "Final UK residual model parameters for sensitivity analyses", 
+#         digits = 3
+#         ) %>%
+#   kable_styling()
 
 ```
 
@@ -1246,33 +1576,40 @@ cbind(Analysis,
 
 # Predictions
 
+#### --> update
+
 combine all results 
 
 ```{r}
-join_dfs_by <- c("site_id", "uk_pred")
-  
-all_predictions <- primary_analysis_uk$dt %>% 
-  select(site_id, latitude, longitude, 
-         primary_uk = uk_pred) %>%
-  #native scale
-  left_join(native_scale_uk$dt[,join_dfs_by], by = "site_id") %>%
-  rename(native_scale_uk = uk_pred) %>%
-  # stop means
-  left_join(means_uk$dt[,join_dfs_by], by = "site_id") %>%
-  rename(means_uk = uk_pred) %>%
-  # trim 10%
-  left_join(trim10_uk$dt[,join_dfs_by], by = "site_id") %>%
-  rename(trim10_uk = uk_pred) %>%
-  # windsorized
-  left_join(windsorize_uk$dt[,join_dfs_by], by = "site_id") %>%
-  rename(windsorize_uk = uk_pred) %>%
-  # windsorized
-  left_join(uw_uk$dt[,join_dfs_by], by = "site_id") %>%
-  rename(uw_uk = uk_pred) %>%
-  # estimates on native scale if not already
-  mutate_at(vars(contains("uk"), -contains("native")) , ~exp(.))
+all_predictions <- cov_act %>%
+  select(site_loc_vars, uk_names)
 
-uk_names <- names(all_predictions)[grepl("uk", names(all_predictions))]
+
+
+# join_dfs_by <- c("site_id", "uk_pred")
+#   
+# all_predictions <- primary_analysis_uk$dt %>% 
+#   select(site_id, latitude, longitude, 
+#          primary_uk = uk_pred) %>%
+#   #native scale
+#   left_join(native_scale_uk$dt[,join_dfs_by], by = "site_id") %>%
+#   rename(native_scale_uk = uk_pred) %>%
+#   # stop means
+#   left_join(means_uk$dt[,join_dfs_by], by = "site_id") %>%
+#   rename(means_uk = uk_pred) %>%
+#   # trim 10%
+#   left_join(trim10_uk$dt[,join_dfs_by], by = "site_id") %>%
+#   rename(trim10_uk = uk_pred) %>%
+#   # windsorized
+#   left_join(windsorize_uk$dt[,join_dfs_by], by = "site_id") %>%
+#   rename(windsorize_uk = uk_pred) %>%
+#   # windsorized
+#   left_join(uw_uk$dt[,join_dfs_by], by = "site_id") %>%
+#   rename(uw_uk = uk_pred) %>%
+#   # estimates on native scale if not already
+#   mutate_at(vars(contains("uk"), -contains("native")) , ~exp(.))
+
+#uk_names <- names(all_predictions)[grepl("uk", names(all_predictions))]
 
 ```
 
@@ -1300,6 +1637,8 @@ all_predictions_l %>%
 ```
 
 Scatterplots around 1-1 line
+
+### --> should trim10 high concs be lower??
 
 ```{r}
 max_plot <- max(all_predictions_l$prediction)
@@ -1377,6 +1716,28 @@ ggarrange(plotlist = dot_maps,
 #                             data = grid_dens_expand) +
 #   scale_fill_gradient(name = "UFP (pt/cm3)",
 #                       low = "yellow", high = "red")
+
+```
+
+## Compare distribution of PLS scores in monitoring vs various study areas. 
+
+```{r}
+# scores_train_test$site_type <- "mobile monitoring"
+# scores_act$site_type <- "ACT cohort"
+# 
+# scores_mm_act <- rbind(scores_train_test, scores_act)
+# 
+# scores_mm_act %>%
+#   gather("Component", "Score", contains("Comp")) %>%
+#   mutate(Component = substr(Component, 5, 5)) %>%
+#   ggplot(aes(x=Score, fill = site_type)) + 
+#   geom_density(alpha = 0.4) + 
+#   facet_wrap(~Component, labeller = "label_both") + 
+#   labs(fill = "Site Type",
+#        title = "Distribution of PLS component scores for the ACT cohort and mobile monitoring stops"
+#        ) + 
+#   theme(legend.position = "bottom")
+  
 
 ```
 

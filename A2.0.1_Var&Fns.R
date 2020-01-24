@@ -348,8 +348,8 @@ pacman::p_load(ggmap)
 map_base <- function(dt,
                    latitude_name = "latitude", longitude_name = "longitude",
                    map_title = NULL,
-                   include_monitoring_area = FALSE, monitoring_area_alpha = 0.25,
-                   include_study_area = FALSE, study_area_alpha = 0.1,
+                   include_monitoring_area = FALSE, monitoring_area_alpha = 0.3,
+                   include_study_area = FALSE, study_area_alpha = 0.4,
                    maptype. = "terrain", #, "toner", "toner-background", "watercolor"
                    zoom_lvl = 11
 ) {
@@ -570,7 +570,8 @@ map_fn <- function(dt,
 estimate_annual_avg <- function(dt,
                                 var = "ptrak",
                                 # model used to estimate annual averages
-                                lm_x_names = c("site_id", "season", "time_of_week", "tod5")
+                                lm_x_names = c("site_id", "season", "time_of_week", "tod5"),
+                                estimate_label = ""
                                 ) {
   #rename variables
   dt <- dt %>%
@@ -677,42 +678,42 @@ estimate_annual_avg <- function(dt,
   
     lm_fit0 <- lm(formula(paste0("var ~", paste(lm_x_names, collapse = " + "))), data = dt)
     
-    lm_pred0$yhat <- predict(lm_fit0, lm_pred0) 
+    lm_pred0$ufp <- predict(lm_fit0, lm_pred0) 
     
     # weigh temporally-specific predictions
     if("season" %in% lm_x_names) {
     lm_pred0 <- lm_pred0 %>%
-      mutate(yhat = yhat*season_wt)
+      mutate(ufp = ufp*season_wt)
     }
     
     if("time_of_week" %in% lm_x_names) {
       lm_pred0 <- lm_pred0 %>%
-        mutate(yhat = yhat*time_of_week_wt)
+        mutate(ufp = ufp*time_of_week_wt)
     }
     
     if("tod2" %in% lm_x_names) {
       lm_pred0 <- lm_pred0 %>%
-        mutate(yhat = yhat*tod2_wt)
+        mutate(ufp = ufp*tod2_wt)
     }
     
     if("tod5" %in% lm_x_names) {
       lm_pred0 <- lm_pred0 %>%
-        mutate(yhat = yhat*tod5_wt)
+        mutate(ufp = ufp*tod5_wt)
     }
     
     lm_pred <- lm_pred0 %>%
     group_by(site_id) %>%
-    dplyr::summarize(yhat = sum(yhat))
+    dplyr::summarize(ufp = sum(ufp)) 
   
   # table of UFP distribution
   t_annual_distribution <- lm_pred %>%
-    distribution.table(var.string = "yhat") %>%
+    distribution.table(var.string = "ufp") %>%
     kable(caption = "Distribution of annual average estimates") %>%
     kable_styling()
   
   ## plot of UFP distribution
   p_annual_density <- lm_pred %>%
-    ggplot(aes(x=yhat)) + 
+    ggplot(aes(x=ufp)) + 
     geom_density() + 
     labs(x = "UPF (pt/cm3)",
          title = "Distribution of annual average estimates")
@@ -724,6 +725,8 @@ estimate_annual_avg <- function(dt,
   ##########################################################################################
   #################################### results ############################################
   ##########################################################################################
+  
+  names(lm_pred)[names(lm_pred) == "ufp"] <- paste0(estimate_label, "_ufp")
   
   # list to return
   results <- list( 
@@ -824,10 +827,12 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
                          RMSE = cv_rmse,
                          R2 = cv_r2)
   
-  eval_results <- list(cv.eval = cv.eval,
-                       cv_table = cv_table)
+  # eval_results <- list(cv.eval = cv.eval,
+  #                      cv_table = cv_table)
   
-  return(eval_results) 
+  #return(eval_results)
+  
+  return(cv_table)
 }
 
 
@@ -872,7 +877,7 @@ pls_uk_cv_predictions <- function(
     #        cov_names.) %>%
     drop_na() %>%
     # ? only use stop sites to build the model? for comparison vs primary analysis
-    filter(grepl("MS", site_id)) %>%
+    #filter(grepl("MS", site_id)) %>%
     #create folds for test/train set
     mutate(set = sample(c(1:k), size = nrow(.), replace = T),
            cv_prediction = NA)
@@ -1069,7 +1074,7 @@ uk_predictions <- function (
   
   ## residual model parameters
   residual_model_table <- data.frame(
-    Method = c("OLS"),
+    #Method = c("OLS"),
     Partial_Sill = resid_model.s$estimated.pars[["sigmasq"]],
     Range_m = resid_model.s$estimated.pars[["phi"]],
     Nugget = resid_model.s$estimated.pars[["tausq"]]

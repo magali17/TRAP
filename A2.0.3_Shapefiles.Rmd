@@ -26,6 +26,8 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 pacman::p_load(knitr, kableExtra,
                # GIS
                sf,rgdal,
+               #? may be required by fortify?
+               maptools,
                #ggpubr, 
                tidyverse  
                )    
@@ -44,41 +46,33 @@ monitoring_area <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Study A
 # make df
 monitoring_area_df <- fortify(monitoring_area)
 
-# ################## --> need ?? ##################
-# # get map projection string 
-# region_proj <- proj4string(region)
-# 
-# # convert to spatialPointsDataFrame
-# region_spdf <- region_df
-# coordinates(region_spdf) <- ~ long + lat
-# proj4string(region_spdf) <- CRS(region_proj)
-# ######################################################
-
-
 ```
  
 Study area (buffered monitoring area)
 
 ```{r}
-pacman::p_load(maptools) #? may be required by fortify?
-
-study_area <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Study Area",
-                                       #"oval_around_monitoring_area_land.shp"
-                                       "oval_around_monitoring_area_land_clean.shp"
-                                       
-                                       # these look worse
-                                       #"oval_around_monitoring_area.shp"
-                                       #"oval_test.shp"
-                                       )) 
+study_area <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Study Area", "oval_around_monitoring_area_land.shp")) 
   
 # make df
-study_area_df <- fortify(study_area) #%>%
-  # doesn't help?
- # mutate_at(vars(piece:group),  ~as.numeric(.))
+study_area_df <- fortify(study_area) 
 
-saveRDS(study_area_df, file = file.path("Data", "GIS", "study_area_df.rda"))
+#saveRDS(study_area_df, file = file.path("Data", "GIS", "study_area_df.rda"))
 
 ```
+
+Spatiotemporal modeling area
+
+```{r}
+st_area <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Study Area","Spatiotemporal", "st_area_land.shp")) 
+  
+# make df
+st_area_df <- fortify(st_area)  
+   
+#saveRDS(st_area_df, file = file.path("Data", "GIS", "st_area_df.rda"))
+
+```
+
+
 
 ? Routes
 ```{r}
@@ -99,6 +93,7 @@ Save datasets.
 
 # saveRDS(monitoring_area_df, file = file.path("Data", "GIS", "monitoring_area_df.rda"))
 # saveRDS(study_area_df, file = file.path("Data", "GIS", "study_area_df.rda"))
+# saveRDS(st_area_df, file = file.path("Data", "GIS", "st_area_df.rda"))
 # saveRDS(routes_df, file = file.path("Data", "GIS", "routes_df.rda"))
 
 ```

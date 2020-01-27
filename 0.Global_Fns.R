@@ -45,6 +45,18 @@ wrapper <- function(x, ...) {
 }
 
 ############################################################################################## 
+#returns the minimum and maximum value of two vectors. for plotting purposes when wanting a perfectly diagonal 1-1 line (square plotting area).
+plot_range <- function(vector1 = uk_decompose_l$primary_uk, 
+                       vector2 = uk_decompose_l$regression_prediction){
+  min <- min(min(vector1), min(vector2))
+  max <- max(max(vector1), max(vector2))
+  
+  result <- data.frame(min = min, 
+                       max = max)
+  
+  return(result)
+  
+}
 
 ################################# correlation plot Wide format ####################################
 

@@ -350,6 +350,7 @@ map_base <- function(dt,
                    map_title = NULL,
                    include_monitoring_area = FALSE, monitoring_area_alpha = 0.3,
                    include_study_area = FALSE, study_area_alpha = 0.4,
+                   include_spatiotemporal_area = F, st_area_alpha = 0.4,
                    maptype. = "terrain", #, "toner", "toner-background", "watercolor"
                    zoom_lvl = 11
 ) {
@@ -378,6 +379,18 @@ map_base <- function(dt,
   
   # Make basic map image from the tiles
   mymap <- ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void()
+  
+  # add spatiotemporal model area
+  if(include_spatiotemporal_area) {
+    st_area <- readRDS(file.path("Data", "GIS", "st_area_df.rda"))
+    
+    mymap <- mymap + 
+      geom_polygon(data = st_area, 
+                   aes(x = long, y = lat, group = group,
+                   ),
+                   alpha = st_area_alpha,
+                   size = 0.3)
+  }
   
   # add study area
   if(include_study_area) {
@@ -426,40 +439,40 @@ map_base <- function(dt,
 # longitude_name. = "x"
 # map_title = NULL
 
-# colors the base map by a variable (3D)
-map_color <- function(dt, 
-                   color_by = "ufp", color_units = "pt/cm3",
-                   latitude_name = "latitude", longitude_name = "longitude",
-                   map_title = NULL
-                   ) {
-  
-  #label by variable being mapped if no title is provided
-  if(is.null(map_title)) {map_title <- color_by}
-  
-  dt <- rename(dt,
-               y = color_by,
-               lat = latitude_name,
-               long = longitude_name) 
-  
-  mymap <- dt %>%
-    map_base(latitude_name = "lat", longitude_name = "long") +
-    # color map
-    geom_point(data = dt,
-                 aes(x = long, y = lat), col= "black",
-                 size = 2.5) +
-      geom_point(data = dt,
-                 aes(x = long, y = lat, col = y),
-                 alpha = 0.8, size = 2) +
-      scale_color_gradient(name = color_units, low = "yellow", high = "red") +
-    labs(title = map_title
-         #fill = "Area"
-         )
-  
-  #+ theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) 
-  
-  return(mymap)
-  
-}
+# # colors the base map by a variable (3D)
+# map_color <- function(dt, 
+#                    color_by = "ufp", color_units = "pt/cm3",
+#                    latitude_name = "latitude", longitude_name = "longitude",
+#                    map_title = NULL
+#                    ) {
+#   
+#   #label by variable being mapped if no title is provided
+#   if(is.null(map_title)) {map_title <- color_by}
+#   
+#   dt <- rename(dt,
+#                y = color_by,
+#                lat = latitude_name,
+#                long = longitude_name) 
+#   
+#   mymap <- dt %>%
+#     map_base(latitude_name = "lat", longitude_name = "long") +
+#     # color map
+#     geom_point(data = dt,
+#                  aes(x = long, y = lat), col= "black",
+#                  size = 2.5) +
+#       geom_point(data = dt,
+#                  aes(x = long, y = lat, col = y),
+#                  alpha = 0.8, size = 2) +
+#       scale_color_gradient(name = color_units, low = "yellow", high = "red") +
+#     labs(title = map_title
+#          #fill = "Area"
+#          )
+#   
+#   #+ theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) 
+#   
+#   return(mymap)
+#   
+# }
 
 
 #################
@@ -469,8 +482,9 @@ map_fn <- function(dt,
                    color_by = "ufp", color_units = "pt/cm3",
                    latitude_name = "latitude", longitude_name = "longitude",
                    map_title = NULL,
-                   include_monitoring_area = FALSE, monitoring_area_alpha = 0.25,
-                   include_study_area = FALSE, study_area_alpha = 0.1,
+                   include_monitoring_area = FALSE, monitoring_area_alpha = 0.2,
+                   include_study_area = FALSE, study_area_alpha = 0.2,
+                   include_st_area = FALSE, st_area_alpha = 0.2,
                    maptype. = "terrain", #, "toner", "toner-background", "watercolor"
                    zoom_lvl = 11,
                    low_conc_col = "yellow",
@@ -508,6 +522,18 @@ map_fn <- function(dt,
   # Make basic map image from the tiles
   mymap <- ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void()
   
+  # add spatiotemporal model area
+  if(include_st_area) {
+    st_area <- readRDS(file.path("Data", "GIS", "st_area_df.rda"))
+    
+    mymap <- mymap + 
+      geom_polygon(data = st_area, 
+                   aes(x = long, y = lat, group = group,
+                       fill = "spatiotemporal model"),
+                   alpha = st_area_alpha,
+                   size = 0.3)
+  }
+  
   # add study area
   if(include_study_area) {
     study_area <- readRDS(file.path("Data", "GIS", "study_area_df.rda"))
@@ -515,8 +541,7 @@ map_fn <- function(dt,
     mymap <- mymap + 
       geom_polygon(data = study_area, 
                 aes(x = long, y = lat, group = group, 
-                    fill = "Study"
-                    ),
+                    fill = "Study"),
                 #fill = "plum2",
                 #col = "plum2",
                 alpha = study_area_alpha,
@@ -769,7 +794,7 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
                            ) {
   
   #df to save CV model eval
-  cv.eval <- data.frame(
+  cv_eval <- data.frame(
     expand.grid(pls_comp = c(1:max_pls_comp),
                 dist_fract = dist_fract),
     RMSE = NA,
@@ -803,19 +828,19 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
         uk_pred <- exp(uk_pred)
         } 
       
-        cv.eval$RMSE[cv.eval$pls_comp== i & cv.eval$dist_fract==j] <- rmse(obs = dt_obs, pred = uk_pred)
-        cv.eval$R2[cv.eval$pls_comp== i & cv.eval$dist_fract==j] <-  r2_mse_based(obs = dt_obs, pred = uk_pred)
+        cv_eval$RMSE[cv_eval$pls_comp== i & cv_eval$dist_fract==j] <- rmse(obs = dt_obs, pred = uk_pred)
+        cv_eval$R2[cv_eval$pls_comp== i & cv_eval$dist_fract==j] <-  r2_mse_based(obs = dt_obs, pred = uk_pred)
         
     }
   }
   
   ######################### select CV parameters #########################
-  cv_rmse <- min(cv.eval$RMSE)  
-  rmse_inx <- cv.eval$RMSE == cv_rmse
+  cv_rmse <- min(cv_eval$RMSE)  
+  rmse_inx <- cv_eval$RMSE == cv_rmse
     
-  cv_r2 <- cv.eval$R2[rmse_inx] 
-  cv_comp <- cv.eval$pls_comp[rmse_inx]
-  cv_dist_fract <- cv.eval$dist_fract[rmse_inx]
+  cv_r2 <- cv_eval$R2[rmse_inx] 
+  cv_comp <- cv_eval$pls_comp[rmse_inx]
+  cv_dist_fract <- cv_eval$dist_fract[rmse_inx]
   
   #cv_comp_names <- paste0("Comp", c(1:cv_comp))
   
@@ -826,32 +851,19 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
                          Variogram_Distance_Fraction = cv_dist_fract,
                          RMSE = cv_rmse,
                          R2 = cv_r2)
+  #return(cv_table)
   
-  # eval_results <- list(cv.eval = cv.eval,
-  #                      cv_table = cv_table)
+  eval_results <- list(cv_eval = cv_eval,
+                        cv_table = cv_table)
+
+  return(eval_results)
   
-  #return(eval_results)
   
-  return(cv_table)
 }
 
 
 # [fn used in pls_uk_cv_eval()]
 # returns CV predictions for a selected number of PLS components and maximum variogram plotting distance. "dt" includes y outcome (UFP), site location (lambert_x, lambert_y) and covariates 
-
-# t <- left_join(annual_train_test, site_locations)
-# dt=t
-# dt = annual_train_test
-# y_name = "log_ufp"
-# cov_names. = cov_names
-# #CV folds
-# k = 5
-# # max PLS components to evaluate
-# use_n_scores. = 3
-# # variogram maximum distance fraction to model
-# dist_fract. = 0.1 #dist_fract, 
-# #dist_fract_index = 1,
-# # lat/long for UK
 
 pls_uk_cv_predictions <- function(
   dt = annual_train_test,
@@ -863,21 +875,13 @@ pls_uk_cv_predictions <- function(
                                   use_n_scores. = 3, 
                                   # variogram maximum distance fraction to model
                                   dist_fract. = 0.1 #, #dist_fract, 
-                                  #dist_fract_index = 1,
-                                  # lat/long for UK
-                                  # site_locations. = site_locations
+                                  
 ) {  
   
   score_n_names <- paste0("Comp", 1:use_n_scores.)
   
   dt <- dt %>% rename(y_name = y_name) %>%
-    # create folds for test/train sets
-    # select(site_id,
-    #        y_name,
-    #        cov_names.) %>%
     drop_na() %>%
-    # ? only use stop sites to build the model? for comparison vs primary analysis
-    #filter(grepl("MS", site_id)) %>%
     #create folds for test/train set
     mutate(set = sample(c(1:k), size = nrow(.), replace = T),
            cv_prediction = NA)
@@ -1050,11 +1054,17 @@ uk_predictions <- function (
   max.dist <- summary(geo_dt)$distances.summary[["max"]]
   max.plot.dist <- max.dist*variogram_dist_fract
   
+  brk_pt <- 1000
+  by1_pt <- 300
+  by2_pt <- 1000
+  
   ##Empirical Variogram
   variog_dt <- variog(geo_dt,
-                      max.dist=max.plot.dist,
+                      uvec=c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
                       #UK
-                      trend = cv_cov_trend)
+                      trend = cv_cov_trend,
+                      #messages = F
+                      )
   
   #estimate range & sill values. using WLS and an exponential fit
   wls_ests <- variofit(vario = variog_dt, cov.model = "exp", messages = F)
@@ -1091,19 +1101,77 @@ uk_predictions <- function (
                                            trend.l= trend_new))
   
   #save predictions
-  cov_loc_new$uk_pred  <- uk_new$predict #%>% exp()
+  scores_loc_new$uk_pred  <- uk_new$predict #%>% exp()
   
-  # predictions <- cov_loc_new %>% select(
-  #   site_id, latitude, longitude, contains("lambert"),
-  #   uk_pred)
-  
-  results <- list(dt = cov_loc_new,
-                  residual_model_table = residual_model_table
-                  )
+  results <- list(
+    #results for prediction locations
+    dt = scores_loc_new,
+    # modeling locations w/ PLS scores
+    pls_model = pls_model,
+    #residual model
+    residual_model_table = residual_model_table,
+    empirical_variogram = variog_dt,
+    residual_model = resid_model,
+    # betas
+    betas = uk_new$beta.est
+    # ? need?
+    #geo_dataset = geo_dt
+    )
   
   
   return(results)
   
 }
+
+############################################## PLS Score distribution ##############################################
+
+compare_pls_scores <- function(my_pls_model = pls_models[["primary_uk"]],
+                                        new_prediction_sites = cov_act,
+                                        new_site_label = "ACT Cohort",
+                                        my_title = "Distribution of PLS component scores for the ACT cohort and mobile monitoring stops"
+) {
+  
+  scores_mm <- my_pls_model$scores[] %>% as.data.frame()  
+  
+  score_names <- names(scores_mm) 
+  score_names <- gsub(" ", "", score_names)
+  
+  names(scores_mm) <- score_names
+  scores_mm$Comp1
+  scores_mm$site_type <- "mobile monitoring"
+  
+  scores_new_locs <- predict(object = my_pls_model,
+                             newdata = new_prediction_sites,
+                             #ncomp = cv_pls_comp,
+                             type = "score") %>%
+    as.data.frame() 
+  
+  names(scores_new_locs) <- score_names
+  scores_new_locs$site_type <- new_site_label
+  
+  scores_mm_new <- rbind(scores_mm, scores_new_locs)
+  
+  myplot <- scores_mm_new %>%
+    gather("Component", "Score", contains("Comp")) %>%
+    # only keep # in component name
+    mutate(Component = gsub("\\D", "", Component)) %>%
+    ggplot(aes(x=Score, fill = site_type)) + 
+    geom_density(alpha = 0.4) + 
+    facet_wrap(~Component, labeller = "label_both") + 
+    labs(fill = "Site Type",
+         title = my_title) + 
+    theme(legend.position = "bottom")
+  
+  results <- list(plot = myplot,
+                  scores_mm = scores_mm,
+                  scores_new_locs = scores_new_locs
+                  )
+  
+  return(results)
+  
+}
+
+######################################################################################################################
+
 
 

@@ -145,7 +145,7 @@ dem0.1 <- dem0.0 %>%
     ## 1 if participants never moved
     one_location,
     # ?0 if did not assumed a constant residential hx or constant AP prediction prior to first available FOR THAT YEAR
-    imputed_coverage10_yr
+    imputed_coverage10_yr 
     
     ) %>%
   

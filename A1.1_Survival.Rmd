@@ -38,6 +38,9 @@ editor_options:
 # ABOUT THIS DATASET
 # exact_ variables: NAs indicate either no location, or no pollutant level info over the period of interest. Whenever you see an NA on exact_, there should also be NA in the corresponding exp_avg var
 
+# imputed_coverage10_yr: 0 if did not assumed a constant residential hx or constant AP prediction prior to first available FOR THAT YEAR
+
+
 
 ```
 
@@ -76,20 +79,10 @@ source("A1.0.2_Var&Fns.R")
 
 ##########
 # dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "issue_001.sas7bdat"), NULL)
-# 
-# dem.new <- haven::read_sas(file.path("Data", "Aim 1", "issue_001_200124.sas7bdat"), NULL)
-# new_names <- names(dem.new)[!names(dem.new) %in% names(dem0.0)]
-#View(dem.new[new_names])
-
-# dem.new %>%
-#   select(study_id, imputed_coverage10_yr, exposure_year, exp_avg10_yr) %>%
-#   View()
-
-
 
 ##########
 
-dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "issue_001_20200214.sas7bdat"), NULL)
+dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "issue_001_200225.sas7bdat"), NULL)
 
 
 #remove SAS labels
@@ -97,56 +90,55 @@ labelled::var_label(dem0.0) <- NULL
 
 #data that can be used for all analyses 
 dem0.1 <- dem0.0 %>% 
-  filter(
-    #drop PM10 predictions
-    pollutant %in% c("no2", "pm25")
-    ) %>%
+  #drop PM10 predictions
+  filter(pollutant %in% c("no2", "pm25")) %>%
   select(
-    study_id,
-    birthdt,
-    intakedt,
-    last_visit,
-    birth_cohort,
-    corrected_onsetdate,
-    onsetage,
-    #"corrected_" = final decision on outcome
-    corrected_anydementia,  
-    corrected_dsmivdx,
-    final_nindx,
-    
-    #M1, 6, sensitivity analyses
-    exposure_year:exp_mos_coverage20_yr, 
-    
-    #M2
-    apoe,
-    male,
-    education, degree,
-    ## household income at the longest addressed lived at prior to baseline. It may include the date of the baseline
-    tr_med_inc_hshld, 
-    race,
-    
-    #M3
-    smoke, pack_years, 
-    exercise, exercise_reg,
-    cohort,
-    
-    #M4a
-    Hypertension, Diabetes,
-    CV_DIS, #indicates whether subject has ever reported having stroke, TIA, or CEA.
-    Heart_Dis, #indicates whether subject has ever reported having an MI, Angina, CABG, or Angioplasty.
-    bmi, bmi4,
-    
-    #M4b
-    casi_irt, casi_valid,
-    #address exactness
-    exact_coverage01_yr:exact_coverage20_yr,
-    
-    # sensitivity analyses
-    ## 1 if participants never moved
-    one_location,
-    # ?0 if did not assumed a constant residential hx or constant AP prediction prior to first available FOR THAT YEAR
-    imputed_coverage10_yr 
-    
+    #final_nindx has issues if this is still here. not sure why.
+    -nindx,
+    # study_id,
+    # birthdt,
+    # intakedt,
+    # last_visit,
+    # birth_cohort,
+    # corrected_onsetdate,
+    # onsetage,
+    # #"corrected_" = final decision on outcome
+    # corrected_anydementia,  
+    # corrected_dsmivdx,
+    # final_nindx,
+    # 
+    # #M1, 6, sensitivity analyses
+    # exposure_year:exp_wks_coverage20_yr, 
+    # 
+    # #M2
+    # apoe,
+    # male,
+    # education, degree,
+    # ## household income at the longest addressed lived at prior to baseline. It may include the date of the baseline
+    # tr_med_inc_hshld, 
+    # race,
+    # 
+    # #M3
+    # smoke, pack_years, 
+    # exercise, exercise_reg,
+    # cohort,
+    # 
+    # #M4a
+    # Hypertension, Diabetes,
+    # CV_DIS, #indicates whether subject has ever reported having stroke, TIA, or CEA.
+    # Heart_Dis, #indicates whether subject has ever reported having an MI, Angina, CABG, or Angioplasty.
+    # bmi, bmi4,
+    # 
+    # #M4b
+    # casi_irt, casi_valid,
+    # #address exactness
+    # exact_coverage01_yr:exact_coverage20_yr,
+    # 
+    # # sensitivity analyses
+    # ## 1 if participants never moved
+    # one_location,
+    # imputed_coverage10_yr, imputed_coverage01_yr,
+    # exact_coverage10_yr, exact_coverage01_yr
     ) %>%
   
   #create/clean up variables
@@ -157,15 +149,11 @@ dem0.1 <- dem0.0 %>%
     anydementia = corrected_anydementia,
     onsetdate = corrected_onsetdate,
     
-    age_intake = #round(
-      as.numeric(intakedt - birthdt)/365, #3),  
-    age_last_visit = #round(
-      as.numeric(last_visit - birthdt)/365, #3),  
+    age_intake = as.numeric(intakedt - birthdt)/365,  
+    age_last_visit = as.numeric(last_visit - birthdt)/365,
     #traditional definition used by ACT for follow-up time for cases and controls
-    age_onset = #round(
-      as.numeric(onsetdate - birthdt)/365, #3),
-    age_act = #round(
-      ifelse(!is.na(age_onset), age_onset, age_last_visit), #3),
+    age_onset = as.numeric(onsetdate - birthdt)/365, 
+    age_act = ifelse(!is.na(age_onset), age_onset, age_last_visit), 
     #collapse earliest & latest cohorts since there are few ppl here 
     birth_cohort = factor(ifelse(birth_cohort <= 1905, 1895,
                            ifelse(birth_cohort >= 1935, 1935, birth_cohort))),
@@ -175,14 +163,12 @@ dem0.1 <- dem0.0 %>%
     nindx = ifelse(is.na(nindx), 0, nindx),
      #Time-varying covariates
      ##starting age is age on Jan 1st of a given year if participant was enrolled, or on intake date, whichever came later
-    age_start_exposure = #round(
-      ifelse(format(intakedt, "%Y") == exposure_year,
+    age_start_exposure = ifelse(format(intakedt, "%Y") == exposure_year,
                                 as.numeric(intakedt-birthdt)/365,
                                 as.numeric(as.Date(paste0(exposure_year, "-01-01")) - birthdt)/365), 
       #3),
     ##ending age is age at end of year or last visit date, whichever came first 
-    age_end_exposure = #round(
-      ifelse(format(last_visit, "%Y") == exposure_year,
+    age_end_exposure = ifelse(format(last_visit, "%Y") == exposure_year,
                                 as.numeric(last_visit - birthdt)/365,
                                 as.numeric(as.Date(paste0(exposure_year, "-12-31")) - birthdt)/365), 
     #3),
@@ -194,10 +180,10 @@ dem0.1 <- dem0.0 %>%
     
     ## filter out invalid casi scores 
     casi_irt = ifelse(casi_valid ==1, casi_irt, NA),
-    income_cat = ifelse(tr_med_inc_hshld < 35000, 1, #tr_med_inc_hshld >= 20000 & 
+    income_cat = ifelse(tr_med_inc_hshld < 35000, 1,  
                                       ifelse(tr_med_inc_hshld >= 35000 & tr_med_inc_hshld < 50000, 2,
                                              ifelse(tr_med_inc_hshld >= 50000 & tr_med_inc_hshld < 75000, 3, 4)
-                                             )), #),
+                                             )),  
     race_white = ifelse(race == 1, 1, 0),
     # make unknown degree=9 an 6 ("other") to avoid creating more NAs; 
     # Rachel/Lianne - change 9 to none? 
@@ -215,15 +201,13 @@ dem0.1 <- dem0.0 %>%
     
     age_start_exposure, age_end_exposure,
     #enrollment_yr,
-    exposure_year, pollutant, exp_avg01_yr:exp_mos_coverage20_yr,
+    exposure_year, pollutant, exp_avg01_yr:exp_wks_coverage20_yr,
     
     apoe:degree, tr_med_inc_hshld, income_cat,race, race_white, smoke:bmi4, casi_irt, 
     
-    #exposure_year:exp_mos_coverage20_yr, 
-    
     one_location,
-    # ?0 if did not assumed a constant residential hx or constant AP prediction prior to first available FOR THAT YEAR
-    imputed_coverage10_yr
+    imputed_coverage10_yr, imputed_coverage01_yr,
+    exact_coverage10_yr, exact_coverage01_yr
   ) 
  
 #how long have participants been followed? 
@@ -263,17 +247,9 @@ dem0.1 <-  dem0.1 %>%
     exposure_year:casi_irt,
     
     one_location,
-    imputed_coverage10_yr
+    imputed_coverage10_yr, # "doesn't exist"?? #imputed_coverage01_yr,
+    exact_coverage10_yr, exact_coverage01_yr
   )
-
-# #proportion of observations with at least 95% of months in 10-year period; for NO2 and PM2.5
-# prop.table(table(dem0.1$exp_mos_coverage10_yr>0.95)) %>% round(2)
-
-#obs after dropping ppl w/ just baseline
-#dim(dem0.1 %>% filter(fu_yrs>1))
-
-
- 
 
 #data for primary and some secondary analyses 
 dem1 <- dem0.1 %>% 
@@ -286,6 +262,8 @@ dem1 <- dem0.1 %>%
     exposure_year <= as.numeric(format(last_visit, "%Y")),  
     ) %>%
   mutate(
+    
+    # Delete _original?
     #copy all original predictions (for sensitivity analysis using min.pct = 0.75 vs 0.95)
     exp_avg01_yr_original = exp_avg01_yr,
     exp_avg05_yr_original = exp_avg05_yr,
@@ -296,12 +274,12 @@ dem1 <- dem0.1 %>%
     
     # [don't do this for now b/c coverage variable is impacted by interpolation assumption when participants first enroll]
     #only keep predictions w/ at least x% coverage (for primary analysis)
-    # exp_avg01_yr = ifelse(exp_mos_coverage01_yr >= min.pct, exp_avg01_yr, NA),
-    # exp_avg05_yr = ifelse(exp_mos_coverage05_yr >= min.pct, exp_avg05_yr, NA),
-    # exp_avg10_yr = ifelse(exp_mos_coverage10_yr >= min.pct, exp_avg10_yr, NA),
-    # exp_avg20_yr = ifelse(exp_mos_coverage20_yr >= min.pct, exp_avg10_yr, NA),
-    # exp_avg10_yr10yrlag = ifelse(exp_mos_coverage10_yr10yrlag >= min.pct, exp_avg10_yr10yrlag, NA),
-    # exp_avg10_yr05yrlag = ifelse(exp_mos_coverage10_yr05yrlag >= min.pct, exp_avg10_yr05yrlag, NA),
+    # exp_avg01_yr = ifelse(exp_wks_coverage01_yr >= min.pct, exp_avg01_yr, NA),
+    # exp_avg05_yr = ifelse(exp_wks_coverage05_yr >= min.pct, exp_avg05_yr, NA),
+    # exp_avg10_yr = ifelse(exp_wks_coverage10_yr >= min.pct, exp_avg10_yr, NA),
+    # exp_avg20_yr = ifelse(exp_wks_coverage20_yr >= min.pct, exp_avg10_yr, NA),
+    # exp_avg10_yr10yrlag = ifelse(exp_wks_coverage10_yr10yrlag >= min.pct, exp_avg10_yr10yrlag, NA),
+    # exp_avg10_yr05yrlag = ifelse(exp_wks_coverage10_yr05yrlag >= min.pct, exp_avg10_yr05yrlag, NA),
     )   
 
 #make wide format
@@ -316,6 +294,8 @@ no2 <- dem1 %>%
     no2_20yr = exp_avg20_yr,
     no2_10yr10yrlag = exp_avg10_yr10yrlag,
     no2_10yr05yrlag = exp_avg10_yr05yrlag,
+    
+    # delete _original? don't need?
     #rename original columns
     no2_1yr_original = exp_avg01_yr_original,
     no2_5yr_original = exp_avg05_yr_original,
@@ -324,12 +304,12 @@ no2 <- dem1 %>%
     no2_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
     no2_10yr05yrlag_original = exp_avg10_yr05yrlag_original,
     
-    no2_coverage_1yr = exp_mos_coverage01_yr,
-    no2_coverage_5yr = exp_mos_coverage05_yr,
-    no2_coverage_10yr = exp_mos_coverage10_yr,
-    no2_coverage_20yr = exp_mos_coverage20_yr,
-    no2_coverage_10yr10yrlag = exp_mos_coverage10_yr10yrlag,
-    no2_coverage_10yr05yrlag = exp_mos_coverage10_yr05yrlag
+    no2_coverage_1yr = exp_wks_coverage01_yr,
+    no2_coverage_5yr = exp_wks_coverage05_yr,
+    no2_coverage_10yr = exp_wks_coverage10_yr,
+    no2_coverage_20yr = exp_wks_coverage20_yr,
+    no2_coverage_10yr10yrlag = exp_wks_coverage10_yr10yrlag,
+    no2_coverage_10yr05yrlag = exp_wks_coverage10_yr05yrlag
     ) 
 
 pm25 <- dem1 %>% 
@@ -342,7 +322,8 @@ pm25 <- dem1 %>%
     pm25_20yr = exp_avg20_yr,
     pm25_10yr10yrlag = exp_avg10_yr10yrlag,
     pm25_10yr05yrlag = exp_avg10_yr05yrlag,
-    #rename original columns
+    
+    # delete _original? don't need?
     #rename original columns
     pm25_1yr_original = exp_avg01_yr_original,
     pm25_5yr_original = exp_avg05_yr_original,
@@ -351,12 +332,12 @@ pm25 <- dem1 %>%
     pm25_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
     pm25_10yr05yrlag_original = exp_avg10_yr05yrlag_original,
     
-    pm25_coverage_1yr = exp_mos_coverage01_yr,
-    pm25_coverage_5yr = exp_mos_coverage05_yr,
-    pm25_coverage_10yr = exp_mos_coverage10_yr,
-    pm25_coverage_20yr = exp_mos_coverage20_yr,
-    pm25_coverage_10yr10yrlag = exp_mos_coverage10_yr10yrlag,
-    pm25_coverage_10yr05yrlag = exp_mos_coverage10_yr05yrlag
+    pm25_coverage_1yr = exp_wks_coverage01_yr,
+    pm25_coverage_5yr = exp_wks_coverage05_yr,
+    pm25_coverage_10yr = exp_wks_coverage10_yr,
+    pm25_coverage_20yr = exp_wks_coverage20_yr,
+    pm25_coverage_10yr10yrlag = exp_wks_coverage10_yr10yrlag,
+    pm25_coverage_10yr05yrlag = exp_wks_coverage10_yr05yrlag
     )   
 dem.w <- full_join(no2, pm25)
 
@@ -379,6 +360,13 @@ dem.w2 <- dem.w %>%
 
 ```
 
+# Check variables  
+
+## Coverage Proportion
+Plot Coverage variable against participant enrollment year. See that coverage is more likely to be 1 at the begining of participant enrollment. This is because the coverage variables takes the imputed variables prior to enrollment into account. 
+
+-Important to look at this variable because we were originally excluding person-years based on this variable
+
 ```{r}
 t <- dem.w %>% 
   select(
@@ -398,7 +386,7 @@ t %>%
     x = "Participant Enrollment Year in Study",
     y = "NO2 Coverage past 10yr",
     title = "Coverage during Past 10 Years for person-years",
-    caption = "coverage calculated from exp_mos_coverage10_yr for NO2"
+    caption = "coverage calculated from exp_wks_coverage10_yr for NO2"
   )
 
 summary(t$no2_coverage_10yr)
@@ -414,149 +402,111 @@ table(t$no2_coverage_10yr>=0.95)
 
 ```
 
+Plot Coverage variable against calendar year.
 
-We have high quality addresses for most person years. Thus, we trust the quality of our predictions once people are enrolled, even if they later move.
-
-### --> ? change "total PY" to "total PY w/ available addresses"?
+### --> does this go down after ~ 2006 b/c of large, initial cohort has been followed > 10 yrs and no longer imputing coverage? 
 
 ```{r}
-# exact <- dem0.0 %>%
-#   filter(pollutant== "no2") %>%
-#   select(
-#     study_id, exposure_year, exp_avg01_yr, exp_avg10_yr, imputed_coverage01_yr, imputed_coverage10_yr, exact_coverage01_yr, exp_mos_coverage10_yr
-#   ) 
-
-prop_exact <- dem0.0 %>%
-  filter(pollutant == "no2") %>%
-  summarize(
-    total_person_years = n(),
-    no_with_exact_cov = sum(exact_coverage01_yr==1, na.rm=T),
-    prop_exact_cov = mean(exact_coverage01_yr==1, na.rm=T),
-    ) 
-
-prop_exact %>%
-  kable(digits = 2, 
-        col.names = c("Total Person-Years (PY)", "PYs with exact addresses", "Proportion with exact addresses"),
-        caption = "Person-years with exact adddress coverage coverage"
-        ) %>%
-  kable_styling()
-
-
+t %>%
+  ggplot(aes(x=exposure_year, y = no2_coverage_10yr)) + 
+  geom_point(alpha = 0.05) + 
+  geom_hline(yintercept = 0.95, col = "red") +
+  geom_smooth() + 
+  labs(
+    x = "Calendar Year",
+    y = "NO2 Coverage past 10yr"
+  )
 
 ```
 
-`r prop_exact$prop_exact_cov*100`% of person-years have an address geocoding of exact quality (the best possible).  
-- looking at NO2 predictions (shoudl be same as for other pollutants)
 
+## Imputed coverage 
 
-Checking to see how many peole are included in our anlysis as a result of meeting the minimum coverare threshold of having an AP prediction available for at least", min.pct*100, "% of each exposure period of ineterst (e.g., 1 yr)
-
-### --> ? see more inclusion at begining of enrollment? b/c making a residential/AP exposure assumption?
+### --> ? Why is imputed coverage > 0 after 10 years for the 10 year imputed coverage variable? Is this for people for whom we do not know their address at baseline? 
 
 ```{r}
-cov95 <- dem.w %>%
-  select(study_id, exposure_year,no2_1yr, no2_10yr, no2_coverage_1yr, no2_coverage_10yr) %>%
-  mutate(no2_10yr_95 = ifelse(no2_coverage_10yr >= min.pct, TRUE, FALSE)) %>%
-  group_by(study_id) %>%
-  dplyr::summarize(mean_cov = mean(no2_10yr_95)) %>%
-  dplyr::summarize(n_always_included = sum(mean_cov==1),
-                   n_never_included = sum(mean_cov==0),
-                   n_sometimes_included = sum(!mean_cov %in% c(0,1))
-                   )
-
-cov95 %>%
-  kable(col.names = c("Always", "Never", "Sometimes"), 
-        caption =  paste0("Number of individuals who are always, never, or sometimes included in our analysis as a result of meeting the minimum coverage threshold of having an AP prediction available for at least ", min.pct*100, "% of each exposure period of ineterst (e.g., 1 yr)" )
-          ) %>%
-  kable_styling()
-
-
-# DELETE??
+#  
 dem.w %>%
-    mutate(meets_cov = ifelse(no2_coverage_10yr >= min.pct, TRUE, FALSE)) %>%
-  group_by(study_id) %>%
-  #proportion of time subjects met minimum coverage requirement
-  mutate(mean_cov = mean(meets_cov),
-         #id_group = cut(study_id, breaks = 5)
-         ) %>%
-  # only keep participants who wre not fully included/excluded by this requirement
-  filter(!mean_cov %in% c(0,1),
-         #study_id < 1500
-         ) %>%
-
-  ggplot(aes(x= enrollment_yr, y = study_id, group=study_id, col=meets_cov)) + 
-  geom_point(alpha = 0.4) +
-  geom_line(alpha=0.4) + 
-  labs(title = "participants not fully included or excluded throughout their enrollment period due to not meeting the minimum coverage criteria",
-       col = "Meets min \ncoverage \ncriteria"
-       )
-
+  ggplot(aes(x=enrollment_yr, y = imputed_coverage10_yr)) + 
+  geom_point(alpha = 0.05) + 
+  geom_smooth() + 
+  labs(
+    x = "Participant Enrollment Year in Study",
+    y = "NO2 Imputed Coverage past 10 yrs"
+  )
 
 ```
+
+We are more likey to impute their coverage if they enrolled earlier in the study.
+### --> 1) why is imputed coverage > 0 after 10 years? Is this for people w/o baseline addresses?
+### --> 2) why do some person-years have imputed coverage = 1? 100% of the values are imputed from what?  
+### --> 3) 3) are imputed coverage values decreasing over time b/c we have residential hx for these people through the Group Health/KP system even if they were not in the study?
 
 ```{r}
-## 75% sensitivity 
-cov75 <- dem.w %>%
-  select(study_id, exposure_year,no2_1yr, no2_10yr, no2_coverage_1yr, no2_coverage_10yr) %>%
-  mutate(no2_10yr_75 = ifelse(no2_coverage_10yr >= .75, TRUE, FALSE)) %>%
-  group_by(study_id) %>%
-  dplyr::summarize(mean_cov = mean(no2_10yr_75)) %>%
-  dplyr::summarize(n_always_included = sum(mean_cov==1),
-                   n_never_included = sum(mean_cov==0),
-                   n_sometimes_included = sum(!mean_cov %in% c(0,1))
-                   )
+dem.w %>%
+  ggplot(aes(x=exposure_year, y = imputed_coverage10_yr)) + 
+  geom_point(alpha = 0.05) + 
+  geom_smooth() + 
+  labs(
+    x = "Year",
+    y = "NO2 Imputed Coverage past 10 yrs"
+  )
 
-cov75 %>%
-  kable(col.names = c("Always", "Never", "Sometimes"), 
-        caption =  paste0("Number of individuals who are always, never, or sometimes included in our analysis as a result of meeting the minimum coverage threshold of having an AP prediction available for at least ", .75*100, "% of each exposure period of ineterst (i.e., 10 yr exposure)" )
-          ) %>%
-  kable_styling()
+summary(dem.w$imputed_coverage10_yr)
 
-
+# ? why are some imputed values = 1? No address at baseline?
+table(dem.w$imputed_coverage10_yr==1)
 
 ```
 
- 
-```{r, eval=F}
-length(unique(dem.w$study_id))
+## Exact Address  
 
-dim(dem.w)
+```{r}
+dem.w %>%
+  ggplot(aes(x=exposure_year, y = exact_coverage01_yr)) + 
+  geom_point(alpha = 0.05) + 
+  geom_smooth() + 
+  labs(
+    x = "Year",
+    y = "Exact Address (1 yr)"
+  )
 
-table(dem.w$dementia_now)
-table(dem.w$ad_now)
+dem.w %>%
+  ggplot(aes(x=enrollment_yr, y = exact_coverage01_yr)) + 
+  geom_point(alpha = 0.05) + 
+  geom_smooth() + 
+  labs(
+    x = "Participant Enrollment Year in Study",
+    y = "Exact Address (1 yr)"
+  )
 
-dim(dem.w2)
-table(dem.w2$dementia_now2)
-table(dem.w2$ad_now2)
-
-summary(dem.w$age_last_visit)
-
-summary(dem.w$onsetdate)
-
-summary(dem.w2$age_act)
-
-# TESTING code against Rachel's results
-
-# Rachel's numbers are 7 higher than mine
-# dem0.1 %>%
-#   filter(pollutant == "no2",
-#          fu_yrs==1,
-#          intakedt != last_visit
-#          ) %>% 
-#   View()
-
- 
-
-  
 ```
 
-Missing apoe by enrollment year
+## median income
+(vs exact address)
 
-Have a cut off since most recent enrollees:    
-*	tend to be those w/o apoe    
-* wont contribute much to survival analysis    
-* may have not-yet geocoded addresses     
+### --> ? why do we still have so much missingness in this variable? Amanda? 
 
+```{r}
+
+dem.w %>%
+  ggplot(aes(x=is.na(exact_coverage01_yr), y = is.na(tr_med_inc_hshld))) + 
+  geom_point(alpha = 0.05) + 
+  geom_smooth() + 
+  labs(
+    # x = "Participant Enrollment Year in Study",
+    # y = "Exact Address (1 yr)"
+  )
+
+# table(exact_na = is.na(dem.w$exact_coverage01_yr), inc_na = is.na(dem.w$tr_med_inc_hshld))
+
+```
+
+
+## APOE 
+
+Plots of APOE availability. See slightly proportinally more missing APOE readings later in time. This may be because they have not yet had their blood work processed.
+ 
 ```{r}
 apoe_avail_ct_p <- dem.w %>%
   filter(enrollment_yr==1,
@@ -589,50 +539,89 @@ ggarrange(apoe_avail_ct_p,
           heights = c(1,1), 
           labels = "Enrolless by APOE availability"
           )
+
 ```
 
 
-note: there > dem & AD cases when using ACT FU age definition b/c missing no2 exposure estimates differ for different incident years. 
 
+
+## Age variables 
+
+Make sure age variables make sense.
+
+```{r, include=F}
+#check that ages make sense ages
+table(round(dem.w$age_intake, 1) <= round(dem.w$age_act, 1))  
+#View(dem.w[which(dem.w$age_intake > dem.w$age_act),]) 
+table(dem.w$age_intake <= dem.w$age_last_visit)
+#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) #study_id: 4647 has wrong last_visit/intakedt? last_visit is correct. "Will be updated in next freeze"
+table(dem.w$age_act <= dem.w$age_last_visit)
+
+#dementia 
+dementia_counts <- dem.w %>% 
+  group_by(study_id) %>%
+  dplyr::summarize(
+    #study_id = mean(study_id),
+    #number of times each patient has dementia_now==1 (should be max 1)
+    anydementia = mean(anydementia),
+    dem_now_n = sum(dementia_now==1)
+  ) 
+
+##check that individuals who have anydementia=1 also have dementia_now=1 & those who don't don't  
+dementia_counts %>%
+  with(., table(anydementia, dem_now_n))
+
+##check that individuals only have 1 dementia_now
+dementia_counts %>%
+  with(., table(dem_now_n <= 1))
+#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) 
+#study_id 1027 has 2 dementia_now's b/c last visit age vs end of year age, which rounded to same thing
+#View(dem.w[dem.w$study_id==1027,]) 
+
+#AD 
+ad_counts <- dem.w %>% 
+  group_by(study_id) %>%
+  dplyr::summarize(
+    ad_nincds = mean(ad_nincds),
+    ad_now_n = sum(ad_now==1)
+  ) 
+##check that individuals who have ad_nincds=1 also have ad_now=1 & those who don't don't #looks good
+ad_counts %>%
+  with(., table(ad_nincds, ad_now_n))
+
+##check that individuals only have 1 ad_now
+ad_counts %>%
+  with(., table(ad_now_n <= 1))
+
+```
+
+## Compare numbers vs Rachel's
+
+```{r, include=F}
+summary(dem.w$age_end_exposure)
+
+summary(dem.w2$age_end_exposure2 )
+
+summary(dem.w$age_act) 
+#summary(dem.w$age_act[dem.w$anydementia==1]) 
+
+summary(dem.w2$last_act_fu_yr)
  
-coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  birth_cohort
 
-```{r}
-t2 <- dem.w2 %>% select(
-  study_id,
-  last_visit, last_act_fu_yr,
-  age_end_exposure, age_end_exposure2,
-  anydementia,
-  dementia_now, dementia_now2,
-  ad_now, ad_now2,
-  exposure_year
-)
+summary(fixed.covariates$age_last_visit)
 
-#View(t2)
+table(dem.w$dementia_now)
+table(dem.w2$dementia_now2)
 
-t1 <- dem.w %>%
-  filter(dementia_now == 1,
-         !is.na(no2_10yr)
-         ) %>%
-  select(
-    study_id, 
-    dementia_now,
-    exposure_year,
-    no2_10yr, apoe, male, race_white, income_cat, degree, birth_cohort
-  )
+summary(fixed.covariates$age_last_visit)
+summary(fixed.covariates$age_act) 
 
-t2 <- dem.w2 %>%
-  filter(dementia_now2 ==1,
-        !is.na(no2_10yr)
-         ) %>%
-  select(
-    study_id,
-    dementia_now2,
-    exposure_year,
-    no2_10yr, apoe, male, race_white, income_cat, degree, birth_cohort
-    )
+summary(fixed.covariates$age_last_visit[fixed.covariates$anydementia==1]) 
+summary(fixed.covariates$age_act[fixed.covariates$anydementia==1]) 
 
 ```
+
+# Create fixed covariates dataset 
 
 ```{r}
 fixed.covariates <- dem.w %>%
@@ -657,9 +646,7 @@ fixed.covariates <- dem.w %>%
 
 ```
 
-## IPW since there is a lot of missing APOE values 
-
-#### --> also/change forward stepwsise selection
+# IPW since there is a lot of missing APOE values 
 
 ```{r}
 # see B540 L7-8
@@ -827,83 +814,7 @@ summary(dem.w$model_wt)
 
 
 ```
-
-# Quality Control
-
-Make sure age variables make sense.
-
-```{r, include=F}
-#check that ages make sense ages
-table(round(dem.w$age_intake, 1) <= round(dem.w$age_act, 1))  
-#View(dem.w[which(dem.w$age_intake > dem.w$age_act),]) 
-table(dem.w$age_intake <= dem.w$age_last_visit)
-#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) #study_id: 4647 has wrong last_visit/intakedt? last_visit is correct. "Will be updated in next freeze"
-table(dem.w$age_act <= dem.w$age_last_visit)
-
-#dementia 
-dementia_counts <- dem.w %>% 
-  group_by(study_id) %>%
-  dplyr::summarize(
-    #study_id = mean(study_id),
-    #number of times each patient has dementia_now==1 (should be max 1)
-    anydementia = mean(anydementia),
-    dem_now_n = sum(dementia_now==1)
-  ) 
-
-##check that individuals who have anydementia=1 also have dementia_now=1 & those who don't don't  
-dementia_counts %>%
-  with(., table(anydementia, dem_now_n))
-
-##check that individuals only have 1 dementia_now
-dementia_counts %>%
-  with(., table(dem_now_n <= 1))
-#View(dem.w[which(dem.w$age_intake > dem.w$age_last_visit),]) 
-#study_id 1027 has 2 dementia_now's b/c last visit age vs end of year age, which rounded to same thing
-#View(dem.w[dem.w$study_id==1027,]) 
-
-#AD 
-ad_counts <- dem.w %>% 
-  group_by(study_id) %>%
-  dplyr::summarize(
-    ad_nincds = mean(ad_nincds),
-    ad_now_n = sum(ad_now==1)
-  ) 
-##check that individuals who have ad_nincds=1 also have ad_now=1 & those who don't don't #looks good
-ad_counts %>%
-  with(., table(ad_nincds, ad_now_n))
-
-##check that individuals only have 1 ad_now
-ad_counts %>%
-  with(., table(ad_now_n <= 1))
-
-```
-
-Compare numbers vs Rachel's
-
-```{r, include=F}
-summary(dem.w$age_end_exposure)
-
-summary(dem.w2$age_end_exposure2 )
-
-summary(dem.w$age_act) 
-#summary(dem.w$age_act[dem.w$anydementia==1]) 
-
-summary(dem.w2$last_act_fu_yr)
  
-
-summary(fixed.covariates$age_last_visit)
-
-table(dem.w$dementia_now)
-table(dem.w2$dementia_now2)
-
-summary(fixed.covariates$age_last_visit)
-summary(fixed.covariates$age_act) 
-
-summary(fixed.covariates$age_last_visit[fixed.covariates$anydementia==1]) 
-summary(fixed.covariates$age_act[fixed.covariates$anydementia==1]) 
-
-```
-
 
 # Descriptive Statistics   
 ## Sample size  

@@ -1,0 +1,906 @@
+---
+title: 'Aim 2: QAQC - Instrument Readings'
+author: "Magali Blanco"
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+  pdf_document:
+    number_sections: yes
+    toc: yes
+    toc_depth: 3
+editor_options:
+  chunk_output_type: console
+---
+
+```{r}
+# ---> TO DO:
+# ---> ? how to drop very low/high UFP & BC readings?
+### --> keep DiscMini
+
+```
+
+```{r, echo=F}
+# notes
+#BC = 880 nm (IR); 625 nm (Red); 528 nm (Green); 470 nm (Blue); and 375 nm (UV);  
+
+```
+
+# Summary of Script
+
+**All data**   
+
+* keep only BC and PTRAK readings, current MM stops (drop old stops)
+* relabeled incorrectly labeled instruments
+* split up data into UFP & BC datasets 
+
+**UFP** 
+
+* drop erroneous UFP instrument readings due to wick/other PTRAK issues
+	+ < ~300 data points were dropped from 2 periods where PTRAKs appeared to have failed - concentrations were at or near zero and very different than concentrations immediately before/after
+	+ these readings did not correlate well to measures from other particle measurement instruments
+
+**BC** 
+
+* perform ONA correction   
+* estimate BC from 880 nm (IR) wavelength 
+
+**All data** 
+
+* compare co-located instruments to make sure readings are similar
+  + PTRAK - PTRAK   
+	+ NanoScan - NanoScan    
+	+ PTRAK - NanoScan (< ptrak limit)   
+    - used NanoScan particle counts comparable to PTRAK (subtracted counts for particles < 20 nm)   
+
+# Analyses  
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      fig.height = 5, fig.width = 10
+                      )  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+           detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+# load packages 
+pacman::p_load(tidyverse, 
+               # tables
+               knitr, kableExtra,
+               # dates
+               chron, lubridate,
+               # statistics
+               Hmisc
+               )   
+
+# source global variables & functions
+source("0.Global_Fns.R")
+source(file.path("A2.0.1_Var&Fns.R"))
+
+images_path <- file.path(images_path0, "1. Stops")
+tables_path <- file.path(tables_path0, "1. Stops")
+
+#read in data
+mm_full0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_2020-03-08.rda"))
+
+### --> why do these runs have missing variable/value? 2019-05-14_R03, 2019-07-17_R07	
+
+site_ids <- read.csv(file.path("Data", "Aim 2", "Mobile Monitoring", "locations_190715.csv")) %>%
+  select(site_id) %>%
+  #drop Roosevelt garage stop; drop site w/ only 1 observation - stopped sampling here & added MS0601
+  filter(!site_id %in% c("MS0000", "MS0398")) %>%
+  unique()
+
+mm_full <- mm_full0 %>%
+  # --> why do 2 runs have missing values??
+  select(-duration_sec) %>%
+  drop_na(value) %>%
+  filter(!variable %in% c("ufp_disc_ct_cm3",
+                         "ufp_disc_med_size_nm", 
+                         "ufp_pt_screen_ct_cm3"
+                         )) %>%
+  mutate(variable = recode_factor(factor(variable),  
+                              "ufp_pt_noscreen_ct_cm3" = "ptrak_pt_cm3")) %>%
+  # not sure why there are repeated identical rows for ufp_scan_11_5_ct_cm3
+  unique()
+
+#unique(mm_full$variable)
+
+#drop old stops 
+mm_full <- left_join(site_ids, mm_full)
+
+#relabel instruments that were incorrectly labeled
+mm_full <- mm_full %>%
+  mutate(instrument_id = ifelse(instrument_id == "BC_0063", "BC_63",
+                                #ifelse(instrument_id == "CO_2", "CO_3",
+                                       ifelse(instrument_id == "PMSCAN_1", "PMSCAN_3",
+                                              instrument_id))
+         )
+
+#Create NanoScan counts (20-420 nm) similar to ptraks: 20-1000 nm)
+ns <- mm_full %>%
+  #look at variables from NanoScan
+  filter(grepl("scan", variable)) %>%
+  #not sure why there are repeated identical rows for ufp_scan_11_5_ct_cm3
+  unique() %>%
+  #make wide format to calculate the difference
+  spread(variable, value) %>%
+  # dropping ufp_scan_20_5_ct_cm3 counts (17.8-23.7 nm) since PTRAK-NS comparison looks slightly better without these counts.
+  mutate(scan_20_420_pt_cm3 = ufp_scan_ct_cm3 - ufp_scan_11_5_ct_cm3 - ufp_scan_15_4_ct_cm3 - ufp_scan_20_5_ct_cm3
+         ) %>%
+  select(-c(ufp_scan_11_5_ct_cm3, # 10.0-13.3 nm
+            ufp_scan_15_4_ct_cm3, # 13.3-17.8 nm
+            ufp_scan_20_5_ct_cm3, # 17.8-23.7 nm
+            ufp_scan_ct_cm3)) %>%
+  #dplyr::rename(scan_10_420_pt_cm3 = ufp_scan_ct_cm3) #%>%
+  #make back to long format
+  gather("variable", "value", scan_20_420_pt_cm3)
+
+# replace old nanoscan calculations w/ new ones similar to PTRAK
+mm_full <- mm_full %>%
+  filter(!grepl("scan", variable)) %>%
+  rbind(ns) %>%
+  arrange(time)   
+
+# create new temporal variables, arrival time and date
+mm_full <- mm_full %>%
+  dplyr::group_by(runname, site_id) %>%
+  #set time to arrival time
+  dplyr::mutate(arrival_time = min(time)) %>%
+  mutate(date = as.Date(substr(arrival_time, 1,10))) %>%
+  ungroup()
+
+```
+
+Instruments Used
+
+```{r}
+#instrument used each day
+mm_full %>%
+  select(instrument_id, time) %>%
+  mutate(date = date(time)) %>%
+  unique() %>%
+  ggplot(aes(x=date, y=instrument_id, colour = instrument_id)) + 
+  geom_point(alpha=0.5) + 
+  theme(legend.position = "none") + 
+  labs(title = "Instruments used",
+       x = "Date",
+       y = "Instrument ID"
+       ) 
+ 
+```
+
+Set up common variables 
+
+```{r, echo=T}
+
+# site note: distribution of pollutants
+# summary(mm_full$value[mm_full$variable=="bc_ng_m3"])
+# summary(mm_full$value[mm_full$variable=="ptrak_pt_cm3"])
+
+
+max_bc_limit <- 1e6 #ng/m3
+bc_factor <-10 
+
+ptrak_lim <- 5e5 
+low_ufp_lvl <- 300
+
+```
+
+# Correct BC readings suing the Optimized Noise-Reduction Algorithm (ONA) 
+
+Distribution of raw BC readings. See that both instruments have negative BC readings.  
+
+```{r}
+
+mm_full %>% 
+  filter(grepl("ma200_ir_bc", variable)) %>%
+  group_by(instrument_id) %>%
+distribution.table(., var.string = "value") %>%
+  kable(caption = "Distribution of raw 10-sec Aethelometer readings") %>%
+  kable_styling()
+
+```
+
+```{r}
+# this does not need to be done separatebly by instrument, results are the same. May be related to different tape positions for differnet instruments, which is already taken into account?
+bc.w <- mm_full %>%
+  filter(grepl("ma200", variable)) %>%
+  spread(variable, value) %>%
+  ONA() 
+
+bc <- bc.w %>%
+  #only keep ONA-corrected values
+  select(site_id:date, 
+        bc_ng_m3 = ona_ir,
+        #ma200_bc = ma200_ir_bc1
+        ) %>%
+  gather("variable", "value", contains("bc")) %>%
+  # BC_63 has a few missing values during a 2.5-minute period
+  drop_na(value)
+  
+```
+
+Distribution of ONA-corrected BC readings. Still see some negative values, but there are fewer and they are not as negative. The highest values are a bit lower than the raw values.
+
+```{r}
+
+bc %>%  
+  group_by(instrument_id) %>%
+distribution.table(., var.string = "value") %>%
+  kable(caption = "Distribution of ONA-corrected 10-sec Aethalometer readings") %>%
+  kable_styling()
+
+```
+
+```{r}
+#BC/IR
+bc.w %>%
+  ggplot(aes(x= ma200_ir_bc1, y = ona_ir)) + 
+  geom_point() + 
+  geom_abline(intercept = 0, slope = 1) + 
+  geom_smooth() + 
+  labs(title = "IR (880 nm, black carbon) concentrations before and after ONA correction",
+      x = "Aethelometer (ng/m3)",
+      y = "ONA-corrected (ng/m3)"
+       )
+```
+
+replace old aethalometer readings with ONA corrected IR (880 nm) BC readings in full dataset
+
+```{r}
+mm_full <- mm_full %>%
+  #drop old, raw MA readings
+  filter(!grepl("ma200", variable)) %>%
+  # attach ONA-corrected IR (880 nm) readings
+  rbind(bc) %>%
+  mutate(variable = droplevels(variable))
+
+```
+
+# Low instrument readings 
+
+## UFP - PTRAKS 
+
+very low concentrations: Elena (MOVUP Study) excluded UPF < 100 b/c: a) had very few samples that were less than 100 (less then 1%), b) they did not correlate to low measures on other particle measurement instruments, c) these values also resulted in extreme values on some the ratio metrics.
+
+PMPT_93 and PMPT_94 have both had 0 readings. PMPT_94 has had a maximum reading of 500k pt/cm3. 
+
+```{r}
+
+mm_full %>% 
+  filter(grepl("ptrak", variable)) %>%
+  group_by(instrument_id) %>%
+  #rename("Instrument ID" = instrument_id) %>%
+distribution.table(., var.string = "value") %>%
+  kable(caption = "summary of 1 sec PTRAK distribution (all data)") %>%
+  kable_styling()
+
+```
+
+Time series plots of runs with very low instrument readings.
+
+```{r}
+
+low_ptrak <- mm_full %>%
+  filter(grepl("ptrak", variable),
+         value < low_ufp_lvl) %>%
+  select(runname, site_id, instrument_id) %>% 
+  unique()
+
+```
+
+Plot of entire day.
+
+```{r, fig.height=8}
+
+y_max <- 5000
+
+mm_full %>%
+  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+  filter(runname %in% low_ptrak$runname) %>%
+  time_series_plots(., mytitle = paste0("time series for sites with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
+                    hline_value = low_ufp_lvl, 
+                    ymax = y_max) +
+  labs(subtitle = paste0("only showing concentrations up to", y_max, " pt/cm3"))
+
+```
+
+Zoomed in to sites with low readings.        
+* 3-22-2019: low alc noted. has unstable readings most of the stop     
+* 7-13-2019 low alc noted. has clear wick issues in the middle and readings seem too stable immediately before and after.  
+* 1-4-2020 has low readings at nearby stops MS0176 also has low BC readings. MS0177 has some low BC readings, but not all. readings seem too stable. Sign of wick issues?
+
+
+```{r, fig.height=8}
+df <- data.frame()
+
+#only keep observations for sites with low readings 
+for (i in 1:nrow(low_ptrak)) {
+  one_site <- mm_full %>%
+    filter(runname == low_ptrak$runname[i] &
+             site_id == low_ptrak$site_id[i])
+  
+  df <- rbind(df, one_site)
+}
+
+df %>%
+  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+  time_series_plots(., mytitle = paste0("time series for sites with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
+                    hline_value = low_ufp_lvl) + 
+  facet_wrap(~runname+site_id,
+             scales = "free_x") 
+
+
+```
+
+
+```{r}
+# # ?? need these? DELETE?
+
+# Zoom in on 3-22 & 1/4 times w/ duplicat PTRAK readings. Take out site readings from bad PTRAK since these seem unstable the majority of the 2 minutes and we have other PTRAK readings.
+
+# date1 <- "2019-03-22"
+# 
+# mm_full %>%
+#   mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+#   filter(grepl(date1, runname),
+#          time > paste(date1, "17:05"),
+#          time < paste(date1, "17:25")) %>%
+#   time_series_plots(., mytitle = paste0("time series for runs with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
+#                     hline_value = low_ufp_lvl)  
+
+```
+
+```{r}
+# # ?? need these? DELETE?
+
+# date2 <- "2020-01-04"
+# 
+# mm_full %>%
+#   mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+#   filter(grepl(date2, runname),
+#          time > paste(date2, "06:05"),
+#          time < paste(date2, "07:00")) %>%
+#   time_series_plots(., mytitle = paste0("time series for runs with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
+#                     hline_value = low_ufp_lvl)  
+
+```
+ 
+Total PTRAK readings before dropping any values: 
+
+```{r}
+
+total_ptrak_readings <- mm_full %>%
+  filter(grepl("ptrak", variable)) %>%
+  nrow()
+
+total_ptrak_readings
+
+```
+
+Dropping sites obsrvations with low UFP readings (< `r low_ufp_lvl` pt/cm3) that may be indicative of:
+* low alcohol wick issues   
+* instrument error (MOV-UP study used 100 pt/cm3; Kerckhoffs et al. 2017 MM study & Kompmaker et al. 2015 used 500 pt/cm3 & cites other studies that used this criteria)
+
+```{r}
+# drop observations for sites with low readings 
+for (i in 1:nrow(low_ptrak)) {
+  mm_full <- mm_full %>%
+    filter(!(runname == low_ptrak$runname[i] &
+             site_id == low_ptrak$site_id[i] &
+             instrument_id == low_ptrak$instrument_id[i]))
+}
+
+```
+
+PTRAK readings dropped, n (%)
+
+```{r}
+remaining_ptrak_readings <- mm_full %>%
+  filter(grepl("ptrak", variable)) %>%
+  nrow()
+
+ptrak_dropped_n <- total_ptrak_readings - remaining_ptrak_readings
+ptrak_dropped_pct <- round(ptrak_dropped_n/total_ptrak_readings*100, 2)
+
+paste0(ptrak_dropped_n, " (", ptrak_dropped_pct, "%)")
+
+```
+
+Distribution of remaining PTRAK readings.
+
+```{r}
+
+mm_full %>% 
+  filter(grepl("ptrak", variable)) %>%
+  group_by(instrument_id) %>%
+  distribution.table(., var.string = "value") %>%
+  kable(caption = "summary of 1 sec PTRAK distribution after dropping low instrument readings", 
+         ) %>%
+  kable_styling()
+ 
+```
+
+## BC 
+
+Time series plots of runs with very low instrument readings.
+
+```{r}
+low_bc_quant <- 0.001
+low_bc_lvl <- 0 #quantile(mm_full$value[mm_full$variable== "bc_ng_m3"], low_bc_quant)[[1]]
+
+low_bc <- mm_full %>%
+  filter(grepl("bc", variable),
+         value <= low_bc_lvl) %>%
+  select(runname, site_id, instrument_id) %>% 
+  unique()
+
+```
+
+```{r}
+# # SQL query for notes of low BC times
+# low_bc_sql <- low_bc %>%
+#   mutate(query = paste0("(runname = '", runname, "' AND upper(site_id) = '", site_id, "')")) %>%
+#   dplyr::summarize(query = paste(query, collapse = " OR ")) %>%
+#   as.character()
+
+```
+
+
+Plot of entire day.
+
+```{r, fig.height=8}
+y_max <- 3000
+
+unique_low_bc_runs <- unique(low_bc$runname)  
+
+bc_day_plots <- mm_full %>%
+  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+  filter(runname %in% unique_low_bc_runs) %>%
+  time_series_plots(., mytitle = paste0("time series for runs with BC concentrations < ", low_bc_lvl, " pt/cm3"),
+                    hline_value = low_bc_lvl, 
+                    ymax = y_max, 
+                    facet_runname = F) + 
+  labs(subtitle = paste0("only showing concentrations up to ", y_max, " pt/cm3"))
+
+
+# plot on separate pages since there are many
+# need this many pages if plot 9 plots/page
+page_no <- ceiling(length(unique_low_bc_runs)/9)
+
+for (i in seq(page_no)) {
+  
+  myplot <- bc_day_plots +
+    ggforce::facet_wrap_paginate(~runname, 
+                             nrow = 3, ncol = 3, 
+                             page = i, 
+                             scales = "free")  
+  
+  print(myplot)
+}
+
+```
+
+zoom in on specific sites 
+
+```{r, fig.height=8}
+df <- data.frame()
+
+#only keep observations for sites with low readings 
+for (i in 1:nrow(low_bc)) {
+  one_site <- mm_full %>%
+    filter(runname == low_bc$runname[i] &
+             site_id == low_bc$site_id[i])
+  
+  df <- rbind(df, one_site)
+}
+
+bc_site_plots <- df %>%
+  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+  time_series_plots(., plot_bc_factor = bc_factor, 
+                    mytitle = paste0("time series for sites with BC concentrations <= ", low_bc_lvl, " pt/cm3"),
+                    hline_value = low_bc_lvl, 
+                    ymax = y_max, 
+                    facet_runname = F) + 
+  labs(subtitle = paste0("only showing concentrations up to ", y_max, " pt/cm3"))
+
+# plot on separate pages since there are many
+# page_no <- ceiling(length(unique_low_bc_runs)/9)
+
+for (i in seq(page_no)) {
+  
+  myplot <- bc_site_plots +
+    ggforce::facet_wrap_paginate(~runname + site_id, 
+                             nrow = 3, ncol = 4, 
+                             page = i, 
+                             scales = "free")  
+  
+  print(myplot)
+}
+
+```
+
+total BC readings before dropping any values:
+
+```{r}
+total_bc_readings <- mm_full %>%
+  filter(grepl("bc", variable)) %>%
+  nrow()
+
+total_bc_readings
+
+```
+
+The number of zero & negative (<= 0) 10-sec BC readings is very low. 
+
+```{r}
+# proportion of negative BC readings
+negative_bc_no <- sum(mm_full$value[mm_full$variable == "bc_ng_m3"] <= 0) 
+negative_bc_pct <- round(negative_bc_no/total_bc_readings*100, 2)
+
+paste0(negative_bc_no, " (", negative_bc_pct, "%)")
+
+```
+
+### --> ?? drop BC < 0 since these readigns seem to generally be different than neighboring BC readings and diffrent from the patterns of other particle instruments? 
+
+### --> [will email Elena] ?? Drop or keep values < 0 or < threshold (or set to ~ 0/min) since so few and don't know wha cutoff to use for high values? 
+
+**Not doing anything for now since some of the very low values are in series (next to each other), indicating that readings are truly low?? Will averaging very low/high readings result in positive, unbiased readings in the end?**
+
+```{r}
+# [??] Set values < 0 equal to ___ the minimum positive BC reading divided by sqrt(2) ___
+# 556 notes suggest: LOD/sqrt(2), but manual does not have a LOD for a 10-sec aethalometer reading. 
+ 
+# low_bc_to_drop <- 0
+# 
+# min_positive_bc <- mm_full %>% 
+#   filter(grepl("bc", variable),
+#          value >0
+#          ) %>%
+#   dplyr::summarise(min_positive_bc = min(value)) %>% 
+#   as.numeric()
+# 
+# mm_full <- mm_full %>%
+#   #filter(value >0)
+#   mutate(value = ifelse(value <= 0, min_positive_bc/sqrt(2), value))
+
+```
+
+Distribution of resulting BC readings 
+
+```{r}
+mm_full %>%  
+  filter(grepl("bc", variable)) %>%
+  group_by(instrument_id) %>%
+distribution.table(., var.string = "value") %>%
+  kable(caption = "Distribution of final 10-sec Aethalometer readings") %>%
+  kable_styling()
+
+```
+
+
+# High instrument readings
+
+**What others have done**   
+*UFP*
+
+### --> ? high conc for PTRAKS = 500 k ? too many high values when using quantile() to manually inspect
+
+
+*BC*   
+* MOVUP study: dropped BC readings > 27k ng/m3 (1% of data)   
+* Kompmaker 2015: did minimal data cleaning b/c averaged 1-min readings to 30-mins   
+* others have taken other approaches for dealing with noisy measurements and spike concentrations (e.g., Apte 2011 SI details dealing w/ spikes due to instrument jolts)
+
+### --> high conc for BC is quantile?
+
+### --> ? take 1 min rolling avg for PTRAK & plot time series? Can see when concentrations diverge
+
+## High PTRAK readings 
+
+```{r}
+
+high_ptrak_val <- ptrak_lim #*.8 # or quantile?
+
+#bc_factor <- 10
+
+```
+
+Runs with PTRAK readings at or above: `r high_ptrak_val` pt/cm3
+
+```{r}
+
+high_ptrak <- mm_full %>%
+  filter(grepl("ptrak", variable),
+         #value == ptrak_lim 
+         value >= high_ptrak_val
+         ) %>%
+  select(runname, site_id) %>% 
+  unique()
+
+#high_ptrak <- high_ptrak$runname
+
+```
+ 
+Plot of entire day.
+
+```{r}
+# plot of entire day
+mm_full %>%
+  mutate(value = ifelse(variable == "bc_ng_m3", value*bc_factor, value)) %>%
+  filter(runname %in% high_ptrak$runname) %>%
+  time_series_plots(., plot_bc_factor = bc_factor, 
+                    hline_value = ptrak_lim,
+                    mytitle = "time series for runs with high PTRAK concentrations")
+
+```
+
+Zoom in on sites of interest. In general, elevated PTRAK readings are associated with delayed elevated NanoScan and BC readings. Thus, keep these high readings? 
+
+### --> ? is the NS time stamp at the end of the reading period? 
+
+```{r}
+df <- data.frame()
+
+#only keep observations for sites with high readings 
+for (i in 1:nrow(high_ptrak)) {
+  one_site <- mm_full %>%
+    filter(runname == high_ptrak$runname[i] &
+             site_id == high_ptrak$site_id[i])
+  
+  df <- rbind(df, one_site)
+}
+
+df %>%
+  mutate(value = ifelse(variable == "bc_ng_m3", value*bc_factor, value)) %>%
+  time_series_plots(., plot_bc_factor = bc_factor, 
+                    hline_value = ptrak_lim,
+                    mytitle = "time series for sites with high PTRAK concentrations") +
+  facet_wrap(~runname+site_id, scales = "free") 
+
+
+```
+
+## High BC readings 
+
+High BC reading quantile & concentration (ng/m3):  
+
+```{r}
+high_quant <- 0.99
+
+bc_high_quant <- quantile(mm_full$value[mm_full$variable=="bc_ng_m3"], high_quant)
+
+```
+
+Runs with BC readings above quantile: `r bc_high_quant`
+
+```{r}
+high_bc <- mm_full %>%
+  filter(grepl("bc", variable),
+         value >= quantile(value, high_quant)) %>%
+  select(runname, site_id) %>% 
+  unique()
+
+```
+
+Plot of entire day.
+
+```{r}
+# plot of entire day
+mm_full %>%
+  mutate(value = ifelse(variable == "bc_ng_m3", value*bc_factor, value)) %>%
+  filter(runname %in% high_bc$runname) %>%
+  time_series_plots(., plot_bc_factor = bc_factor, 
+                    hline_value = ptrak_lim,
+                    mytitle = "time series for runs with high BC concentrations")
+
+```
+
+Zoom in on sites of interest.  
+
+```{r}
+
+df <- data.frame()
+
+#only keep observations for sites with high readings 
+for (i in 1:nrow(high_bc)) {
+  one_site <- mm_full %>%
+    filter(runname == high_bc$runname[i] &
+             site_id == high_bc$site_id[i])
+  
+  df <- rbind(df, one_site)
+}
+
+df %>%
+  mutate(value = ifelse(variable == "bc_ng_m3", value*bc_factor, value)) %>%
+  time_series_plots(., plot_bc_factor = bc_factor, 
+                    hline_value = ptrak_lim, 
+                    mytitle = "time series for sites with high BC concentrations") +
+  facet_wrap(~runname+site_id, scales = "free")
+
+```
+
+
+### --> plot where have divergent estimates. e.g. very high NS readings. near airport? is this where discMini has high readings? 
+
+```{r}
+
+```
+
+
+
+# Compare co-located instruments 
+
+## UFP
+
+Compare collocated PTRAK readings. These will later be averaged when duplicate instruments are used. PMPT_94 has collected most of the measurements and been co-located with PMPT_93, PMPT_4 and PMPT_2. PMPT_1 and PMPT_93 collected measurements early on in the study. PMPT_93 was co-located with PMPT_94 and PMPT_4. Can't compare PMPT_1 to other PTRAKs because it was never co-located.
+
+### PTRAK - PTRAK
+
+PTRAK 93 tends to have slightly lower readings than primary PTRAK 94.
+
+```{r}
+
+mm_full %>%
+  spread(instrument_id, value) %>%
+  colo.plot(data.wide = .,
+            x.variable = "PMPT_94",  
+            y.variable = "PMPT_93", 
+            mytitle = paste0("Comparison of collocated PTRAKs (pt/cm3)"), 
+            col.by = "route")
+```
+
+PMPT_4 has slightly higher reaadings than primary PMPT_94.
+
+```{r}
+mm_full %>%
+  spread(instrument_id, value) %>%
+  colo.plot(data.wide = .,
+            x.variable = "PMPT_94",  
+            y.variable = "PMPT_4", 
+            mytitle = paste0("Comparison of collocated PTRAKs (pt/cm3)"), 
+            col.by = "route")
+```
+
+PMPT_2 has slightly lower reaadings than primary PMPT_94.
+
+```{r}
+mm_full %>%
+  spread(instrument_id, value) %>%
+  colo.plot(data.wide = .,
+            x.variable = "PMPT_94",  
+            y.variable = "PMPT_2", 
+            mytitle = paste0("Comparison of collocated PTRAKs (pt/cm3)"), 
+            col.by = "route")
+```
+
+PMPT_4 has slightly lower reaadings than more commonly used PMPT_93. Instruments have a better fit on Route 2 than 7?
+
+```{r}
+mm_full %>%
+  spread(instrument_id, value) %>%
+  colo.plot(data.wide = .,
+            x.variable = "PMPT_93",  
+            y.variable = "PMPT_4", 
+            mytitle = paste0("Comparison of collocated PTRAKs (pt/cm3)"), 
+            col.by = "route")
+
+```
+
+
+### PTRAK - diSCMini
+
+```{r}
+
+```
+
+### NanoScan - NanoScan
+
+PMPSCAN_3 has slightly lower reaadings than primary PMSCAN_5.
+
+```{r} 
+ns_trim <- 0.00  # 0.01
+
+mm_full %>%
+  filter(grepl("scan", variable)) %>%
+  # time stamps are sometimes a ~ 1 second off.
+  mutate(time = floor_date(time, unit = "minute")) %>%
+  spread(instrument_id, value) %>%
+  colo.plot(
+    x.variable = "PMSCAN_5", #x.label = "NanoScan ID 5",
+    y.variable = "PMSCAN_3", #y.label = "NanoScan ID 3",
+    mytitle = paste0("Comparison of collocated NanoScan instrument readings"), 
+    col.by = "route")
+
+```
+
+### PTRAK - NanoScan
+
+Compare NanoScan (24-422 nm) to ptrak (20-1000 nm) since NanoScan tends to be more steady. Assuming few particles > 420 nm, such that NanoScan and PTRAK readings are comparable.
+
+Dropping nanoscan readings above 500k pt/cm3 (PTRAK instrument threshold)
+
+### --> use ceiling_date() instead of floor_date() to align PTRAK & NS readings?   
+
+```{r}
+# use wide (takes avg of identical collocatd instruments) since not comparing specific instrument IDs, but instrument Type   
+t <- mm_full %>%
+  filter((grepl("ptrak", variable) & value < ptrak_lim) |
+           grepl("scan", variable)) %>%
+  # take avg ptrak reading at the "00" second mark for each instrument, for comparison w/ NanoScan
+  mutate(time = floor_date(time, unit = "minute")) %>%  #ceiling_date()
+  group_by(time, variable, route, instrument_id) %>%
+  dplyr::summarize(value = mean(value)) %>%
+  spread(variable, value)
+
+# keep duplicate PTRAK & NS readings
+t_ptrak <- t %>%
+  select(time, route, ptrak_pt_cm3) %>%
+  drop_na()
+
+t_ns <- t %>%
+  select(time, scan_20_420_pt_cm3) %>%
+  drop_na()
+
+full_join(t_ptrak, t_ns) %>%
+  colo.plot(x.variable = "scan_20_420_pt_cm3", x.label = "NanoScan (24-422 nm pt/cm3)",
+                      y.variable = "ptrak_pt_cm3", y.label = "PTRAK 94 (20-1000 nm pt/cm3)",
+                      mytitle = paste0("Comparison of co-located 1-min avg PTRAK and NanoScan readings"), mysubtitle = paste0("dropped PTRAK readings >= ", ptrak_lim, " pt/cm3"),
+            col.by = "route" 
+            )
+
+```
+
+## Aethalometer - Aethalometer
+
+First, round reading time to nearest 10-seconds since instrument time stamps may not be for the exact same 10 seconds.
+
+```{r}
+ mm_full %>%
+  filter(grepl("bc", variable)) %>%
+  # 2020-01-07 has issues where the time stamp jumps from being 5 sec into the interval to being 4 sec into the interval. creates merging issues where some points are dropped. round to nearest 5-sec to adjust for this.
+  mutate(time_round = round_date(time, unit = "5s")) %>%
+  #drop time, otherwise merging has fewer pairs 
+  select(-time) %>%
+   spread(instrument_id, value) %>%
+  colo.plot(x.variable = "BC_63", #x.label = "BC_63 ng/m3",
+          y.variable = "BC_66", #y.label = "BC_66 ng/m3",
+          mytitle = "Co-located aethalometer readings (ng/m3)", 
+          col.by = "route" 
+          )
+ 
+```
+
+## --> ? compare BC readings to AQS site readings (2 min & overnight). select a reference instrument that is most similar?
+
+(cite: Minet 2017 & their refs: Deville Cvaellin 2016; Lin 2015)
+
+```{r}
+
+```
+
+
+
+
+
+
+
+Save datasets.
+
+````{r}
+# saveRDS(mm_full, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_full_2020-03-08.rda"))
+
+```

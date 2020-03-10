@@ -60,15 +60,17 @@ plot_range <- function(vector1 = uk_decompose_l$primary_uk,
 
 ################################# correlation plot Wide format ####################################
 
-# x.variable = "mean_s_tow2" 
-# y.variable = "LUR_mean_s_tow2"
+# data.wide <- uk_decompose %>% filter(study_area) 
+# y.variable = my_analysis
+# x.variable = "regression_prediction"
 # x.label = ""
 # y.label = ""
 # col.by = ""
 # mytitle = ""
 # coef_digits = 0
 # r2.digits = 2
-# rmse.digits = 0
+# rmse.digits = 2
+# convert_rmse_r2_to_native_scale=T
 
 colo.plot <- function(data.wide=mm.wide, 
                       x.variable, x.label = "",
@@ -77,9 +79,12 @@ colo.plot <- function(data.wide=mm.wide,
                       mytitle = "", title_width = 60,
                       mysubtitle = NULL,
                       mycaption = NULL,
-                      coef_digits = 0, 
+                      int_digits = 0,
+                      slope_digits = 2,
                       r2.digits = 2, 
-                      rmse.digits = 0) {
+                      rmse.digits = 0,
+                      convert_rmse_r2_to_native_scale=F
+                      ) {
   
   #if label is left blank, use variable name
   if(x.label == ""){x.label <- x.variable}
@@ -88,18 +93,31 @@ colo.plot <- function(data.wide=mm.wide,
   data.wide <- data.wide %>% drop_na(x.variable, y.variable)  
   
   lm1 <- lm(formula(paste(y.variable, "~", x.variable)), data = data.wide)
+  #summary(lm1)
   
   #rmse
-  rmse <- rmse(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>% 
+  if (convert_rmse_r2_to_native_scale==T) {
+    rmse <- rmse(obs = exp(data.wide[[x.variable]]), pred = exp(data.wide[[y.variable]])) %>% 
+      round(digits = rmse.digits)
+    
+    r2 <- r2_mse_based(obs = exp(data.wide[[x.variable]]), pred = exp(data.wide[[y.variable]])) %>%
+      round(r2.digits)
+    } 
+  
+  else {
+    rmse <- rmse(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>% 
     round(digits = rmse.digits)
+    
+    r2 <- r2_mse_based(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>%
+      round(r2.digits)
+  }
   
-  r2 <- r2_mse_based(obs = data.wide[[x.variable]], pred = data.wide[[y.variable]]) %>%
-    round(r2.digits)
   
-  fit.info <- paste0("y = ", round(coef(lm1)[1], coef_digits), " + ", round(coef(lm1)[2], coef_digits), 
+  
+  fit.info <- paste0("y = ", round(coef(lm1)[1], int_digits), " + ", round(coef(lm1)[2], slope_digits), 
                      "x \nR2 = ", r2,  
                      "\nRMSE = ", rmse,
-                     "\nno. pairs = ", nrow(data.wide))
+                     "\nNo. Pairs = ", nrow(data.wide))
   
   max_plot <- max(max(data.wide[[x.variable]]), max(data.wide[[y.variable]]) )
   min_plot <- min(min(data.wide[[x.variable]]), min(data.wide[[y.variable]]) )

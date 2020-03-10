@@ -17,27 +17,116 @@ model.digits <- 2
 ###################################################################################
 ################################ FUNCTIONS ######################################## 
 ###################################################################################
+### NOT USING??
+# function calculates summary statististics for a table
+
+# dt <- dem.w %>%
+#   # only keep individuals included in Model 2
+#   drop_na(m2_variables) %>%
+#   #1st year of enrollment (baseline)
+#   filter(enrollment_yr == 1)
+
+
+summarize_variable <- function(dt, var, var_label, 
+                               #group_var = "anydementia",
+                               calc_summary,
+                               round.var = 2
+                               ) {
+  # dt = data
+  # var = "birth_cohort"
+  # var_label = "Birth Cohort"
+  # calc_summary = "n_perc"  # "mean_sd", "median_iqr
+  
+    if(calc_summary == "n_perc") {
+      
+    dt %>%
+        #group_by(anydementia) %>%
+        rename(var = var,
+               #group_var = group_var
+               ) %>%
+        drop_na(var) %>%
+        # add grouping var to other already existing grouping vars (e.g., anydementia)
+        group_by(var, add=TRUE) %>%
+        dplyr::summarize(
+          N = nrow(.),
+          n = n(),
+          prop = round(n/N, round.var)
+          )  %>%
+        mutate(
+          summary = paste0(n, " (", prop*100, "%)")
+          ) %>%
+        select(var, 
+               #group_var, 
+               summary) %>%
+        #spread(group_var, summary) %>%
+         ungroup() #%>%
+         #add_row(var = var_label, .before = 1)
+
+      }
+    
+    ## --> add mean_sd, median_iqr
+    
+    
+  
+  #return(df)
+  
+  
+}
+
+
+# dem.w %>%
+#   # only keep individuals included in Model 2
+#   drop_na(m2_variables) %>%
+#   #1st year of enrollment (baseline)
+#   filter(enrollment_yr == 1) %>%
+#   group_by(anydementia) %>%
+#   summarize_variable(dt=., var = "birth_cohort", var_label = "Birth Cohort", calc_summary =  "n_perc") %>%
+#   spread(anydementia, summary) %>%
+#   add_row(var = var_label, .before = 1)
+# 
+# 
+# unique(dem.w$birth_cohort)
+
+
+
+
+
+
 
 #function returns Table 1 summary statistics for a given dataset, with a column name describing group 
+
+
 t1.fn <- function(data, 
                   #description variables
                   column.name = "") {  
-  
-  # data = dem1 %>%
-  #   filter(enrollment_yr == 1,
-  #     pollutant == "no2") %>%
-  #   filter(anydementia == 1)
-  
-  pacman::p_load(kableExtra)
+ 
+  #pacman::p_load(kableExtra)
   
   round.var <- 0
   
+
   t1 <- data %>%
     dplyr::summarize(
       N = n(),
-      #person_years = nrow(data),
+      N_perc = round(N/nrow(.)*100, round.var),
       follow_up_yrs_mean = round(mean(fu_yrs), round.var), 
       follow_up_yrs_sd = round(sd(fu_yrs), round.var),
+      
+      birth_cohort1_n = sum(birth_cohort==1895, na.rm=T),
+      birth_cohort1_pct = round(birth_cohort1_n/N*100, round.var),
+      birth_cohort2_n = sum(birth_cohort==1910, na.rm=T),
+      birth_cohort2_pct = round(birth_cohort2_n/N*100, round.var),
+      birth_cohort3_n = sum(birth_cohort==1915, na.rm=T),
+      birth_cohort3_pct = round(birth_cohort3_n/N*100, round.var),
+      birth_cohort4_n = sum(birth_cohort==1920, na.rm=T),
+      birth_cohort4_pct = round(birth_cohort4_n/N*100, round.var),
+      birth_cohort5_n = sum(birth_cohort==1925, na.rm=T),
+      birth_cohort5_pct = round(birth_cohort5_n/N*100, round.var),
+      birth_cohort6_n = sum(birth_cohort==1930, na.rm=T),
+      birth_cohort6_pct = round(birth_cohort6_n/N*100, round.var),
+      birth_cohort7_n = sum(birth_cohort==1935, na.rm=T),
+      birth_cohort7_pct = round(birth_cohort7_n/N*100, round.var),
+
       age_entry_median = round(median(age_intake), round.var),
       age_entry_iqr = round(IQR(age_intake), round.var),
       male_n = sum(male),
@@ -45,8 +134,6 @@ t1.fn <- function(data,
       race_known_n = sum(!is.na(race)),
       race_white_n = sum(race ==1, na.rm = T),
       race_white_pct = round(race_white_n/race_known_n*100, round.var),
-      # race_nonwhite_n = sum(race !=1, na.rm = T),
-      # race_nonwhite_pct = round(race_nonwhite_n/race_known_n*100, 1),
       edu_known_n = sum(!is.na(degree)),
       degree_known_n = sum(!is.na(degree)),
       degree0_n = sum(degree ==0, na.rm = T),
@@ -108,11 +195,36 @@ t1.fn <- function(data,
       cv_dis_pct = round(cv_dis_n/cv_dis_known_n*100, round.var),
       heart_dis_known_n = sum(!is.na(Heart_Dis)),
       heart_dis_n = sum(Heart_Dis == 1, na.rm=T),
-      heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, round.var)
-    ) %>%
+      heart_dis_pct = round(heart_dis_n/heart_dis_known_n*100, round.var),
+      
+      act_cohort_known = sum(!is.na(cohort)),
+      act_cohort1_n = sum(cohort == 1, na.rm=T),
+      act_cohort1_pct = round(act_cohort1_n/act_cohort_known*100, round.var),
+      act_cohort2_n = sum(cohort == 2, na.rm=T),
+      act_cohort2_pct = round(act_cohort2_n/act_cohort_known*100, round.var),
+      act_cohort3_n = sum(cohort == 3, na.rm=T),
+      act_cohort3_pct = round(act_cohort3_n/act_cohort_known*100, round.var),
+      
+      casi_irt_mean = round(mean(casi_irt, na.rm=T), 2), 
+      casi_irt_sd = round(sd(casi_irt, na.rm=T), 2),
+      
+    ) 
+  
+  t1 <- t1 %>%
     mutate(
-      "Follow-up years (mean, SD)" = paste0(follow_up_yrs_mean, " (", follow_up_yrs_sd, ")"),
+      "No. Participants" = paste0(N, " (", N_perc, "%)" ),
       "Entry age, years (median, IQR)" = paste0(age_entry_median, " (", age_entry_iqr, ")"),
+      "Follow-up years (mean, SD)" = paste0(follow_up_yrs_mean, " (", follow_up_yrs_sd, ")"),
+      
+      # Demographics 
+      "Birth Cohort (n, %)" = "",
+      "1895" =  paste0(birth_cohort1_n, " (", birth_cohort1_pct, "%)"),
+      "1910" =  paste0(birth_cohort2_n, " (", birth_cohort2_pct, "%)"),
+      "1915" =  paste0(birth_cohort3_n, " (", birth_cohort3_pct, "%)"),
+      "1920" =  paste0(birth_cohort4_n, " (", birth_cohort4_pct, "%)"), 
+      "1925" =  paste0(birth_cohort5_n, " (", birth_cohort5_pct, "%)"), 
+      "1930" =  paste0(birth_cohort6_n, " (", birth_cohort6_pct, "%)"), 
+      "1935" =  paste0(birth_cohort7_n, " (", birth_cohort7_pct, "%)"), 
       "Male (n, %)" = paste0(male_n, " (", male_pct, "%)"),
       "White (n, %)" = paste0(race_white_n, " (", race_white_pct, "%)"),
       "Education (n, %)" = "",
@@ -127,7 +239,8 @@ t1.fn <- function(data,
       "$35-50k" = paste0(income2_n, " (", income2_pct, "%)"),
       "$50-75k" = paste0(income3_n, " (", income3_pct, "%)"),
       "> $75k" = paste0(income4_n, " (", income4_pct, "%)"),
-      "APOE carrier (n, %)" = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
+      
+      # Health Indicators
       "Smoker (n, %)" = "",
       "Never" = paste0(smoke_never_n, " (", smoke_never_pct, "%)"),
       "Former" = paste0(smoke_former_n, " (", smoke_former_pct, "%)"),
@@ -142,21 +255,31 @@ t1.fn <- function(data,
       "Hypertension" = paste0(hypertension_n, " (", hypertension_pct, "%)"),
       "Diabetes" = paste0(diabetes_n, " (", diabetes_pct, "%)"),
       "Cardiovascular Disease" = paste0(cv_dis_n, " (", cv_dis_pct, "%)"),
-      "Heart Disease" = paste0(heart_dis_n, " (", heart_dis_pct, "%)")
+      "Heart Disease" = paste0(heart_dis_n, " (", heart_dis_pct, "%)"),
+      
+      # Cognitive fn indicator
+      "APOE carrier (n, %)" = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
+      "Baseline Cognition (mean, SD)" = paste0(casi_irt_mean, " (", casi_irt_sd, ")"),
+      
+      # Study Indicator
+      "ACT Cohort (n, %)" = "",
+      "Original" =  paste0(act_cohort1_n, " (", act_cohort1_pct, "%)"),
+      "Expansion" =  paste0(act_cohort2_n, " (", act_cohort2_pct, "%)"),
+      "Replacement" =  paste0(act_cohort3_n, " (", act_cohort3_pct, "%)"),
+      
     ) %>%
     #get rid of repeat columns
-    select(
-      N, 
-      #person_years,
-      "Follow-up years (mean, SD)":"Heart Disease"
-    ) #%>%
+    select(-c(N, N_perc, follow_up_yrs_mean:casi_irt_sd))  
   
   # transpose
   t1 <- t(t1) %>% 
-    as.data.frame() 
+    as.data.frame() %>%
+    rownames_to_column()
   
   #rename "V1" column  
-  names(t1) <- column.name
+  if(column.name != "") {
+    names(t1) <- column.name
+    }
   
   return(t1) 
   }
@@ -191,23 +314,25 @@ hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
 ################################################ new models.fn ###########################################
 # returns various models for diff exposure periods
 
+# mydata = dem.w
+# models = paste0("m", c(1, 2, "3a", "3b",  "4a", "4b", 5, 6))
+# surv.time2 = "age_end_exposure"
+# surv.event = "dementia_now"
+# no2.var = "no2_10yr"
+# pm25.var = "pm25_10yr"
+# no2.units = my.no2.units
+# pm25.units = my.pm25.units
+# surv.time1 = "age_start_exposure"
+
 models.fn <- function(mydata = dem.w,
                        models,
+                      surv.time1 = "age_start_exposure",
                       surv.time2 = "age_end_exposure", 
                       surv.event = "dementia_now", 
                       no2.var = "no2_10yr",
                       pm25.var = "pm25_10yr",
                       no2.units = my.no2.units,
                       pm25.units = my.pm25.units) {
-  
-  # mydata = dem.w
-  # models <- c("m1", "m3b", "m4b", "m5")
-  # surv.time2 = "age_end_exposure"
-  # surv.event = "dementia_now"
-  # no2.var = "no2_10yr"
-  # pm25.var = "pm25_10yr"
-  # no2.units = my.no2.units
-  # pm25.units = my.pm25.units
   
   #rename variables for fns
   mydata <- mydata %>%
@@ -240,7 +365,7 @@ models.fn <- function(mydata = dem.w,
   
   #create a survival object
   s.dem <- Surv(
-    time = as.numeric(unlist(mydata["age_start_exposure"])),  
+    time = as.numeric(unlist(mydata[surv.time1])),  
     time2 = as.numeric(unlist(mydata[surv.time2])) ,  
     event = as.numeric(unlist(mydata[surv.event])))
   
@@ -248,7 +373,8 @@ models.fn <- function(mydata = dem.w,
   if("m1" %in% models) {
     m1 <- coxph(s.dem ~ no2 + strata(apoe), 
           data=mydata, 
-          robust = T, 
+          cluster = study_id,
+          #robust = T,
           weights = model_wt)  
   
     m1.s <- m1 %>% summary()
@@ -261,9 +387,11 @@ models.fn <- function(mydata = dem.w,
     m2 <- coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
               edu +  birth_cohort, 
             data=mydata, 
-            robust = T, 
+            #robust = T, 
+            # --> ? correct? need this for robust SEs
+            cluster = study_id,
             weights = model_wt) 
-    
+    # 95% CIs here should use robust SEs. 95%CIs is diff when don't run coxph() w/ robust/cluster
     m2.s <- m2 %>% summary()
     }
   
@@ -273,7 +401,8 @@ models.fn <- function(mydata = dem.w,
       coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + birth_cohort + 
               smoke + exercise_reg, 
             data=., 
-            robust = T,
+            #robust = T,          
+            cluster = study_id,
             weights = model_wt) 
     
     m3a.s <- m3a %>% summary()
@@ -285,7 +414,8 @@ models.fn <- function(mydata = dem.w,
       coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + birth_cohort +
               smoke + exercise_reg  + cohort,
             data=.,
-            robust = T,
+            #robust = T,          
+            cluster = study_id,
             weights = model_wt)
 
     m3b.s <- m3b %>% summary()
@@ -300,7 +430,8 @@ models.fn <- function(mydata = dem.w,
               smoke + exercise_reg +
               Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi, 
             data=., 
-            robust = T,
+            #robust = T,          
+            cluster = study_id,
             weights = model_wt) 
     
     m4a.s <- m4a %>% summary()
@@ -315,7 +446,8 @@ models.fn <- function(mydata = dem.w,
               Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi +
               casi_irt, 
             data=., 
-            robust = T,
+            #robust = T,          
+            cluster = study_id,
             weights = model_wt) 
     
     m4b.s <- m4b %>% summary()
@@ -334,7 +466,8 @@ models.fn <- function(mydata = dem.w,
     coxph(s.dem ~ no2_noapoe + no2_apoe + apoe +
             male + edu + race_white + income + birth_cohort + strata(apoe),
           data=., 
-          robust = T,
+          #robust = T,          
+          cluster = study_id,
           weights = model_wt)
   
   m5.s <- m5 %>% summary()
@@ -348,7 +481,8 @@ models.fn <- function(mydata = dem.w,
               male + race_white + income + edu + birth_cohort + strata(apoe) +
               pm25,  
             data=.,
-            robust = T,
+            #robust = T,          
+            cluster = study_id,
             weights = model_wt
       )
     
@@ -383,7 +517,7 @@ models.fn <- function(mydata = dem.w,
   }
   
   ##add exposure period labels  
-  hrs <- cbind(exposure = substr(no2.var, 5, nchar(no2.var)),
+  hrs <- cbind(Exposure = substr(no2.var, 5, nchar(no2.var)),
                    hrs) 
  
   return(list(hrs= hrs,
@@ -395,37 +529,35 @@ models.fn <- function(mydata = dem.w,
 
 
 ###############################################################################
-#returns HR plot for models.fn()$table_of_no2_HRs  
+#returns plot with all HRs 
 
 # example code: https://datascienceplus.com/lattice-like-forest-plot-using-ggplot2-in-r/ 
 
 ############## old plot FN - DELETE? ##############  
-hr.plot <- function(mydata,
-                    outcome.var) {
-  # mydata=dem_hrs
-  # outcome.var = "Dementia"
+hr.plot <- function(dt,
+                    outcome_var,
+                    title_pollutant = "NO2 (10 ppb)"
+                    ) {
+   
   
-  p <- mydata %>%
-    ggplot(aes(x=exposure, 
+  p <- dt %>% 
+    ggplot(aes(x=Description, 
                y=hr, ymin=lower_limit, ymax=upper_limit,
-               col=exposure)) + 
+               col=Exposure, linetype = grepl("2", Model))
+    ) + 
     geom_pointrange() + 
     geom_errorbar() +
     geom_hline(yintercept = 1, linetype=2) + 
     labs(y= "Hazard Ratio (95% CI)",
-         x = "NO2 Exposure Period",
-         title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " models,\nusing different exposure time periods")
-         ) + 
-    facet_wrap(~Model, 
-               labeller = "label_both", 
-               scales = "free_y",
-               #strip.position="left",
-               ncol=2) +
+         x = "Model Description",
+         title = paste0(title_pollutant, " hazard ratios for ", outcome_var),
+         linetype = "M2 Covariates"
+    ) + 
     theme(
-      legend.position = "none",
+      legend.position = "bottom",
       axis.ticks.y=element_blank()
-      ) +  
-  coord_flip() 
+    ) +  
+    coord_flip()  
 
   #p
   
@@ -440,13 +572,18 @@ hr.plot <- function(mydata,
 
 ## reduced & extended models, 10 yr exposure
 hr.plot.m1_m6 <- function(dt,
-                          outcome.var) {
+                          outcome.var,
+                          max_hr_upper_lim = NULL
+                          ) {
   
   # dt = dem_all_hrs %>%
   #   filter(Model != "2" |
   #            (Model == "2" & Description == "Primary"))
   # outcome.var <- "dementia"
-
+  
+  #plot all HRs on same axis
+  if(is.null(max_hr_upper_lim)) {max_hr_upper_lim <- max(dt$upper_limit)}
+  
   p <- dt %>%
     #only keep models of interest
     filter(Model != "2" |
@@ -461,13 +598,14 @@ hr.plot.m1_m6 <- function(dt,
     geom_errorbar() +
     geom_hline(yintercept = 1, linetype=2) + 
     labs(y= "Hazard Ratio (95% CI)",
-         x = "Model",
+         x = "Reduced & Extended Models",
          #col = "Model Description",
          linetype = "Primary Model",
          title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " incidence\nusing reduced, primary and extended models"),
          subtitle = "10 yr exposure"
     )  +
     theme(legend.position = "bottom") +  
+    ylim(0, max_hr_upper_lim) +
     coord_flip()  #+ 
     #scale_x_discrete( aes(labels=hr),
      # position="top"
@@ -482,17 +620,18 @@ hr.plot.m1_m6 <- function(dt,
 
 ## different exposure periods
 hr.plot.diff.expo.prds <- function(dt,
-                                   outcome.var) {
-  # dt <- dem_all_hrs %>%
-  # filter(Model == "2",
-  #        Description %in% c("Primary", "Different exposure period")
-  #        )
+                                   outcome.var,
+                                   max_hr_upper_lim = NULL) {
+  #plot all HRs on same axis
+  if(is.null(max_hr_upper_lim)) {max_hr_upper_lim <- max(dt$upper_limit)}
   
   p <- dt %>%
     filter(Model == "2",
-           Description %in% c("Primary", "Different exposure period")) %>%
+           grepl("Primary|Exposure", Description)
+           #Description %in% c("Primary", "Different exposure period")
+           ) %>%
     
-    ggplot(aes(x=exposure, 
+    ggplot(aes(x=Exposure, 
                y=hr, ymin=lower_limit, ymax=upper_limit,
                #col=Description,
                linetype = (model_description == "2. Primary")
@@ -508,6 +647,7 @@ hr.plot.diff.expo.prds <- function(dt,
          subtitle = "Model 2"
     )  +
     theme(legend.position = "bottom") +  
+    ylim(0, max_hr_upper_lim) +
     coord_flip()  
   
   return(p)
@@ -516,15 +656,17 @@ hr.plot.diff.expo.prds <- function(dt,
 
 # other sensitivity analyse 
 hr.plot.other.models <- function(dt,
-                                 outcome.var) {
-  # dt = dem_all_hrs %>%
-  # filter(Model == "2",
-  #        Description != "Different exposure period"
-  #        ) 
+                                 outcome.var,
+                                 max_hr_upper_lim = NULL) {
+   
+  #plot all HRs on same axis
+  if(is.null(max_hr_upper_lim)) {max_hr_upper_lim <- max(dt$upper_limit)}
   
   p = dt %>%
     filter(Model == "2",
-           Description != "Different exposure period") %>%
+           !grepl("Exposure", Description)
+           #Description != "Different exposure period"
+           ) %>%
     mutate(
       Description = relevel(as.factor(Description), ref = "Primary")
     ) %>%
@@ -544,12 +686,12 @@ hr.plot.other.models <- function(dt,
          subtitle = "Model 2"
     )  +
     theme(legend.position = "bottom") +  
+    ylim(0, max_hr_upper_lim) +
     coord_flip()  
   
   return(p)
   
 }
-
 
 ######################## replace vector NAs for IPW ########################
 #returns vector of most frequently used value if variabl is factor or mean if variable is numeric  

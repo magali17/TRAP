@@ -1,7 +1,7 @@
 ---
 title: 'Aim 2: Annual Averages'
 author: "Magali Blanco"
-date: "12/19/2019"
+date: '`r Sys.Date()`'
 output:
   html_document:
     number_sections: yes
@@ -18,9 +18,9 @@ editor_options:
 
 ```{r}
 # to do:
-# ?? fit interction term & then plot to see if predictions are closer to the 1-1 line? interact temporal variables by AQS site indicator?
-# select images/tables to export
+# --> VCA package not found? # anovaVCA() 
 
+# --> estimate annual avg using 7 dys/wk
 
 ```
 
@@ -31,16 +31,32 @@ editor_options:
 
 ```
 
-# Methods
+# Summary Script
+
+* categorized hours into times of day (2, 3, 5 times of day)
+* trimmed 5% top/bottom observations per site
+* plotted UFP concentrations at various times (e.g., hour, TOD, TOW, season)
+* calculated stop sample sizes for different times
+* calculated annual averages using various methods and weights
+	+ site specific
+		- unweighted, weighted by: season, TOW, TOD
+	+ regression (borrowing info across sites)
+		- unweighted, weighted by: season, TOW, various TODs
+* compared annual averages
+	+ plots
+	+ compared LUR predictions: desired estimates weighted by season, TOW2 & TOD5 vs other methods, both on the native and log-scale
+* investigated sites with high inter-method variability and high regression residuals
+* ran ANOVAs to investigate the fraction of UFP variability explained by various effects:
+	+ method
+	+ site
+	+ hour/TOD
+	+ TOW
+	+ season 
+* compared annual average estimates for different sensitivity analyses
 
 
+# Analyses 
 
-# Key Findings
-
-
-
-
- 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
@@ -50,12 +66,12 @@ knitr::opts_chunk$set(echo = F,
                       )  
 
 # # Clear workspace of all objects and unload all extra (non-base) packages
-# rm(list = ls(all = TRUE))
-# if (!is.null(sessionInfo()$otherPkgs)) {
-#   res <- suppressWarnings(
-#     lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
-#       detach, character.only=TRUE, unload=TRUE, force=TRUE))
-# }
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
 
 pacman::p_load(
   #plots & tables
@@ -77,11 +93,11 @@ set.seed(1)
 source("0.Global_Fns.R")
 source("A2.0.1_Var&Fns.R")
 
-images_path <- file.path(images_path0, "2. Annual Average")
-tables_path <- file.path(tables_path0, "2. Annual Average")
+# images_path <- file.path(images_path0, "2. Annual Average")
+# tables_path <- file.path(tables_path0, "2. Annual Average")
 
 #load data
-mm.wide <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm.w_2019-12-22.rda"))
+mm_stops <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-03-08.rda"))
 
 cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda")) %>%
   select(-contains("pop_"), -contains("pop90_"))
@@ -92,7 +108,7 @@ site_locations <- cov_mm %>%
 cov_mm <- cov_mm %>% select(-contains("lambert"), -latitude, -longitude)
 cov_names <- names(cov_mm)[!names(cov_mm) %in% c("site_id")]
 
-ufp0 <- mm.wide %>% 
+ufp0 <- mm_stops %>% 
   select(date:site_no,
          ptrak_pt_cm3_median,
          # for sensitivity analyses
@@ -112,9 +128,7 @@ ufp0 <- mm.wide %>%
     tod2 = factor(ifelse(hour %in% seq(9, 17), "9_17", "18_08"), 
                          levels= c("9_17", "18_08")),
     stop_type = ifelse(grepl("MC", site_id), "AQS", "ACT")) %>%
-  left_join(cov_mm, by = "site_id") %>%
-  #drop winter for now
-  filter(season != "winter") # %>%
+  left_join(cov_mm, by = "site_id")  
 
 # SENSITIVITY ANALYSIS: means (vs median) stop readings
 ufp0_mean <- ufp0 %>%
@@ -159,7 +173,8 @@ ufp_windsorized <- ufp0 %>%
 
 
 #no. months sampled
-months.sampled <- month.abb[3:12]
+###                   --> udpate 
+months.sampled <- month.abb[c(1, 3:12)]
 n.months.sampled <- length(months.sampled)
 
 n.seasons.sampled <- length(unique(ufp$season))
@@ -167,8 +182,6 @@ n.seasons.sampled <- length(unique(ufp$season))
 ```
 
 Untrimmed vs trimmed UFP stop concentrations.
-
-### --> add means to all plots (what will be regressed)
 
 ```{r, fig.height=5} 
 
@@ -180,7 +193,8 @@ ufp0 %>%
   #View()
   gather("trim", "ufp_value", contains("trim")) %>%
   mutate(trim = factor(trim, levels = c("untrimmed", "trimmed"))) %>%
-  ggplot(aes(x=trim, y =ufp_value, fill = stop_type)) + 
+  ggplot(aes(x=trim, y =ufp_value, #fill = stop_type
+             )) + 
   geom_boxplot() + 
   facet_wrap(~trim, scales="free") + 
   labs(title = paste0("Untrimmed vs trimmed (",trim_quantile*100, "%) UFP stop data"),
@@ -200,7 +214,8 @@ ufp %>%
   # create groupings based on measured concentrations
   mutate(group = cut_number(x=site_no, n = 4)) %>%
   #arrange(site_id) %>%
-  ggplot(aes(x= site_id, y=ptrak, fill = stop_type)) + 
+  ggplot(aes(x= site_id, y=ptrak, #fill = stop_type
+             )) + 
   geom_boxplot() +
   labs(title = paste0("UFP Concentrations by site visit" ),
        y= "UFP (pt/cm3)",
@@ -216,6 +231,9 @@ ufp %>%
 ```
 
 # Concentrations at different times
+
+### --> make plot of UFP over hour for diff sites  
+### --> see if there's an interaction btwn TOD & site location (e.g., a1 proximity)
 
 Table
 
@@ -259,10 +277,10 @@ rbind(
   tod.distrib
   ) %>%
   add_row(time = "Season", .before = 2) %>%
-  add_row(time = "Time of Week", .before = 6) %>%
-  add_row(time = "Time of Day", .before = 9) %>%
+  add_row(time = "Time of Week", .before = 7) %>%
+  add_row(time = "Time of Day", .before = 10) %>%
   kable(caption = "Distribution of median stop concentrations over time") %>%
-  add_indent(c(3:5, 7:8, 10:14)) %>%
+  add_indent(c(3:6, 8:9, 11:15)) %>%
   kable_styling()
   
 ```
@@ -367,12 +385,13 @@ rbind(
   stop.counts.tod
     ) %>%
   add_row(Time = "season", .before = 2) %>%
-  add_row(Time = "time of week", .before = 6) %>%
-  add_row(Time = "time of day", .before = 9) %>%
+   add_row(Time = "Time of Week", .before = 7) %>%
+  add_row(Time = "Time of Day", .before = 10) %>%
   kable(caption = "Number of stop samples per site (after trimming; N = No. sites sampled)"
         ) %>%
-  add_indent(c(3:5, 7:8, 10:14)) %>%
+  add_indent(c(3:6, 8:9, 11:15)) %>%
   kable_styling()
+
 
 ## plot stratified by time 
 ufp %>%
@@ -412,6 +431,10 @@ calculate annual avg means using different methods and weights to determine how 
 ```{r}
 #calc diff summary measures
 ## using within site information
+
+# ufp_copy <- ufp
+# ufp <- ufp_copy
+
 ufp <- ufp %>%
   group_by(site_id) %>%
   mutate(mean_uw = mean(ptrak, na.rm=T))
@@ -441,7 +464,6 @@ s_tow2_tod3 <- ufp %>%
 if(!max(s_tow2_tod3$unique_times) >= min.t){rm(s_tow2_tod3)}
  
  #means by seaason-wk-tod2 (2 tods)
-    #8 sites w/ sampling during all 12 unique times (2 tod x 2 tow x 3 seasons)
     #none when looking at all 4 seasons
  min.t <- 2*2*n.seasons.sampled
  s_tow2_tod2 <- ufp %>%
@@ -454,23 +476,23 @@ if(!max(s_tow2_tod3$unique_times) >= min.t){rm(s_tow2_tod3)}
    filter(unique_times >= min.t)
 if(!max(s_tow2_tod2$unique_times) >= min.t){rm(s_tow2_tod2)}
 
- ## using tod2, caclulate weighted mean for sites w/ obs during all time combinations
- s_tow2_tod2 <- s_tow2_tod2 %>%
-   mutate(
-     season.wt = 1/n.seasons.sampled,
-     wk.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
-     tod.wt = ifelse(tod2 == "9_17", 9/24, 15/24),
-     wt = season.wt * wk.wt * tod.wt,
-     wt_times_mean = wt*mean) %>% 
-
- # #check that weights for all sites = 1. #looks good
- # s_tow2_tod2 %>%
+ # ## using tod2, caclulate weighted mean for sites w/ obs during all time combinations
+ # s_tow2_tod2 <- s_tow2_tod2 %>%
+ #   mutate(
+ #     season.wt = 1/n.seasons.sampled,
+ #     wk.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+ #     tod.wt = ifelse(tod2 == "9_17", 9/24, 15/24),
+ #     wt = season.wt * wk.wt * tod.wt,
+ #     wt_times_mean = wt*mean) %>% 
+ # 
+ # # #check that weights for all sites = 1. #looks good
+ # # s_tow2_tod2 %>%
+ # #   group_by(site_id) %>%
+ # #   summarize(n = sum(wt))
+ #   
+ #   #calculate each site's weighted mean
  #   group_by(site_id) %>%
- #   summarize(n = sum(wt))
-   
-   #calculate each site's weighted mean
-   group_by(site_id) %>%
-   dplyr::summarize(mean_wt = sum(wt_times_mean))
+ #   dplyr::summarize(mean_wt = sum(wt_times_mean))
    
  #means by season-wk7 (2 tods)
     #no sites w/ sampling during all 42/56 unique times (2 tod x 7 tow x 3/4 seasons)
@@ -554,6 +576,10 @@ s <- ufp %>%
 ``` 
 
 # Regression of mean annual average
+
+### --> change tables/plots "yhat" --> "regression"/"reg"; "mean" --> ?? "site-specific"
+
+# --> estimate annual avg using 7 dys/wk
 
 ```{r}
 #df for predictions - all unique variable combinations
@@ -700,8 +726,11 @@ annual <- ufp %>%
          mean_uw,
          ) %>%
   unique() %>%
-  left_join(s_tow2_tod2) %>%
-  rename(mean_s_tow2_tod2 = mean_wt) %>%
+
+  # --> ADD LATER WHEN HAVE MORE WINTER READINGS?
+  # left_join(s_tow2_tod2) %>%
+  # rename(mean_s_tow2_tod2 = mean_wt) %>%
+  
   left_join(s_tow2) %>%
   rename(mean_s_tow2 = mean_wt) %>%
   left_join(s) %>%
@@ -799,40 +828,41 @@ Scatterplots to compare desired yhat_s_tow2_tod5 estimates to other site-specifi
 ```{r}
 rmse.digits. <- 0
 r2.digits. <- 2
-coef_digits. <- 1
+slope_digits. <- 1
 #compare predictsion vs observations
 p1 <- colo.plot(data.wide = annual,
                     x.variable = "mean_uw",
                     y.variable = "yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.
+                )
 
 p2 <- colo.plot(data.wide = annual,
                     x.variable = "mean_s",
                     y.variable = "yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 p3 <- colo.plot(data.wide = annual,
                     x.variable = "mean_s_tow2",
                     y.variable = "yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
-p4 <- colo.plot(data.wide = annual,
-                    x.variable = "mean_s_tow2_tod2",
-                    y.variable = "yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.) #+
+# p4 <- colo.plot(data.wide = annual,
+#                     x.variable = "mean_s_tow2_tod2",
+#                     y.variable = "yhat_s_tow2_tod5",
+#                     rmse.digits = rmse.digits.,
+#                     r2.digits =  r2.digits.,
+#                     slope_digits = slope_digits.) #+
   #theme(plot.background = element_rect(fill = NA, colour = "black", linetype = "solid"))
 
  
 
- ggarrange(p1, p2, p3, p4,  
+ ggarrange(p1, p2, p3, # p4,  
            common.legend = T, legend = "bottom"
            ) %>%
   annotate_figure(fig.lab = paste0("Comparison of desired regression-based estimates (yhat_s_tow2_tod5) to other site-specific averaging methods")
@@ -842,7 +872,9 @@ p4 <- colo.plot(data.wide = annual,
 
 Method comparison plots.
 
-```{r, fig.height = 8}
+#### -->  eval=F
+
+```{r, fig.height = 8, eval = F}
 #TOD2
 annual.l.tod2 <- annual.l %>%
   filter(site_id %in% s_tow2_tod2$site_id,
@@ -905,10 +937,12 @@ tod2$diff <- tod2$max - tod2$min
 
 ```
 
+#### ---> mean_s_tow2_tod2
+
 ```{r}
 # TOW2
 tow2 <- annual %>% 
-  select(-mean_s_tow2_tod2,
+  select(#-mean_s_tow2_tod2,
          -yhat_s_tow2_tod2,
          -yhat_s_tow2_tod5
          ) %>%
@@ -1034,6 +1068,8 @@ UFP_annual_avg ~ method + site_id
 
 Using sites with Season_TOW2 estimates. Only showing first few site_effects in linear regression.
 
+### --> clean up tables for final presentation. what % of total variability is between sites? within sites (temporal)?
+
 ```{r, eval=T}
 #ANOVA for TOW2 
  tow2.anova <- tow2 %>%
@@ -1118,7 +1154,7 @@ reg_predictors <- reg_predictors$results$cov
 
 ## Values in native scale
 
-```{r}
+```{r, fig.height=8}
 annual_with_LUR <- annual %>%
   #drop AQS sites from here
   filter(grepl("MS", site_id)) %>%
@@ -1129,41 +1165,41 @@ annual_with_LUR <- annual %>%
   save.pred.fn(y_name = "yhat_s", x_names = reg_predictors) %>%
   save.pred.fn(y_name = "yhat_uw", x_names = reg_predictors) %>%
 
-  save.pred.fn(y_name = "mean_s_tow2_tod2", x_names = reg_predictors) %>%
+  #save.pred.fn(y_name = "mean_s_tow2_tod2", x_names = reg_predictors) %>%
   save.pred.fn(y_name = "yhat_s_tow2_tod2", x_names = reg_predictors) %>%
   save.pred.fn(y_name = "yhat_s_tow2_tod5", x_names = reg_predictors)
 
 rmse.digits. <- 0
 r2.digits. <- 3
-coef_digits. <- 2
+slope_digits. <- 2
 #compare predictsion vs observations
 LUR_mean_s_tow2_plot <- colo.plot(data.wide = annual_with_LUR,
                     x.variable = "mean_s_tow2",
                     y.variable = "LUR_mean_s_tow2",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 LUR_mean_s_plot <- colo.plot(data.wide = annual_with_LUR,
                     x.variable = "mean_s",
                     y.variable = "LUR_mean_s",
                    rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 LUR_mean_uw_plot <- colo.plot(data.wide = annual_with_LUR,
                     x.variable = "mean_uw",
                     y.variable = "LUR_mean_uw",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
-LUR_mean_s_tow2_tod2_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "mean_s_tow2_tod2",
-                    y.variable = "LUR_mean_s_tow2_tod2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+# LUR_mean_s_tow2_tod2_plot <- colo.plot(data.wide = annual_with_LUR,
+#                     x.variable = "mean_s_tow2_tod2",
+#                     y.variable = "LUR_mean_s_tow2_tod2",
+#                     rmse.digits = rmse.digits.,
+#                     r2.digits =  r2.digits.,
+#                     slope_digits = slope_digits.)
 
 
 LUR_yhat_s_tow2_plot <- colo.plot(data.wide = annual_with_LUR,
@@ -1171,37 +1207,37 @@ LUR_yhat_s_tow2_plot <- colo.plot(data.wide = annual_with_LUR,
                     y.variable = "LUR_yhat_s_tow2",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 LUR_yhat_s_plot <- colo.plot(data.wide = annual_with_LUR,
                     x.variable = "yhat_s",
                     y.variable = "LUR_yhat_s",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 LUR_yhat_uw_plot <- colo.plot(data.wide = annual_with_LUR,
                     x.variable = "yhat_uw",
                     y.variable = "LUR_yhat_uw",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 LUR_yhat_s_tow2_tod2_plot <- colo.plot(data.wide = annual_with_LUR,
                     x.variable = "yhat_s_tow2_tod2",
                     y.variable = "LUR_yhat_s_tow2_tod2",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 LUR_yhat_s_tow2_tod5_plot <- colo.plot(data.wide = annual_with_LUR,
                     x.variable = "yhat_s_tow2_tod5",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
-ggarrange(LUR_mean_s_tow2_tod2_plot,
+ggarrange(#LUR_mean_s_tow2_tod2_plot,
           LUR_mean_s_tow2_plot,
           LUR_mean_s_plot ,
           LUR_mean_uw_plot,
@@ -1222,7 +1258,7 @@ ggarrange(LUR_mean_s_tow2_tod2_plot,
 
 All values with tow2 estimates.
 
-```{r, fig.height=8, include=T}
+```{r, fig.height=8}
 #save lm predictions for dataset
 log_annual_with_LUR <- annual %>%
   #drop AQS sites from here
@@ -1236,20 +1272,20 @@ log_annual_with_LUR <- annual %>%
   save.pred.fn(y_name = "yhat_s", x_names = reg_predictors) %>%
   save.pred.fn(y_name = "yhat_uw", x_names = reg_predictors) %>%
 
-  save.pred.fn(y_name = "mean_s_tow2_tod2", x_names = reg_predictors) %>%
+  #save.pred.fn(y_name = "mean_s_tow2_tod2", x_names = reg_predictors) %>%
   save.pred.fn(y_name = "yhat_s_tow2_tod2", x_names = reg_predictors) %>%
   save.pred.fn(y_name = "yhat_s_tow2_tod5", x_names = reg_predictors)
 
 rmse.digits. <- 3
 r2.digits. <- 3
-coef_digits. <- 3
+slope_digits. <- 3
 #compare predictsion vs observations
 log_LUR_mean_s_tow2_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "mean_s_tow2",
                     y.variable = "LUR_mean_s_tow2",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.) +
+                    slope_digits = slope_digits.) +
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
@@ -1258,7 +1294,7 @@ log_LUR_mean_s_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     y.variable = "LUR_mean_s",
                    rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.) +
+                    slope_digits = slope_digits.) +
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
@@ -1267,7 +1303,7 @@ log_LUR_mean_uw_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     y.variable = "LUR_mean_uw",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.) +
+                    slope_digits = slope_digits.) +
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
@@ -1276,25 +1312,25 @@ log_LUR_yhat_s_tow2_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     y.variable = "LUR_yhat_s_tow2",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.) +
+                    slope_digits = slope_digits.) +
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
-log_LUR_mean_s_tow2_tod2_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "mean_s_tow2_tod2",
-                    y.variable = "LUR_mean_s_tow2_tod2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)+
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
+# log_LUR_mean_s_tow2_tod2_plot <- colo.plot(data.wide = log_annual_with_LUR,
+#                     x.variable = "mean_s_tow2_tod2",
+#                     y.variable = "LUR_mean_s_tow2_tod2",
+#                     rmse.digits = rmse.digits.,
+#                     r2.digits =  r2.digits.,
+#                     slope_digits = slope_digits.)+
+#   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
+#   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
 log_LUR_yhat_s_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "yhat_s",
                     y.variable = "LUR_yhat_s",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.) +
+                    slope_digits = slope_digits.) +
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
@@ -1303,7 +1339,7 @@ log_LUR_yhat_uw_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     y.variable = "LUR_yhat_uw",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.) +
+                    slope_digits = slope_digits.) +
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
@@ -1312,7 +1348,7 @@ log_LUR_yhat_s_tow2_tod2_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     y.variable = "LUR_yhat_s_tow2_tod2",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)+
+                    slope_digits = slope_digits.)+
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
@@ -1321,11 +1357,11 @@ log_LUR_yhat_s_tow2_tod5_plot <- colo.plot(data.wide = log_annual_with_LUR,
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)+
+                    slope_digits = slope_digits.)+
   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
 
-ggarrange(log_LUR_mean_s_tow2_tod2_plot,
+ggarrange(#log_LUR_mean_s_tow2_tod2_plot,
           log_LUR_mean_s_tow2_plot,
           log_LUR_mean_s_plot,
           log_LUR_mean_uw_plot,
@@ -1348,31 +1384,31 @@ ggarrange(log_LUR_mean_s_tow2_tod2_plot,
 # yhat_s_tow2_tod5 vs other yhat methods
 rmse.digits. <- 2
 r2.digits. <- 2
-coef_digits. <- 2
+slope_digits. <- 2
 p1 <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "LUR_yhat_s_tow2_tod2",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 p2 <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "LUR_yhat_s_tow2",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 p3 <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "LUR_yhat_s",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 p4 <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "LUR_yhat_uw",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
 ggarrange(p1, p2, p3, p4,  
            common.legend = T, legend = "bottom"
@@ -1385,32 +1421,33 @@ ggarrange(p1, p2, p3, p4,
 
 ```{r}
 # yhat_s_tow2_tod5 vs site-specific mean methods
-p1 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_mean_s_tow2_tod2",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+# p1 <- colo.plot(data.wide = log_annual_with_LUR,
+#                     x.variable = "LUR_mean_s_tow2_tod2",
+#                     y.variable = "LUR_yhat_s_tow2_tod5",
+#                     rmse.digits = rmse.digits.,
+#                     r2.digits =  r2.digits.,
+#                     slope_digits = slope_digits.)
 p2 <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "LUR_mean_s_tow2",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 p3 <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "LUR_mean_s",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 p4 <- colo.plot(data.wide = log_annual_with_LUR,
                     x.variable = "LUR_mean_uw",
                     y.variable = "LUR_yhat_s_tow2_tod5",
                     rmse.digits = rmse.digits.,
                     r2.digits =  r2.digits.,
-                    coef_digits = coef_digits.)
+                    slope_digits = slope_digits.)
 
-ggarrange(p1, p2, p3, p4,  
+ggarrange(#p1, 
+  p2, p3, p4,  
            common.legend = T, legend = "bottom"
            ) %>%
   annotate_figure(fig.lab = paste0("Comparison of LUR predictions"),
@@ -1516,6 +1553,16 @@ myquant <- 0.98
 # write.csv(site_averages,
 #           file =  file.path("Data", "Aim 2", "Mobile Monitoring", "site_averages.csv"),
 #           row.names = F)
+
+```
+
+# Correlation between observations
+
+### --> ? show that obsrvations,e.g., diff times of day (when we don't always have observations) are correlated, (?) adjusted for site. 
+
+Hoek et al. (2008) review of LUR approaches cites Sebret et al.'s (2000) work. saw correlations between four (seasonal) 14-dy sampling ranging form 0.63-0.98
+
+```{r}
 
 ```
 
@@ -1658,7 +1705,7 @@ b) AQS sites may not necesarily be representative of where ACT participants live
 aqs_ufp <- annual_ufp_and_cov %>%
   select(site_id, ufp) %>%
   filter(grepl("MC", site_id)) %>%
-  left_join(unique(mm.wide[c("site_id", "aqs_id", "aqs_location")])) %>%
+  left_join(unique(mm_stops[c("site_id", "aqs_id", "aqs_location")])) %>%
   select(site_id, aqs_location, ufp) %>%
   arrange(desc(ufp)) #%>%
   
@@ -1701,9 +1748,9 @@ Use UFP and proximity covariaets in the native scale.
 Note that distances < 10 m are converted to 10 m b/c we do not believe any sites are < 10 m from the center of a roadway.
 
 ```{r}
-annual_ufp_and_cov_native_scale <- annual_ufp_and_cov %>%
-  mutate_at(vars(contains("log_")), ~exp(.)) %>%
-  rename_at(vars(contains("log_")), ~substr(., 5, nchar(.)) )
+# annual_ufp_and_cov_native_scale <- annual_ufp_and_cov %>%
+#   mutate_at(vars(contains("log_")), ~exp(.)) %>%
+#   rename_at(vars(contains("log_")), ~substr(., 5, nchar(.)) )
 
 ## repeate for ACT covariates?
 # cov_mm_native_scale <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_native_scale_preprocessed.rda")) %>% 
@@ -1815,31 +1862,63 @@ Maps
 #list to store maps
 dot_maps <-list()
 
+# min and max difference of all estimates
+ufp_range <- all_annual %>%
+  select(annual_names) %>%
+  dplyr::summarize(min = min(.),
+                   max = max(.)) %>%
+  round()
+
 for(i in seq_along(annual_names)) {
   #i=1
-  mymap <- all_annual %>% map_fn(color_by = annual_names[i], map_title = "")
+  #mymap <- all_annual %>% map_fn(color_by = annual_names[i], map_title = "")
+  
+  mymap <- suppressMessages(
+     all_annual %>% map_fn(color_by = annual_names[i], outline_points = F,
+                                   map_title = annual_names[i]) +
+    scale_color_gradient(name = "pt/cm3", 
+                        low = "yellow", high = "red",
+                        #ensure that all plots on same scale
+                        limits = c(ufp_range$min, ufp_range$max),
+                         # breaks= legend_breaks,
+                         # labels = legend_breaks
+                         )
+   )
+  
+  
+  
   
   dot_maps[i] <- list(mymap)
   names(dot_maps)[i] <- annual_names[i]
 }
 
+```
+
+```{r, fig.height=10}
+dot_maps$primary_ufp
+
+```
+
+### --> fix spacing issue
+
+```{r, fig.height=15}
+
 ggarrange(plotlist = dot_maps,
           ncol = 3, nrow = 2,
-          common.legend = T, legend = "right",
-          labels = annual_names
+          common.legend = T, legend = "right"
           ) %>%
   annotate_figure(top = "Annual average UFP estimates from different methods" ) 
    
 ```
 
-## Prediction differences 
+## Prediction differences for ACT cohort
 
 ```{r}
 # calculate difference between sensitivity & primary estimates
 pred_differences <- all_annual %>%
   mutate_at(vars(contains("ufp"), -contains("primary")), ~.-primary_ufp) %>%
   select(-contains("primary"))
-
+ 
 #density plot
 pred_differences %>% gather("analysis", "prediction_diff", contains("ufp")) %>%
   ggplot(aes(x = prediction_diff, fill = analysis)) + 
@@ -1863,64 +1942,59 @@ pred_differences %>% gather("analysis", "prediction_diff", contains("ufp")) %>%
 
 Maps
 
-### --> map coloring seems off - wrong? trim10 estimates should be lower. legend should show < 0
-
 ```{r, fig.height=10}
+
+annual_names2 <- setdiff(annual_names, c("primary_ufp" 
+                                         #"windsorize_ufp"
+                                         ))
+
+# min and max difference of all estimates
+diff_range <- pred_differences %>%
+  select(annual_names2) %>%
+  dplyr::summarize(min = min(.),
+                   max = max(.)) %>%
+  round()
 
 difference_maps <-list()
 
-for(i in seq_along(annual_names[2:length(annual_names)])) {
-  #i=2
-  pred_differences$color_by <- pred_differences[[annual_names[i+1]]]
+legend_breaks <- c(diff_range$min, 0, diff_range$max)
+
+for(i in seq_along(annual_names2)) {
+  #i=3
+  pred_differences$color_by <- pred_differences[[annual_names2[i]]]
   
   mymap <- pred_differences %>% map_base() +
     geom_point(data = pred_differences,
                aes(x = longitude, y = latitude, col = color_by),
                alpha = 0.3, size = 2) +
-    scale_color_gradient(name = "pt/cm3")  
+    scale_color_gradient2(name = "pt/cm3", 
+                        low = "black", high = "red",
+                        midpoint = 0,  mid = "white", 
+                        limits = c(diff_range$min, diff_range$max),
+                         breaks= legend_breaks,
+                         labels = legend_breaks
+                         )
+  #mymap
   
   difference_maps[i] <- list(mymap)
-  names(difference_maps)[i] <- annual_names[i+1]
+  names(difference_maps)[i] <- annual_names2[i]
 }
 
-ggarrange(plotlist = difference_maps,
+ggpubr::ggarrange(plotlist = difference_maps,
           ncol = 3, nrow = 2,
           common.legend = T, legend = "right",
-          labels = annual_names[2:length(annual_names)]
+          labels = annual_names2 
           ) %>%
   annotate_figure(top = "Difference in annual average UFP estimate relative to primary method" ) 
  
 ```
 
-
 save datasets. 
 
 ```{r}
 # all annual estimates
-#saveRDS(all_annual, file.path("Data", "Aim 2", "Mobile Monitoring", "all_annual_estimates.rda"))
+# saveRDS(all_annual, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_annual.rda"))
  
-
-
-
-###  ---> OLD. DELETE??
-# # data for UK
-# # primary analysis
-# saveRDS(annual_ufp_and_cov, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov.rda"))
-# 
-# # [? DELETE? already have code in UK.Rmd] native scale covariates (and UFP)
-# saveRDS(annual_ufp_and_cov_native_scale, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_cov_native_scale.rda"))
-# 
-# # using stop means
-# saveRDS(stop_mean_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_stop_means.rda"))
-# 
-# # trim 10% top/bottom stop observations
-# saveRDS(trim10_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_trim10.rda"))
-# 
-# # Windosrize extremes
-# saveRDS(windsorized_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_windsorized.rda"))
-# 
-# # different regression to estimate annual average
-# saveRDS(uw_results$annual_estimates, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_uw_means.rda"))
 
 ```
 

@@ -26,6 +26,9 @@ editor_options:
 ```{r, echo=F}
 # notes
 #BC = 880 nm (IR); 625 nm (Red); 528 nm (Green); 470 nm (Blue); and 375 nm (UV);  
+# missingness
+## 2019-07-17_R07 - PTRAKS had issues, no/little data collected
+## 2019-07-17_R07	- PTRAKS not started on time & had issues, no/little data collected
 
 ```
 
@@ -92,7 +95,7 @@ images_path <- file.path(images_path0, "1. Stops")
 tables_path <- file.path(tables_path0, "1. Stops")
 
 #read in data
-mm_full0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "all_data_2020-03-08.rda"))
+mm_full0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_raw_2020-03-08.rda"))
 
 ### --> why do these runs have missing variable/value? 2019-05-14_R03, 2019-07-17_R07	
 
@@ -319,8 +322,8 @@ mm_full %>%
 
 Zoomed in to sites with low readings.        
 * 3-22-2019: low alc noted. has unstable readings most of the stop     
-* 7-13-2019 low alc noted. has clear wick issues in the middle and readings seem too stable immediately before and after.  
-* 1-4-2020 has low readings at nearby stops MS0176 also has low BC readings. MS0177 has some low BC readings, but not all. readings seem too stable. Sign of wick issues?
+* 7-13-2019: low alc noted. has clear wick issues in the middle and readings seem too stable immediately before and after.  
+* 1-4-2020: no notes on alc issues. has low readings at nearby stops MS0176 also has low BC readings. MS0177 has some low BC readings, but not all. readings seem too stable. Sign of wick issues?
 
 
 ```{r, fig.height=8}
@@ -345,39 +348,6 @@ df %>%
 
 ```
 
-
-```{r}
-# # ?? need these? DELETE?
-
-# Zoom in on 3-22 & 1/4 times w/ duplicat PTRAK readings. Take out site readings from bad PTRAK since these seem unstable the majority of the 2 minutes and we have other PTRAK readings.
-
-# date1 <- "2019-03-22"
-# 
-# mm_full %>%
-#   mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
-#   filter(grepl(date1, runname),
-#          time > paste(date1, "17:05"),
-#          time < paste(date1, "17:25")) %>%
-#   time_series_plots(., mytitle = paste0("time series for runs with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
-#                     hline_value = low_ufp_lvl)  
-
-```
-
-```{r}
-# # ?? need these? DELETE?
-
-# date2 <- "2020-01-04"
-# 
-# mm_full %>%
-#   mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
-#   filter(grepl(date2, runname),
-#          time > paste(date2, "06:05"),
-#          time < paste(date2, "07:00")) %>%
-#   time_series_plots(., mytitle = paste0("time series for runs with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
-#                     hline_value = low_ufp_lvl)  
-
-```
- 
 Total PTRAK readings before dropping any values: 
 
 ```{r}
@@ -493,7 +463,8 @@ for (i in seq(page_no)) {
 
 ```
 
-zoom in on specific sites 
+zoom in on specific sites   
+* no site-specific note associated with low BC readings  
 
 ```{r, fig.height=8}
 df <- data.frame()
@@ -648,8 +619,11 @@ mm_full %>%
 
 ```
 
-Zoom in on sites of interest. In general, elevated PTRAK readings are associated with delayed elevated NanoScan and BC readings. Thus, keep these high readings? 
+Zoom in on sites of interest. In general, elevated PTRAK readings are associated with delayed elevated NanoScan and BC readings. Thus, keep these high readings?    
+* 2019-06-06: construction at site noted (cutting metal pipe)
+* 2019-07-23: no field notes at or near site MS0137 about any unusual TRAP sources
 
+### --> are there other field notes available? 
 ### --> ? is the NS time stamp at the end of the reading period? 
 
 ```{r}
@@ -709,7 +683,8 @@ mm_full %>%
 
 ```
 
-Zoom in on sites of interest.  
+Zoom in on sites of interest.    
+* no notes associated with high BC readings   
 
 ```{r}
 
@@ -831,7 +806,90 @@ mm_full %>%
 
 Compare NanoScan (24-422 nm) to ptrak (20-1000 nm) since NanoScan tends to be more steady. Assuming few particles > 420 nm, such that NanoScan and PTRAK readings are comparable.
 
-Dropping nanoscan readings above 500k pt/cm3 (PTRAK instrument threshold)
+Dropping PTRAK readings above 500k pt/cm3 (instrument threshold)
+
+
+### --> issue: rolling avg for PTRAKs takes VERY long time to run
+
+```{r, eval=F}
+unique_times <- mm_full %>%
+    filter(variable == "ptrak_pt_cm3") %>%
+  select(runname, site_id, 
+         #instrument_id
+         ) %>%
+  unique()
+
+rolling_ptrak <- data.frame()
+
+library(zoo)
+library(RcppRoll)
+
+mm_full_zoo <- mm_full %>% as.zoo()
+
+for(i in 1:nrow(unique_times) ) {
+  #i=1
+  
+  df <- mm_full %>% 
+    
+    filter(
+      runname == unique_times$runname[i] &
+        site_id == unique_times$site_id[i] &
+        instrument_id == unique_times$instrument_id[i]
+      ) %>%
+    # ?? help run faster? 
+    #as.zoo() %>%
+    mutate(
+      rolling_value = roll_mean(x = value, n = 60, align = "left", fill = NA)
+      #rolling_mean = rollmean(x=value, k=60, align = "left", na.pad = T) #fill = NA
+      #rolling_value = rollapply(value, FUN=mean, width=60, align="left", fill=NA),
+           )
+  
+  rolling_ptrak <- rbind(rolling_ptrak, df)
+  
+}
+
+ 
+############
+# # DOESNT group properly  
+# library(RcppRoll) #supposed to be faster, but still slow
+# 
+# test <- mm_full %>%
+#   slice(1:5000) %>%
+#   group_by(runname, site_id, instrument_id) %>%
+#   arrange(runname, site_id, instrument_id, time) %>%
+#   mutate(
+#     rolling_value = roll_mean(x = value, n = 60, align = "left", fill = NA)
+#     #rolling_value = rollapply(value, FUN=mean, width=60, align="left", fill=NA),
+#     #rolling_mean = rollmean(x=value, k=60, align = "left",na.pad = T #fill = NA,
+#                             )
+
+##########
+# rolling_ptrak_copy <- rolling_ptrak
+
+test <- rolling_ptrak %>%
+  #select(-value) %>%
+  rename(value = rolling_mean) %>%
+  mutate(variable = "ptrak_60s_rolling")
+
+ mm_full_rolling <- rbind(mm_full, test)
+
+```
+
+
+```{r}
+# ma <- function(arr, n=15){
+#   res = arr
+#   for(i in n:length(arr)){
+#     res[i] = mean(arr[(i-n):i])
+#   }
+#   res
+# }
+
+# mav <- function(x,n=5){filter(x,rep(1/n,n), sides=1)}
+
+
+```
+
 
 ### --> use ceiling_date() instead of floor_date() to align PTRAK & NS readings?   
 
@@ -884,23 +942,39 @@ First, round reading time to nearest 10-seconds since instrument time stamps may
  
 ```
 
-## --> ? compare BC readings to AQS site readings (2 min & overnight). select a reference instrument that is most similar?
+### --> ? compare BC readings to AQS site readings (2 min & overnight). select a reference instrument that is most similar?   
+### --> minute & hour DOE data is only available for BC through April 2019
 
 (cite: Minet 2017 & their refs: Deville Cvaellin 2016; Lin 2015)
 
 ```{r}
 
+
+
 ```
 
 
 
+Distribution of final cleaned data
 
+```{r}
+mm_full %>% 
+  filter(grepl("ptrak|bc", variable)) %>%
+  group_by(variable,
+           #instrument_id
+           ) %>%
+distribution.table(., var.string = "value") %>%
+  kable(caption = "Distribution of clean intrument readings") %>%
+  kable_styling()
 
+```
 
-
-Save datasets.
 
 ````{r}
-# saveRDS(mm_full, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_full_2020-03-08.rda"))
+# Save dataset
+# mm_full %>%
+#   filter(grepl("ptrak|bc", variable)) %>%
+#   mutate(variable = droplevels(variable)) %>%
+#   saveRDS(., file.path("Data", "Aim 2", "Mobile Monitoring", "mm_clean_2020-03-08.rda"))
 
 ```

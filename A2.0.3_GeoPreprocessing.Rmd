@@ -24,10 +24,36 @@ params:
 
 ```
 
-# Notes
- 
+# Summary of script 
 
+* uploaded geocovariates for MM, ACT and area grid 
+* dropped columns w/ any NAs
+* [temporary?] made sure all datasets had same covariates
+* used ST model’s covariate.preprocess() function to clean up geocovariates for MM stops & ACT locations:
+	+ common.value: excluded variables which have less than 20% of being different from the most common value in monitoring data
+	+ low.landuse:  excluded varlabies with maximum land use variables less than 10 in monitoring data
+	+ sd.ratio: excluded variables with SD of cohort data greater than 5 times of SD of monitoring data
+	+ outlier: excluded variables with outliers more than 2% in monitoring and cohort data combined
+	+ log transformed proximities variables, made min distance 10 m
+	+ other
+	  - dropped RLU
+	  - created some new proximity variables (e.g. distance to a123)
+* dropped variables in MM and ACT dataset that I won’t use
+	+ e.g., satelite/emission estimates
+* cleaned up grid covariates using individual functions used within the covariate.preprocess() function. Didn’t use the covariate.preprocess() function b/c this drops covariates if e.g., they are too variable between datasets. This can result in a different set of covariates than those for MM stops & ACT locations.
 
+* mapped monitoring, study and spatiotemporal modeling areas 
+  + monitoring area
+    - compsoed of Census tracts
+    - filled in monitoring holes/gaps by including census tracts if monitoring occurred on a minimum of ~ 2 sides of that tract 
+
+# Key findings
+
+* most of the cohort is in Seattle, so the monitoring region captures a large fraction of the cohort. 
+* study region captures only a few more individuals
+* ST area is much larger and captures most of the cohort
+
+# Analyses 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
@@ -62,25 +88,27 @@ act_area <- read.csv(file.path("..", "GIS", "Shapefiles", "ACT", "all_act_addres
          site_location = site_loc) %>%
   mutate(site_location = factor(site_location, levels = c("monitoring", "study", "st")))
 
-```
-
-# Initial covariates 
-
-```{r}
-initial_cov <- cov_mm0 %>%
-  select(-(location_id:msa)) %>%
-  names()
+# grid
+grid_covars0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "grid_covars.csv" ))  
 
 ```
-
-Length: `r length(initial_cov)`
 
 
 ```{r}
-# names
-#initial_cov 
+# # SIDE PROJECT: CREATE NEW GRID W/ EQUAL SPACING
+# min_lat <- min(grid_covars0$latitude)
+# max_lat <- max(grid_covars0$latitude)
+# min_long <- min(grid_covars0$longitude)
+# max_long <- max(grid_covars0$longitude)
+# 
+# 
+# grid2 <-
+
 
 ```
+
+
+
 
 ```{r}
 # # --> delete? not imp here
@@ -123,12 +151,7 @@ mm_names <- names(cov_mm1)
 
 
 ```{r}
-
 ######################## ACT ########################
-#  fake ACT cohort geocovariate dataset so names are the same across datasets
-# cov_act_fake0 <- cov_mm1 %>% slice(1:100)  
-
-# actual data
 cov_act1 <- cov_act0 %>%
   #don't need these
   select(-c(X), - contains("state"), -county,
@@ -153,7 +176,36 @@ cov_act1 <- cov_act1 %>%
 
 act_names <- names(cov_act1)
 
-######################## Only keep columns if in both datasets ######################## 
+```
+
+```{r}
+################### grid ###################
+grid_covars1 <- grid_covars0 %>%
+  #don't need these
+  select(-c(X), - contains("state"), -county,
+         -contains("region")) %>%
+  #drop columns w/ all NAs
+  select_if(~!all(is.na(.))) %>%
+  #drop rows w/ NAs
+  drop_na() %>%
+  mutate(site_type = "P") %>% # [delete?]
+  rename(site_id = native_id)
+
+locations_grid <- grid_covars1 %>%
+  select(site_id,
+         latitude:lambert_y)
+
+grid_covars1 <- grid_covars1 %>%
+  #only keep covariates
+  select(-c(location_id:lambert_y))  
+
+grid_names <- names(grid_covars1)
+
+
+```
+
+```{r}   
+######################## Only keep columns if in mm & ACT datasets ######################## 
 # # act dataset has fewer columns
 # length(mm_names)
 # length(act_names)
@@ -166,7 +218,16 @@ cov_act1 <- cov_act1[,keep_var]
 # dim(cov_mm1)
 # dim(cov_act1)
 
+grid_covars1 <- grid_covars1[, keep_var]
+
 ```
+
+# Initial covariates 
+
+Length: `r length(keep_var)`
+
+
+# Final covariates to be used in analysis
 
 clean up geocovariates using covariate.preprocess() function (lab protocol/code) and additional cleaning 
 * returns log-transformed proximity variables; drops old land use ("lu") variables; drops variables not available/ready for use in our study area
@@ -198,7 +259,25 @@ cov_act <- cbind(locations_act, cov_act)
 
 ```
 
-# Final covariates to be used in analysis
+```{r}
+################### grid ###################
+# grid_preprocessed <- covariate.preprocess(covars.mon = cov_mm1, 
+#                                          covars.sub = grid_covars1, 
+#                                          region = "NW"
+#                                          )
+# 
+# cov_grid <- grid_preprocessed$covars.sub 
+
+# don't use covariate.preprocess() b/c some cov may be dropped that are not when mobile monitoring & ACT covariates are run. Use individual transformation fns instead.
+cov_grid <- grid_covars1 %>%
+  combine_a123_m() %>%
+  combine_a23_m() %>%
+  combine_a23_ll() %>%
+  log_transform_distance()
+
+cov_grid <- cbind(locations_grid, cov_grid)
+
+```
 
 ```{r}
 cov_descrip <- data.frame(Covariate = final_cov) %>%
@@ -290,7 +369,18 @@ cov_descrip %>% kable(caption = paste0("Geocovariates and buffers to be used in 
 
 ## ACT Cohort Sample size
 
+Map of Census tracts with monitoring and the final monitoring area resulting from fillin in holes/gaps on the map 
+
+### --> 
+
+```{r}
+
+
+```
+
+
 Map of spatiotemporal, study and monitoring area.
+
 ```{r}
 monitoring_ids <- na.omit(cov_act[cov_act$site_location=="monitoring", "site_id"]) %>% as.vector()
 study_ids <- append(monitoring_ids, 
@@ -303,13 +393,13 @@ st_ids <- append(study_ids,
 ```{r}
 
 cov_act %>% 
-  filter(site_id %in% st_ids) %>%
+  filter(site_id %in% study_ids) %>%
   map_fn(color_map = F,
          color_by = "site_id", 
          map_title = "",
     include_monitoring_area = T, #monitoring_area_alpha = 1,
     include_study_area = T, #study_area_alpha = 0.4,
-    include_spatiotemporal_area = T, #st_area_alpha = 0.3
+    #include_st_area = T #st_area_alpha = 0.3
          )
   
   # map_base(include_monitoring_area = T, #monitoring_area_alpha = 1,
@@ -318,23 +408,35 @@ cov_act %>%
   #          map_title = "Monitoring and study areas"
   #          )
 
+# with ST area
+cov_act %>% 
+  filter(site_id %in% st_ids) %>%
+  map_fn(color_map = F,
+         color_by = "site_id", 
+         map_title = "",
+    include_monitoring_area = T, #monitoring_area_alpha = 1,
+    include_study_area = T, #study_area_alpha = 0.4,
+    include_st_area = T #st_area_alpha = 0.3
+         )
+
 ```
 
 ```{r}
 
 data.frame(
-  Locations = c("Entire Cohort", 
-                "Spatiotemporal modeling area",
-                "Study area", 
-                "Mobile monitoring area" 
+  Area = c("Entire Cohort", 
+                "Mobile Monitoring",
+                "Study",
+                "Spatiotemporal Modeling"
                 ),
-  N = c(nrow(cov_act), 
-        length(st_ids),
+  N = c(nrow(cov_act),
+        length(monitoring_ids),
         length(study_ids),
-        length(monitoring_ids)
+        length(st_ids)
         )) %>%
-  mutate(Proportion_of_total_loc = N/nrow(cov_act)) %>%
-kable(caption = "ACT cohort locations included in this study",
+  mutate("Proportion of Total"  = N/nrow(cov_act)) %>%
+kable(caption = "ACT cohort locations included in this study", 
+      col.names = c("Area", "No. Locations", "Proportin of Total"),
       digits = 2) %>% 
   kable_styling()
 
@@ -344,8 +446,9 @@ Save datasets
 
 ```{r}
 
-# saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda"))
-# saveRDS(cov_act,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_log_scale_preprocessed.rda"))
+# saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda"))
+# saveRDS(cov_act,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
+# saveRDS(cov_grid,file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda"))
 
 ```
 

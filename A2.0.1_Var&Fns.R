@@ -251,6 +251,58 @@ ptrak.bind.fn <- function(folder_path) {
   
   }
  
+###################### Time series plots #####################################################
+# returns time series plots of all values in the dataset, facetted by run
+
+# dt <-  mm_full %>%
+#   mutate(value = ifelse(variable == "bc_ng_m3", value*bc_factor, value)) %>%
+#   filter(runname %in% high_bc$runname)
+# 
+# hline_value = ptrak_lim
+
+time_series_plots <- function(dt, 
+                              plot_bc_factor = 10, 
+                              mytitle = "",
+                              hline_value = NA,
+                              ymax=NA,
+                              facet_runname = TRUE
+                          
+                              ) {
+  
+ if(is.na(ymax)) {ymax <- max(dt$value)}
+  
+   myplot <- dt %>%
+    ggplot(aes(x = time, y=value, col=variable, 
+               #shape=instrument_id
+               )) + 
+    geom_point(alpha=0.4) +
+    scale_y_continuous(sec.axis = sec_axis(~./plot_bc_factor, name = "BC (ng/m3)",
+                                           labels = function(x) format(x, scientific = T)),
+                       labels = function(x) format(x, scientific = T),
+                       limits = c(NA, ymax)
+                       ) +
+    labs(title= mytitle,
+         y = "UFP (pt/cm3)",
+         shape = "Instrument ID"
+    ) +
+    theme(legend.position = "bottom") 
+    
+  # add horizontal line
+  if(!is.na(hline_value)) {
+    myplot <- myplot +
+      geom_hline(aes(yintercept=hline_value))
+  }
+  
+  # facet plot
+  if(facet_runname == TRUE) {
+    myplot <- myplot +
+      facet_wrap(~runname, scales = "free") 
+  }
+  
+  myplot
+  
+}
+
 
 #############################################################################################
 #returns boxplots of UFP estimates for selected sites by method
@@ -350,7 +402,7 @@ map_base <- function(dt,
                    map_title = NULL,
                    include_monitoring_area = FALSE, monitoring_area_alpha = 0.3,
                    include_study_area = FALSE, study_area_alpha = 0.4,
-                   include_spatiotemporal_area = F, st_area_alpha = 0.4,
+                   include_st_area = F, st_area_alpha = 0.4,
                    maptype. = "terrain", #, "toner", "toner-background", "watercolor"
                    zoom_lvl = 11
 ) {
@@ -381,7 +433,7 @@ map_base <- function(dt,
   mymap <- ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void()
   
   # add spatiotemporal model area
-  if(include_spatiotemporal_area) {
+  if(include_st_area) {
     st_area <- readRDS(file.path("Data", "GIS", "st_area_df.rda"))
     
     mymap <- mymap + 
@@ -480,6 +532,7 @@ map_base <- function(dt,
 map_fn <- function(dt, 
                    color_map = TRUE,
                    color_by = "ufp", color_units = "pt/cm3",
+                   outline_points = TRUE,
                    latitude_name = "latitude", longitude_name = "longitude",
                    map_title = NULL,
                    include_monitoring_area = FALSE, monitoring_area_alpha = 0.2,
@@ -529,7 +582,7 @@ map_fn <- function(dt,
     mymap <- mymap + 
       geom_polygon(data = st_area, 
                    aes(x = long, y = lat, group = group,
-                       fill = "spatiotemporal model"),
+                       fill = "ST model"),
                    alpha = st_area_alpha,
                    size = 0.3)
   }
@@ -564,16 +617,18 @@ map_fn <- function(dt,
   
   # color map
   if(color_map) {
+    if(outline_points) {
     mymap <- mymap +
       geom_point(data = dt,
                  aes(x = long, y = lat), col= "black",
-                 size = 2.5) +
+                 size = 2.5)
+    }
+    mymap <- mymap +
       geom_point(data = dt,
                  aes(x = long, y = lat, col = y),
                  alpha = 0.8, size = 2,
       ) +
       scale_color_gradient(name = color_units, low = low_conc_col, high = high_conc_col) 
-  
   }
   
   mymap <- mymap +
@@ -781,7 +836,7 @@ estimate_annual_avg <- function(dt,
 
 #1. returns CV RMSE and R2 for a series of PLS components and maximum variogram plotting distances. "dt2" includes y outcome (UFP), site location and covariates 
 pls_uk_cv_eval <- function(dt2 = annual_train_test,
-                           max_pls_comp = 6,
+                           pls_comps = c(1:6),
                            dist_fract = c(0.05, seq(0.1, 0.5, by=0.1)),
                            # to be passed to pls_uk_cv_predictions()
                            y_name.. = "log_ufp",
@@ -795,14 +850,14 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
   
   #df to save CV model eval
   cv_eval <- data.frame(
-    expand.grid(pls_comp = c(1:max_pls_comp),
+    expand.grid(pls_comp = pls_comps,
                 dist_fract = dist_fract),
     RMSE = NA,
     R2 = NA)
   
   ################## CV loops ##################################
   # estimate CV RMSE and r2 for diff number of PLS components
-  for(i in seq_len(max_pls_comp)) {
+  for(i in pls_comps) {
     #i=1
 
     for(j in dist_fract) {
@@ -1127,7 +1182,7 @@ uk_predictions <- function (
 
 compare_pls_scores <- function(my_pls_model = pls_models[["primary_uk"]],
                                         new_prediction_sites = cov_act,
-                                        new_site_label = "ACT Cohort",
+                                        new_site_label = "ACT Cohort Locations",
                                         my_title = "Distribution of PLS component scores for the ACT cohort and mobile monitoring stops"
 ) {
   
@@ -1138,7 +1193,7 @@ compare_pls_scores <- function(my_pls_model = pls_models[["primary_uk"]],
   
   names(scores_mm) <- score_names
   scores_mm$Comp1
-  scores_mm$site_type <- "mobile monitoring"
+  scores_mm$site_type <- "Mobile Monitoring Stops"
   
   scores_new_locs <- predict(object = my_pls_model,
                              newdata = new_prediction_sites,
@@ -1158,7 +1213,7 @@ compare_pls_scores <- function(my_pls_model = pls_models[["primary_uk"]],
     ggplot(aes(x=Score, fill = site_type)) + 
     geom_density(alpha = 0.4) + 
     facet_wrap(~Component, labeller = "label_both") + 
-    labs(fill = "Site Type",
+    labs(fill = "",
          title = my_title) + 
     theme(legend.position = "bottom")
   

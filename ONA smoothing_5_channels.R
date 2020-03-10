@@ -1,7 +1,7 @@
 #ONA smoothing 5 channels: returns ONA corrected BC readings for 5 channels: UVONA, BlueONA, GreenONA, RedONA, IRONA
 #Version 2
 #February 2019
-#Original file from Elena Austin
+#Original code came from Elena Austin; code has been modified to better fit the TRAP study
 
 library(pacman)
 p_load("data.table", "zoo", "plyr")

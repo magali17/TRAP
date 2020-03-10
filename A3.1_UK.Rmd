@@ -5,6 +5,10 @@ date: "12/14/2019"
 output: html_document
 ---
 
+```{r}
+ 
+```
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
 ```
@@ -21,3 +25,25 @@ if have 6 months of data, compare to the 6-mo estimate at AQS sites
 # repeat above w/ BC & compare to AQS site readings? is this data on server? 
 
 ```
+
+# How correlated are UFP and BC since I will be using BC emission factors for UFP model? 
+
+```{r}
+
+```
+
+# difference between 2019 MM readings & annual readings at AQS sites
+Wang 2013 did a "difference" adjustment of all predictions
+
+```{r}
+
+```
+
+# could put a smoother through EC since it’s very noisy & use the smoother to adjust model predictions. Use it to predict/rescale to BC. Use that BC prediction as a temporal adjustment in UK model.
+? rescale using non-heating month relationship
+
+```{r}
+
+```
+
+

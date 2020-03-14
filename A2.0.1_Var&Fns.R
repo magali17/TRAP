@@ -304,6 +304,49 @@ time_series_plots <- function(dt,
 }
 
 
+
+########################################################################################################################
+########################################################################################################################
+# returns unique times each site was sampled based on different time combinations & the site IDs. default is by site and pollutant variable
+
+# dt = stops_l
+# min_samples_required = min.t 
+# temporal_vars = c("season", "time_of_week", "tod5")
+
+unique_times_sampled <- function(dt, 
+                                 min_samples_required,
+                                 temporal_vars,
+                                 return_site_ids = FALSE
+                                 #grouping_vars = c("Pollutant", "site_id")
+) {
+  
+  times_sampled <- dt %>%
+    select(Pollutant, site_id, temporal_vars) %>%
+    unique() %>%
+    group_by(Pollutant, site_id) %>%
+    dplyr::summarize(unique_times =n()) 
+  
+  sites_sampled_min_amount <- times_sampled %>%
+    filter(unique_times >= min_samples_required) %>%
+    select(-unique_times)
+  
+  n_sampled_min_amount <- times_sampled %>%
+    group_by(Pollutant) %>%
+    # number of sites sampled each combination of times
+    dplyr::summarize(sites_sampled_all_times = sum(unique_times >= min_samples_required)) 
+  
+  if(return_site_ids == FALSE) {
+    result <- n_sampled_min_amount
+    } else {
+      result <- list(n_sampled_min_amount = n_sampled_min_amount, 
+                   sites_sampled_min_amount = sites_sampled_min_amount)
+  }
+  
+  return(result)
+  
+}
+
+##################################################################################################################
 #############################################################################################
 #returns boxplots of UFP estimates for selected sites by method
 ufp_by_method <- function(dt, 
@@ -661,68 +704,68 @@ estimate_annual_avg <- function(dt,
   #################### characterize stop-level concentrations at sites ####################
   ##########################################################################################
   
-  # table of distribution
-  t_stops_distribution <- dt %>% ungroup() %>%
-    distribution.table(var.string = "var") %>%
-    mutate(time = "Overall") %>%
-    select(time, everything()) %>%
-    kable(caption = "Distribution of stop-level UFP concentrations") %>%
-    kable_styling()
-  
-  # density plot
-  p_stops_density <- dt %>%
-    ggplot(aes(x=var)) + 
-    geom_density() + 
-    labs(title = "Distribution of stop-level UFP concentrations",
-         x = "UFP (pt/cm3)")
-  
-  # plots over time
-  #by time
-  p0_hour <- dt %>% 
-    mutate(hour = factor(hour)) %>%
-    ggplot(aes(x=hour, y=var)) + 
-    geom_boxplot() +
-    labs(x = "hour") + 
-    labs(y="")
-  
-  p0_tod5 <- dt %>% 
-    #mutate(hour = factor(hour)) %>%
-    ggplot(aes(x=tod5, y=var)) + 
-    geom_boxplot() +
-    labs(x = "Time of Day (hour)",
-         y = "",
-         fill = "Time of day") 
-  
-  p0_day <- dt %>%
-    ggplot(aes(x=day, y=var)) + 
-    geom_boxplot() + 
-    labs(y="")
-  
-  p0_season <- dt %>%
-    ggplot(aes(x=season, y=var)) + 
-    geom_boxplot() + 
-    labs(y="")
-  
-  p_stop_concs_over_time <- ggarrange(p0_hour, p0_tod5, p0_day, p0_season, 
-                                      common.legend = T, legend = "bottom") %>%
-    annotate_figure(left = "UFP (pt/cm3)", 
-                    fig.lab = "Stop-level UFP concentrations")
+  # # table of distribution
+  # t_stops_distribution <- dt %>% ungroup() %>%
+  #   distribution.table(var.string = "var") %>%
+  #   mutate(time = "Overall") %>%
+  #   select(time, everything()) %>%
+  #   kable(caption = "Distribution of stop-level UFP concentrations") %>%
+  #   kable_styling()
+  # 
+  # # density plot
+  # p_stops_density <- dt %>%
+  #   ggplot(aes(x=var)) + 
+  #   geom_density() + 
+  #   labs(title = "Distribution of stop-level UFP concentrations",
+  #        x = "UFP (pt/cm3)")
+  # 
+  # # plots over time
+  # #by time
+  # p0_hour <- dt %>% 
+  #   mutate(hour = factor(hour)) %>%
+  #   ggplot(aes(x=hour, y=var)) + 
+  #   geom_boxplot() +
+  #   labs(x = "hour") + 
+  #   labs(y="")
+  # 
+  # p0_tod5 <- dt %>% 
+  #   #mutate(hour = factor(hour)) %>%
+  #   ggplot(aes(x=tod5, y=var)) + 
+  #   geom_boxplot() +
+  #   labs(x = "Time of Day (hour)",
+  #        y = "",
+  #        fill = "Time of day") 
+  # 
+  # p0_day <- dt %>%
+  #   ggplot(aes(x=day, y=var)) + 
+  #   geom_boxplot() + 
+  #   labs(y="")
+  # 
+  # p0_season <- dt %>%
+  #   ggplot(aes(x=season, y=var)) + 
+  #   geom_boxplot() + 
+  #   labs(y="")
+  # 
+  # p_stop_concs_over_time <- ggarrange(p0_hour, p0_tod5, p0_day, p0_season, 
+  #                                     common.legend = T, legend = "bottom") %>%
+  #   annotate_figure(left = "UFP (pt/cm3)", 
+  #                   fig.lab = "Stop-level UFP concentrations")
   
   ##########################################################################################
   #################################### stop sample size ####################################
   ##########################################################################################
   
-  ## table of stop counts/site overall & stratified
-  t_stop_count <- dt %>%
-    dplyr::group_by(site_id) %>%
-    # no. samples/site
-    dplyr::summarize(N = n()) %>%
-    # distribution of no. samples
-    distribution.table(var.string = "N") %>%
-    mutate(Time = "Overall") %>%
-    select(Time, everything()) %>%
-    kable(caption = "Number of stop samples per site (after trimming; N = No. sites sampled)") %>%
-    kable_styling()
+  # ## table of stop counts/site overall & stratified
+  # t_stop_count <- dt %>%
+  #   dplyr::group_by(site_id) %>%
+  #   # no. samples/site
+  #   dplyr::summarize(N = n()) %>%
+  #   # distribution of no. samples
+  #   distribution.table(var.string = "N") %>%
+  #   mutate(Time = "Overall") %>%
+  #   select(Time, everything()) %>%
+  #   kable(caption = "Number of stop samples per site (after trimming; N = No. sites sampled)") %>%
+  #   kable_styling()
   
   ##########################################################################################
   #################################### annual averages ####################################

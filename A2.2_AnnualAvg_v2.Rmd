@@ -18,9 +18,6 @@ editor_options:
 
 ```{r}
 # to do:
-# --> VCA package not found? # anovaVCA() 
-
-# --> estimate annual avg using 7 dys/wk
 
 ```
 
@@ -29,40 +26,42 @@ editor_options:
 # refs:
 ## Sampson 2013 National UK Model using PLS for PM2.5
 
+# # get location of package
+# find.package("VCA")
+# # deleted VCA folder
+# # reinstall package
+# install.packages("VCA")
+# # see what libraries this package depends on
+# packageDescription("VCA")  # Imports = stats, graphics, grDevices, lme4, Matrix, methods, numDeriv
+# # load packge 
+# pacman::p_load(VCA) 
+# # check that imports are all also loaded. # ?didn't have lme4?
+
+# some functions used:
+# Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange(); qwraps2::mean_sd, median_iqr
+
 ```
 
 # Summary Script
 
 * categorized hours into times of day (2, 3, 5 times of day)
-* trimmed 5% top/bottom observations per site
-* plotted UFP concentrations at various times (e.g., hour, TOD, TOW, season)
-* calculated stop sample sizes for different times
-* calculated annual averages using various methods and weights
+* trim 5% top/bottom observations per site
+* prepare data for sensitivity analyses 
+* plot UFP & BC concentrations at various times (e.g., hour, TOD, TOW, season)
+* calculate stop sample sizes for different times
+* calculate annual averages using various methods and weights
 	+ site specific
 		- unweighted, weighted by: season, TOW, TOD
 	+ regression (borrowing info across sites)
 		- unweighted, weighted by: season, TOW, various TODs
-* compared annual averages
-	+ plots
-	+ compared LUR predictions: desired estimates weighted by season, TOW2 & TOD5 vs other methods, both on the native and log-scale
-* investigated sites with high inter-method variability and high regression residuals
-* ran ANOVAs to investigate the fraction of UFP variability explained by various effects:
-	+ method
-	+ site
-	+ hour/TOD
-	+ TOW
-	+ season 
-* compared annual average estimates for different sensitivity analyses
-
-
-# Analyses 
+* compare annual averages from primary and sensitivity analysis 
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE,
-                      fig.height = 6, fig.width = 10
+                      fig.height = 6, fig.width = 11
                       )  
 
 # # Clear workspace of all objects and unload all extra (non-base) packages
@@ -75,47 +74,72 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 
 pacman::p_load(
   #plots & tables
-  dplyr, tidyverse, ggpubr, ggmap,
+  tidyverse, ggpubr, ggmap, #dplyr, 
   knitr, kableExtra, 
   # descriptive satistics
   Hmisc, EnvStats, #qwraps2,  
   # dates
   lubridate, 
   # modeling: lasso, ANOVA for mixed models
-  glmnet, VCA
+  glmnet, 
+  VCA  
   )    
-
-# some functions used:
-# Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange(); qwraps2::mean_sd, median_iqr
 
 options(knitr.kable.NA = '')
 set.seed(1)
 source("0.Global_Fns.R")
 source("A2.0.1_Var&Fns.R")
 
-# images_path <- file.path(images_path0, "2. Annual Average")
-# tables_path <- file.path(tables_path0, "2. Annual Average")
-
 #load data
-mm_stops <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-03-08.rda"))
+stops0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-03-08.rda")) 
 
-cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda")) %>%
-  select(-contains("pop_"), -contains("pop90_"))
+site_locations <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda")) %>% 
+  select(site_id, latitude, longitude)
 
-site_locations <- cov_mm %>% 
-  select(site_id, contains("lambert"), latitude, longitude)
-
-cov_mm <- cov_mm %>% select(-contains("lambert"), -latitude, -longitude)
-cov_names <- names(cov_mm)[!names(cov_mm) %in% c("site_id")]
-
-ufp0 <- mm_stops %>% 
-  select(date:site_no,
-         ptrak_pt_cm3_median,
-         # for sensitivity analyses
-         ptrak_pt_cm3_mean) %>%
+stops <- stops0 %>%
+  rename(
+    ptrak_median_all_data = ptrak_pt_cm3_median,
+    ptrak_mean_all_data = ptrak_pt_cm3_mean,
+    bc_median_all_data = bc_ng_m3_median,
+    bc_mean_all_data = bc_ng_m3_mean
+  ) %>%
+  group_by(site_id) %>%
+  # deal with extreme observations for each site 
+  mutate(
+    # UFP
+    ## primary analysis using medians & trimming 5%
+    ptrak_median_trim5 = ifelse(ptrak_median_all_data >= quantile(ptrak_median_all_data, 0.05, na.rm = T) &
+                                ptrak_median_all_data <= quantile(ptrak_median_all_data, 0.95, na.rm = T), ptrak_median_all_data, NA),
+    ## sensitivity analyses 
+    ### stop means
+    ptrak_mean_trim5 = ifelse(ptrak_mean_all_data >= quantile(ptrak_mean_all_data, 0.05, na.rm = T) &
+                                ptrak_mean_all_data <= quantile(ptrak_mean_all_data, 0.95, na.rm = T), ptrak_mean_all_data, NA),
+    ### trim 10%
+    ptrak_median_trim10 = ifelse(ptrak_median_all_data >= quantile(ptrak_median_all_data, 0.10, na.rm = T) &
+                                ptrak_median_all_data <= quantile(ptrak_median_all_data, 0.90, na.rm = T), ptrak_median_all_data, NA),
+    ### windosrize
+    ptrak_median_windsorize = ifelse(ptrak_median_all_data > quantile(ptrak_median_all_data, 0.95, na.rm=T), quantile(ptrak_median_all_data, 0.95, na.rm = T),
+                                     ifelse(ptrak_median_all_data < quantile(ptrak_median_all_data, 0.05, na.rm=T), quantile(ptrak_median_all_data, 0.05, na.rm = T), ptrak_median_all_data)),
+    
+    # BC
+    ## primary analysis using medians & trimming 5%
+    bc_median_trim5 = ifelse(bc_median_all_data >= quantile(bc_median_all_data, 0.05, na.rm = T) &
+                                bc_median_all_data <= quantile(bc_median_all_data, 0.95, na.rm = T), bc_median_all_data, NA),
+    ## sensitivity analyses 
+    ### stop means
+    bc_mean_trim5 = ifelse(bc_mean_all_data >= quantile(bc_mean_all_data, 0.05, na.rm = T) &
+                                bc_mean_all_data <= quantile(bc_mean_all_data, 0.95, na.rm = T), bc_mean_all_data, NA),
+    ### trim 10%
+    bc_median_trim10 = ifelse(bc_median_all_data >= quantile(bc_median_all_data, 0.10, na.rm = T) &
+                                bc_median_all_data <= quantile(bc_median_all_data, 0.90, na.rm = T), bc_median_all_data, NA),
+    ### windosrize
+    bc_median_windsorize = ifelse(bc_median_all_data > quantile(bc_median_all_data, 0.95, na.rm=T), quantile(bc_median_all_data, 0.95, na.rm = T),
+                                     ifelse(bc_median_all_data < quantile(bc_median_all_data, 0.05, na.rm=T), quantile(bc_median_all_data, 0.05, na.rm = T), bc_median_all_data))
+    ) %>%
+  ungroup() %>%
   mutate(
     site_id = factor(site_id),  
-    # New Hour Binning
+    # add other temporal variables & geocovariates
     tod5 = factor(ifelse(hour %in% seq(3,8), "3_8",
                                        ifelse(hour %in% seq(9,11), "9_11", 
                                               ifelse(hour %in% seq(12,15), "12_15",
@@ -123,1747 +147,1346 @@ ufp0 <- mm_stops %>%
                          levels= c("3_8", "9_11", "12_15", "16_20", "21_2")),
     tod3 = factor(ifelse(hour %in% seq(0,8), "0_8",
                                        ifelse(hour %in% seq(9,17), "9_17", "18_23")),
-                         levels= c("0_8", "9_15", "16_23")),
+                         levels= c("0_8", "9_17", "18_23")),
     #selected this break b/c: 1) UFP values rise during warmer daytime hours; 2) mixing ht is higher during day; 3) "daytime" = typical business as usual mm campaigns
     tod2 = factor(ifelse(hour %in% seq(9, 17), "9_17", "18_08"), 
                          levels= c("9_17", "18_08")),
-    stop_type = ifelse(grepl("MC", site_id), "AQS", "ACT")) %>%
-  left_join(cov_mm, by = "site_id")  
+    stop_type = ifelse(grepl("MC", site_id), "AQS", "ACT"))  
 
-# SENSITIVITY ANALYSIS: means (vs median) stop readings
-ufp0_mean <- ufp0 %>%
-  select(-contains("median")) %>%
-  drop_na(contains("ptrak")) %>%
-  rename(ptrak = ptrak_pt_cm3_mean)
-
-# dataset used for other analyses & sensitivity analyses datasets
-ufp0 <- ufp0 %>%
-  select(-contains("mean")) %>%
-  drop_na(contains("ptrak")) %>%
-  rename(ptrak = ptrak_pt_cm3_median)
-   
-ufp <- ufp0 %>%
-  #trim data (5% top/bottom)
-  group_by(site_id) %>%
-  filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
-         ptrak >= quantile(ptrak, (trim_quantile), na.rm = T)) %>%
-  ungroup()  
-
-# SENSITIVITY ANALYSIS: means (vs median) stop readings
-ufp_mean <- ufp0_mean %>%
-  group_by(site_id) %>%
-  filter(ptrak <= quantile(ptrak, (1-trim_quantile), na.rm = T),
-         ptrak >= quantile(ptrak, (trim_quantile), na.rm = T)) %>%
-  ungroup()
-
-# SENSITIVITY ANALYSIS: Trim 10% top/bottom of data
-ufp_trim10 <- ufp0 %>%
-  group_by(site_id) %>%
-  filter(ptrak <= quantile(ptrak, (1-0.1), na.rm = T),
-         ptrak >= quantile(ptrak, (0.1), na.rm = T)) %>%
-  ungroup()  
-
-# SENSITIVITY ANALYSIS: windosrized top/bottom 5% of data
-ufp_windsorized <- ufp0 %>%
-  group_by(site_id) %>%
-  mutate(
-    ptrak = ifelse(ptrak > quantile(ptrak, (1-trim_quantile), na.rm = T), quantile(ptrak, (1-trim_quantile), na.rm = T),
-                      ifelse(ptrak < quantile(ptrak, (trim_quantile), na.rm = T), quantile(ptrak, (trim_quantile), na.rm = T),
-                             ptrak)))
-
-
-#no. months sampled
-###                   --> udpate 
-months.sampled <- month.abb[c(1, 3:12)]
-n.months.sampled <- length(months.sampled)
-
-n.seasons.sampled <- length(unique(ufp$season))
+n.months.sampled <- length(unique(stops$month))
+n.seasons.sampled <- length(unique(stops$season))
 
 ```
 
-Untrimmed vs trimmed UFP stop concentrations.
+# Distribution of Stop Concentrations
 
-```{r, fig.height=5} 
-
-ufp0 %>%
-  rename(untrimmed = ptrak) %>%
-  left_join(ufp[c("site_id", "runname", "ptrak")]) %>%
-  rename(trimmed = ptrak) %>%
-  #select(ufp_untrimmed, ptrak) %>%
-  #View()
-  gather("trim", "ufp_value", contains("trim")) %>%
-  mutate(trim = factor(trim, levels = c("untrimmed", "trimmed"))) %>%
-  ggplot(aes(x=trim, y =ufp_value, #fill = stop_type
-             )) + 
-  geom_boxplot() + 
-  facet_wrap(~trim, scales="free") + 
-  labs(title = paste0("Untrimmed vs trimmed (",trim_quantile*100, "%) UFP stop data"),
-       y = "UFP (pt/cm3)",
-       x = "stop data"
-       ) +
-  theme(strip.text.x = element_blank())
-
-```
-
-Distribution of UFP stop concentrations by site (using trimmed data). 
-
-Distributions look semi normally-distributed or slightly right skewed.
-
-```{r, fig.height=20}
-ufp %>%
-  # create groupings based on measured concentrations
-  mutate(group = cut_number(x=site_no, n = 4)) %>%
-  #arrange(site_id) %>%
-  ggplot(aes(x= site_id, y=ptrak, #fill = stop_type
-             )) + 
-  geom_boxplot() +
-  labs(title = paste0("UFP Concentrations by site visit" ),
-       y= "UFP (pt/cm3)",
-       x = "site"
-       ) + 
-    facet_wrap(~group, 
-               scales="free", 
-               ncol=1,  
-               ) + 
- theme(strip.text.x = element_blank(), 
-       axis.text.x = element_text(size=5, angle = 90))
-
-```
-
-# Concentrations at different times
-
-### --> make plot of UFP over hour for diff sites  
-### --> see if there's an interaction btwn TOD & site location (e.g., a1 proximity)
-
-Table
+Using all of the median stop concentration estimates (median_all_data), the data are a lot more variable and have much higher values. Other trimmed and windsorized concentrations are less skewed to the right.
 
 ```{r}
-# table of concentrations distribution 
-# overall
-ufp.dist.overall <- ufp %>% ungroup() %>%
-  distribution.table(dt = ., var.string = "ptrak") %>%
-  mutate(time = "Overall") %>%
-  select(time, everything())
-
-#by season
-season.distrib <- ufp %>% group_by(time=season) %>%
-  distribution.table(dt = ., var.string = "ptrak")  
-
-#by TOW
-tow.distrib <- ufp %>% group_by(time= time_of_week) %>%
-  distribution.table(dt = ., var.string = "ptrak")  
-
-#by TOD
-first_morning_hr_sampled <- min(ufp$hour[ufp$tod5 == "3_8"])
-last_night_hr_sampled <- min(ufp$hour[ufp$tod5 == "21_2"])
-last_night_hr_sampled <- ifelse(last_night_hr_sampled == 0, 12, last_night_hr_sampled)
-
-tod.distrib <- ufp %>% group_by(time= tod5) %>%
-  distribution.table(dt = ., var.string = "ptrak") %>%
+stops_l_all_analyses <- stops %>%
+select(contains("ptrak"), contains("bc"),
+       -c(ptrak_mean_all_data, bc_mean_all_data)) %>%
+  gather(key = "Pollutant", value = "value") %>%
   mutate(
-    time = recode(time, 
-        "3_8" = paste0("early Morning (", first_morning_hr_sampled, " - 8 AM)"),
-        "9_11" = "morning (9 - 11 AM)",
-        "12_15" = "midday (12 - 3 PM)",
-        "16_20" = "late afternoon (4 - 8 PM)",
-        "21_2" = paste0("night (9 PM - ",  last_night_hr_sampled, " AM)")
-         )
-  )
-   
-rbind(
-  ufp.dist.overall,
-  season.distrib,
-  tow.distrib,
-  tod.distrib
-  ) %>%
-  add_row(time = "Season", .before = 2) %>%
-  add_row(time = "Time of Week", .before = 7) %>%
-  add_row(time = "Time of Day", .before = 10) %>%
-  kable(caption = "Distribution of median stop concentrations over time") %>%
-  add_indent(c(3:6, 8:9, 11:15)) %>%
+    Estimate = ifelse(grepl("ptrak", Pollutant), substr(Pollutant, 7, nchar(Pollutant)), substr(Pollutant, 4, nchar(Pollutant))),
+    Pollutant = ifelse(grepl("ptrak", Pollutant), "UFP (pt/cm3)", "BC (ng/m3)"),
+    Estimate = factor(Estimate, levels = unique(Estimate))
+    ) %>%
+  drop_na(value) 
+
+data_crosswalk <- data.frame(
+  Estimate = unique(stops_l_all_analyses$Estimate),
+  Description = c(
+    "Medians stop concentrations for all data",
+    "PRIMARY ANALYSIS: 5% trimmed median stop concentrations",
+    "5% trimmed mean stop concentrations",
+    "10% trimmed median stop concentrations",
+    "Windsorized median stop concentrations"
+    ))
+stops_l_all_analyses <- left_join(stops_l_all_analyses, data_crosswalk)
+
+```
+
+### --> create table just for primary analyses before & after trimming 
+
+```{r}
+stops_l_all_analyses %>%
+  group_by(Pollutant, Estimate, Description) %>% 
+  distribution.table(var.string = "value") %>%
+  kable(caption = "Distribution of stop concentrations for all the data (median_all_data), the primary analysis (median_trim5) and sensitivity analyses") %>%
   kable_styling()
-  
+
 ```
 
-Plots
-
+### --> ? create plot of just the primary analyses before & after trimming 
 
 ```{r}
-#by time
-p.hour <- ufp %>% 
-  mutate(hour = factor(hour)) %>%
-  ggplot(aes(x=hour, y=ptrak #, # fill=stop_type
-             )) + 
-  geom_boxplot() +
-  labs(x = "hour",
-       y = "") 
-
-p.tod5 <- ufp %>% 
-  #mutate(hour = factor(hour)) %>%
-  ggplot(aes(#x=stop_type, 
-             y=ptrak,  x=tod5)) + 
-  geom_boxplot() +
-  labs(x = "Time of Day",
-       y = ""
-       #fill = "Time of day"
-       ) 
-    
-p.day <- ufp %>%
-  ggplot(aes(x=day, y=ptrak#,  fill=stop_type
-             )) + 
+stops_l_all_analyses %>% 
+    ggplot(aes(x=Estimate, y=value, fill=Estimate)) + 
   geom_boxplot() + 
-  labs(y="")
+  facet_wrap(~Pollutant, scales="free", ncol=1) + 
+  labs(title = "Distribution of stop concentrations for all the data (median_all_data), the primary analysis (median_trim5) and sensitivity analyses",
+       y = "Stop Concentration Estimate",
+       x = "Data Used"
+       )  + 
+  theme(legend.position = "none") +
+  coord_flip()
+```
 
-p.season <- ufp %>%
-  ggplot(aes(x=season, y=ptrak#,  fill=stop_type
-             )) + 
-  geom_boxplot() + 
-  labs(y="")
+**All analyses starting here use data for the primary analyses (5% trimmed stop medians) unless otherwise stated.**
 
-ggarrange(p.hour, p.tod5,
-          p.day, 
-          p.season, 
-          common.legend = T, legend = "bottom"
-          ) %>%
-  annotate_figure(left = "UFP Concentration (pt/cm3)", 
-                  fig.lab = "UFP concentrations observed at stops"
-                  )
+```{r}
+# rename primary analyses for easlier plotting & coding
+stops <- stops %>%
+  rename(ufp_pt_cm3 = ptrak_median_trim5,
+         bc_ng_m3 = bc_median_trim5)
 
+# make PTRAK and BC in long format
+stops_l <- stops %>%
+  gather("ufp_pt_cm3", "bc_ng_m3", key = "Pollutant", value = "Value" ) %>%
+  group_by(Pollutant) %>%
+  drop_na(Value) %>%
+  ungroup() #%>%
+  #mutate(Pollutant = factor(Pollutant, levels = c("ufp_pt_cm3", "bc_ng_m3"), labels = c("UFP (pt/cm3)", "BC (ng/m3)") ))
 
+  
 ```
 
 # Sample size 
 
+By temporal variables. 
+
+### --> make these tables into plots for dissertation
+
 ```{r}
-## table of stop counts/site overall & stratified
-stop.counts.total <- ufp %>%
-  dplyr::group_by(site_id) %>%
+## table of stop counts per site overall & stratified
+stop.counts.total <- stops_l %>%
+  dplyr::group_by(Pollutant, site_id) %>%
   # no. samples/site
   dplyr::summarize(N = n()) %>%
+  group_by(Pollutant) %>%
   # distribution of no. samples
   distribution.table(var.string = "N") %>%
   mutate(Time = "Overall") %>%
-  select(Time, everything())
+  select(Pollutant, Time, everything())
 
-stop.counts.season <- ufp %>%
-  dplyr::group_by(site_id, season) %>%
+stop.counts.season <- stops_l %>%
+  dplyr::group_by(Pollutant, site_id, season) %>%
   # no. samples/site
   dplyr::summarize(N = n()) %>%
   #group by time period of interest
-  group_by(Time=season) %>%
+  group_by(Pollutant, Time=season) %>%
   distribution.table(var.string = "N")  
 
-stop.counts.tow <- ufp %>%
-  group_by(site_id, time_of_week) %>%
+stop.counts.tow <- stops_l %>%
+  group_by(Pollutant, site_id, time_of_week) %>%
   # no. samples/site
   dplyr::summarize(N = n()) %>%
   #group by time period of interest
-  group_by(Time=time_of_week) %>%
+  group_by(Pollutant, Time=time_of_week) %>%
   distribution.table(var.string = "N")  
   
-stop.counts.tod <- ufp %>%
-  group_by(site_id, tod5) %>%
+stop.counts.hr <- stops_l %>%
+  group_by(Pollutant, site_id, hour) %>%
   # no. samples/site
   dplyr::summarize(N = n()) %>%
   #group by time period of interest
-  group_by(Time=tod5) %>%
+  group_by(Pollutant, Time=hour) %>%
   distribution.table(var.string = "N") %>%
-  mutate(
-    Time = recode(Time, 
-        "3_8" = paste0("early Morning (", first_morning_hr_sampled, " - 8 AM)"),
-        "9_11" = "morning (9 - 11 AM)",
-        "12_15" = "midday (12 - 3 PM)",
-        "16_20" = "late afternoon (4 - 8 PM)",
-        "21_2" = paste0("night (9 PM - ",  last_night_hr_sampled, " AM)")
-         )
-  ) 
-  
-rbind(
+  mutate(Time = as.character(Time))
+   
+n_distribution <- bind_rows(
   stop.counts.total,
   stop.counts.season,
   stop.counts.tow,
-  stop.counts.tod
+  stop.counts.hr
     ) %>%
-  add_row(Time = "season", .before = 2) %>%
-   add_row(Time = "Time of Week", .before = 7) %>%
-  add_row(Time = "Time of Day", .before = 10) %>%
-  kable(caption = "Number of stop samples per site (after trimming; N = No. sites sampled)"
-        ) %>%
-  add_indent(c(3:6, 8:9, 11:15)) %>%
-  kable_styling()
-
-
-## plot stratified by time 
-ufp %>%
-  group_by(site_no, season, time_of_week, tod5) %>%
-  dplyr::summarize(N = n()) %>%
-  ggplot(aes(x=site_no, y=N, fill=tod5)) +
-  geom_bar(stat = "identity", aes(group=site_no))+
-  facet_wrap(~season+time_of_week, ncol = 2) +
-  labs(title = "Number of samples by site and time (after trimming)",
-    y="No. Samples",
-       x= "Site No.",
-       fill = "Time of Day")
-
-#ggsave(filename = file.path("A2_Images", "samples_tow_tod.png"), 
-#      height = 8, width = 8)
-
-
-# hist of unique hours locations have sampled at 
-ufp %>%
-  ggplot(aes(x=hour, fill= tod5)) +
-  geom_bar(aes( )) + 
-  labs(title = "Unique hours sampled (after trimming)",
-       y = "No. Times Sampled",
-       fill = "Time of Day"
-       )
+  rename('Unique Sites Sampled' = N)
 
 ```
+
+- UFP 
+
+On average (SD), we collected 24 (1) two-minute samples from each site, ranging from a minimum of __21__ to a maximum of __26__ samples. Sites were generally sampled __5-7__ times each season, __17__ times during weekdays, __7__ times during weekends, and __1-4__ times during each hour between 4 AM and midnight. These sample counts are mutually exclusive across categories. 
+
+```{r}
+n_distribution %>%
+  filter(Pollutant == "ufp_pt_cm3") %>%
+  select(-Pollutant) %>%
+  add_row(Time = "Season", .before = 2) %>%
+  add_row(Time = "Time of Week", .before = 7) %>%
+  add_row(Time = "Hour", .before = 10) %>%
+  kable(caption = "Number of UFP samples collected at each site") %>%
+  add_indent(c(3:6, 8:9, 11:31)) %>%
+  kable_styling()
+
+```
+
+- BC
+
+On average (SD), we collected 24 (1) two-minute samples from each site, ranging from a minimum of __21__ to a maximum of __26__ samples. Sites were generally sampled __5-7__ times each season, __17__ times during weekdays, __7__ times during weekends, and __1-4__ times during each hour between 4 AM and midnight. These sample counts are mutually exclusive across categories. 
+
+```{r}
+n_distribution %>%
+  filter(Pollutant == "ufp_pt_cm3") %>%
+  select(-Pollutant) %>%
+  add_row(Time = "Season", .before = 2) %>%
+  add_row(Time = "Time of Week", .before = 7) %>%
+  add_row(Time = "Hour", .before = 10) %>%
+  kable(caption = "Number of UFP samples collected at each site") %>%
+  add_indent(c(3:6, 8:9, 11:31)) %>%
+  kable_styling()
+```
+
+By site.
+
+- UFP
+
+The figure below shows the number of samples collected for each site during each season, time of week and time of day combination. For logistical reasons related to site location along a route, some sites were sampled during more times of day than others. Sites were more likely to be sampled on more times of day during weekendays than weekends because weekdays received more sampling times (five vs two days out of the week).
+
+```{r}
+## plot stratified by time 
+stops_l %>%
+  filter(Pollutant == "ufp_pt_cm3") %>%
+  group_by(site_no, season, time_of_week, tod5) %>%
+  dplyr::summarize(N = n()) %>%
+  ggplot(aes(x=site_no, y=N, fill= tod5)) +
+  geom_bar(stat = "identity", aes(group=site_no))+
+  facet_grid(season~time_of_week, switch="y") +
+  labs(title = "Number of UFP samples by site and time",
+    y="No. Samples",
+    x= "Site No.",
+    fill = "Hour") + #scale_colour_binned() +
+theme(legend.position = "bottom")
+  
+```
+
+- BC
+
+[same description as above]
+
+```{r}
+## plot stratified by time 
+stops_l %>%
+  filter(Pollutant == "bc_ng_m3") %>%
+  group_by(site_no, season, time_of_week, tod5) %>%
+  dplyr::summarize(N = n()) %>%
+  ggplot(aes(x=site_no, y=N, fill= tod5)) +
+  geom_bar(stat = "identity", aes(group=site_no))+
+  facet_grid(season~time_of_week, switch="y") +
+  labs(title = "Number of BC samples by site and time",
+    y="No. Samples",
+    x= "Site No.",
+    fill = "Hour") +  
+theme(legend.position = "bottom")
+  
+```
+
+# Pollutant Concentrations
+
+## by site 
+
+Distribution of stop concentrations by site (using trimmed data). Distributions look semi normally-distributed or slightly right skewed. Some sites have more variability than others.
+
+```{r}
+stops_l %>%
+  ggplot(aes(x= site_no, y=Value, group = site_no)) + 
+  geom_boxplot() +
+  labs(title = paste0("Distribtuion of stop concentrations" ),
+       y= "Concentration",
+       x = "Site No.") + 
+    facet_wrap(~ Pollutant,scales="free", ncol=1)  
+
+```
+
+## over time
+
+```{r}
+# table of concentrations distribution 
+# overall
+ufp.dist.overall <- stops_l %>% 
+  group_by(Pollutant) %>%
+  distribution.table(dt = ., var.string = "Value") %>%
+  mutate(time = "Overall") %>%
+  select(Pollutant, time, everything())  
+
+#by season
+season.distrib <- stops_l %>% 
+  group_by(Pollutant, time=season) %>%
+  distribution.table(dt = ., var.string = "Value")  
+
+#by TOW
+tow.distrib <- stops_l %>% 
+  group_by(Pollutant, time= time_of_week) %>%
+  distribution.table(dt = ., var.string = "Value")  
+
+# by hour
+hr.distrib <- stops_l %>%
+  group_by(Pollutant, time= hour) %>%
+  distribution.table(dt = ., var.string = "Value") %>%
+  mutate(time = as.character(time))
+   
+conc_distributions <- bind_rows(ufp.dist.overall,
+                            season.distrib,
+                            tow.distrib,
+                            hr.distrib)  
+
+```
+
+Tables
+
+- UFPs
+
+Average UFP concentrations were generally higher during the fall and winter, on weekdays and during late morning and evening hours.   
+-This is in line with the literature, which has reported higher UFP concentrations during cold weather and high traffic activity times.
+
+```{r}
+conc_distributions %>%
+  filter(Pollutant == "ufp_pt_cm3") %>%
+  select(-Pollutant) %>%
+  add_row(time = "Season", .before = 2) %>%
+  add_row(time = "Time of Week", .before = 7) %>%
+  add_row(time = "Hour", .before = 10) %>%
+  kable(caption = "Distribution of median UFP stop concentrations over time") %>%
+  add_indent(c(3:6, 8:9, 11:31)) %>%
+  kable_styling()
+  
+```
+
+- BC
+
+Average BC concentrations were generally higher during the fall and winter, on weekdays and during morning and evening hours.
+
+```{r}
+conc_distributions %>%
+  filter(Pollutant == "bc_ng_m3") %>%
+  select(-Pollutant) %>%
+  add_row(time = "Season", .before = 2) %>%
+  add_row(time = "Time of Week", .before = 7) %>%
+  add_row(time = "Hour", .before = 10) %>%
+  kable(caption = "Distribution of median BC stop concentrations over time") %>%
+  add_indent(c(3:6, 8:9, 11:31)) %>%
+  kable_styling()
+
+```
+
+Plots
+
+UFP and BC concentrations were very variable for any one hour, day of the week and season.
+
+### --> check that temporal_variable is factored correctly
+
+```{r}
+stops_l %>%
+  gather(hour, day, season, key = "temporal_variable", value = "temporal_value") %>%
+  #filter(Pollutant == "ufp_pt_cm3") %>% #comment this out to plot UFP and BC on sample plot
+  mutate(
+    temporal_variable = factor(temporal_variable, levels = c("season", "day", "hour")),
+    temporal_value = factor(temporal_value, levels = c(levels(factor(stops$hour)), levels(stops$day), levels(stops$season))),
+    Pollutant = factor(Pollutant, levels = c("ufp_pt_cm3", "bc_ng_m3"), labels = c("UFP (pt/cm3)", "BC (ng/m3)"))
+    ) %>%
+  ggplot(aes(x=temporal_value, y=Value)) + 
+  geom_boxplot() + 
+  facet_grid(Pollutant~temporal_variable, scales= "free", switch = "both") +
+  #facet_wrap(Pollutant~temporal_variable, scales= "free",switch = "y",) +
+  labs(
+    title = "Stop concentrations over time",
+    x = "",
+    y = ""  #"Concentration"
+  )
+
+```
+
+```{r}
+# # BC concentrations were very variable for any one hour, day of the week and season.
+
+# # same code as above, but filtered for BC
+# stops_l %>%
+#   gather(hour, day, season, key = "temporal_variable", value = "temporal_value") %>%
+#   filter(Pollutant == "bc_ng_m3") %>%
+#   mutate(
+#     temporal_value = factor(temporal_value, levels = c(levels(factor(stops$hour)), levels(stops$day), levels(stops$season))),
+#     Pollutant = factor(Pollutant, levels = c("ufp_pt_cm3", "bc_ng_m3"), labels = c("UFP (pt/cm3)", "BC (ng/m3)"))
+#     ) %>%
+#   ggplot(aes(x=temporal_value, y=Value)) + 
+#   geom_boxplot() + 
+#   facet_grid(Pollutant~temporal_variable, scales= "free", switch = "both") +
+#   #facet_wrap(Pollutant~temporal_variable, scales= "free",switch = "y",) +
+#   labs(
+#     title = "Stop concentrations over time",
+#     x = "",
+#     y = "")
+  
+```
+
+
+# ANOVA for stop medians
+
+stop_medians ~ season + day of week + hour + site_id 
+
+- UFP
+
+Most (~74%) of the variation in UFP stop concentration occurs __[?]within stops at any particular time__. About 22% of the variation in UFP concentration occurs between stops and only ~ 4% occurs as a result temporal changes.
+
+```{r}
+# using all of the observations to characterize variability 
+anovaVCA(Value ~ season + day + hour + site_id, Data = as.data.frame(subset(stops_l, Pollutant == "ufp_pt_cm3")))$aov.tab %>%
+  kable(caption = "Variance components analysis for UFP", 
+        digits = 1) %>%
+  kable_styling()
+
+```
+
+Site ID and temporal variables are all significantly associated with variation in stop-level UFP concentrations. 
+
+```{r}
+ufp_anova <- stops_l %>%
+  filter(Pollutant == "ufp_pt_cm3") %>%
+  mutate(day = factor(day, ordered = F),
+         hour = factor(hour)) %>%
+  lm(Value ~ season + day + hour + site_id, data = .)
+
+anova(ufp_anova) %>% 
+  kable(caption = "ANOVA results for UFP stop concentrations") %>% 
+  kable_styling()
+
+#summary(ufp_anova) 
+
+```
+
+- BC
+
+Most (~77%) of the variation in BC stop concentration occurs __within stops at any particular time__. About 11% of the variation in BC concentration occurs between stops and ~12% occurs as a result temporal changes. 
+
+- BC concentrations are slightly more affected by temporal changes than UFP concentrations.
+
+```{r}
+# using all of the observations to characterize variability 
+anovaVCA(Value ~ season + day + hour + site_id, Data = as.data.frame(subset(stops_l, Pollutant == "bc_ng_m3")))$aov.tab %>%
+  kable(caption = "Variance components analysis for BC", 
+        digits = 1) %>%
+  kable_styling()
+
+```
+
+Like UFP concentrations, site ID and temporal variables are all significantly associated with variation in stop-level BC concentrations. 
+
+```{r}
+bc_anova <- stops_l %>%
+  filter(Pollutant == "bc_ng_m3") %>%
+  mutate(day = factor(day, ordered = F),
+         hour = factor(hour)) %>%
+  lm(Value ~ season + day + hour + site_id, data = .)
+
+anova(bc_anova) %>% 
+  kable(caption = "ANOVA results for BC stop concentrations") %>% 
+  kable_styling()
+
+#summary(bc_anova) 
+
+``` 
 
 # Annual averages 
 
 calculate annual avg means using different methods and weights to determine how sensitve estimates are to using various approaches: 
-* site-specific mean vs regression of mean
-* unweighted (site_id) vs weighted means (site_id, season, tow, tod) 
+* site-specific data vs regression  
+* unweighted vs weighted (season, tow, tod) means
 
-## Site-specific means 
+## Site-specific data 
+
+### season-TOW2-TOD5
 
 ```{r}
-#calc diff summary measures
-## using within site information
+# unique times
+min.t <- n.seasons.sampled*2*5
 
-# ufp_copy <- ufp
-# ufp <- ufp_copy
+```
 
-ufp <- ufp %>%
-  group_by(site_id) %>%
-  mutate(mean_uw = mean(ptrak, na.rm=T))
+No sites are sampled each season-TOW2_TOD5 combination (n = `r min.t` unique times).
 
- #means by seaason-wk-tod5 (5 tods)
-min.t <- 5*2*n.seasons.sampled
-s_tow2_tod5 <- ufp %>%
-   group_by(site_id, season, time_of_week, tod5) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   ungroup() %>%
-   unite("swh", season:tod5, remove = F) %>%
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(swh)) #%>% filter(unique_times >= min.t)
-  #there are no sites w/ sampling during all 30/40 unique times (5 tod x 2 tow x 3 or 4 seasons)
- if(!max(s_tow2_tod5$unique_times) >= min.t){ rm(s_tow2_tod5) }
+```{r}
+stops_l %>%
+  unique_times_sampled(.,min_samples_required = min.t,
+                       temporal_vars = c("season", "time_of_week", "tod5")) %>%
+  kable(caption = "Number of sites that sampled during each time combination") %>% 
+  kable_styling()
+
+```
  
- #means by seaason-wk-tod3 (3 tods)
-min.t <- 3*2*n.seasons.sampled
-s_tow2_tod3 <- ufp %>%
-   group_by(site_id, season, time_of_week, tod3) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   ungroup() %>%
-   unite("swh", season:tod3, remove = F) %>%
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(swh)) #%>% filter(unique_times >=min.t)
- #there are no sites w/ sampling during all 18/24 unique times (3 tod x 2 tow x 3/4 seasons)
-if(!max(s_tow2_tod3$unique_times) >= min.t){rm(s_tow2_tod3)}
  
- #means by seaason-wk-tod2 (2 tods)
-    #none when looking at all 4 seasons
- min.t <- 2*2*n.seasons.sampled
- s_tow2_tod2 <- ufp %>%
-   group_by(site_id, season, time_of_week, tod2) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   ungroup() %>%
-   unite("swh", season:tod2, remove = F) %>%
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(swh)) %>% 
-   filter(unique_times >= min.t)
-if(!max(s_tow2_tod2$unique_times) >= min.t){rm(s_tow2_tod2)}
+### season-TOW2-TOD3
 
- # ## using tod2, caclulate weighted mean for sites w/ obs during all time combinations
- # s_tow2_tod2 <- s_tow2_tod2 %>%
- #   mutate(
- #     season.wt = 1/n.seasons.sampled,
- #     wk.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
- #     tod.wt = ifelse(tod2 == "9_17", 9/24, 15/24),
- #     wt = season.wt * wk.wt * tod.wt,
- #     wt_times_mean = wt*mean) %>% 
- # 
- # # #check that weights for all sites = 1. #looks good
- # # s_tow2_tod2 %>%
- # #   group_by(site_id) %>%
- # #   summarize(n = sum(wt))
- #   
- #   #calculate each site's weighted mean
- #   group_by(site_id) %>%
- #   dplyr::summarize(mean_wt = sum(wt_times_mean))
-   
- #means by season-wk7 (2 tods)
-    #no sites w/ sampling during all 42/56 unique times (2 tod x 7 tow x 3/4 seasons)
-min.t <- 2*7*n.seasons.sampled
-s_tow7_tod2 <- ufp %>%
-   group_by(site_id, season, day, tod2) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   ungroup() %>%
-   unite("swh", season:tod2, remove = F) %>%
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(swh)) #%>% filter(unique_times >=min.t)
-if(!max(s_tow7_tod2$unique_times) >= min.t){rm(s_tow7_tod2)} 
+```{r}
+min.t <- n.seasons.sampled*2*3
 
- #no tod
-    # no site w/ 21/28 unique times (3/4 seasons x 7 days)
-min.t <- 7*n.seasons.sampled
-s_tow7 <- ufp %>%
-   group_by(site_id, season, day) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   ungroup() %>%
-   unite("swh", season:day, remove = F) %>%
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(swh)) #%>% filter(unique_times >=min.t)
-if(!max(s_tow7$unique_times) >= min.t){rm(s_tow7)} 
+```
 
-min.t <- 2*n.seasons.sampled
-s_tow2 <- ufp %>%
-   group_by(site_id, season, time_of_week) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   ungroup() %>%
-   unite("swh", season:time_of_week, remove = F) %>%
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(swh)) %>%
-   filter(unique_times >=min.t) %>%
- #  caclulate weighted mean for sites w/ obs during all time combinations
-   mutate(
-     season.wt = 1/n.seasons.sampled,
-     wk.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
-     wt = season.wt * wk.wt,
-     wt_times_mean = wt*mean) %>%
-   #calculate each site's weighted mean
-   group_by(site_id) %>%
-   dplyr::summarize(mean_wt = sum(wt_times_mean))
+No sites are sampled each season-TOW2-TOD3 combination (n = `r min.t` unique times).
 
- #season
-    # 305 sites w/ sampling during all 3 seasons
- 
+```{r}
+stops_l %>%
+  unique_times_sampled(.,min_samples_required = min.t,
+                       temporal_vars = c("season", "time_of_week", "tod3")) %>%
+  kable(caption = "Number of sites that sampled during each time combination") %>% 
+  kable_styling()
+
+```
+
+### season-TOW2-TOD2
+
+```{r}
+min.t <- n.seasons.sampled*2*2
+
+```
+
+A few sites sampled each season-TOW2-TOD2 combination (n = `r min.t` unique times).
+
+```{r}
+s_tow2_tod2 <- stops_l %>%
+  unique_times_sampled(.,min_samples_required = min.t,
+                       temporal_vars = c("season", "time_of_week", "tod2"), 
+                       return_site_ids = T) 
+
+s_tow2_tod2$n_sampled_min_amount %>%
+  kable(caption = "Number of sites that sampled during each time combination") %>% 
+  kable_styling()
+
+```
+
+Calculate the weighted means for these locations. 
+
+```{r}
+## using tod2, caclulate weighted mean for sites w/ obs during all time combinations
+s_tow2_tod2 <- s_tow2_tod2$sites_sampled_min_amount %>%
+  left_join(stops_l) %>%
+  # calculate means for each temporal combination & pollutant
+  group_by(Pollutant, site_id, season, time_of_week, tod2) %>%
+  dplyr::summarize(grp_mean = mean(Value)) %>%
+  mutate(
+    season.wt = 1/n.seasons.sampled,
+    wk.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+    tod.wt = ifelse(tod2 == "9_17", 9/24, 15/24),
+    wt = season.wt * wk.wt * tod.wt,
+    grp_mean_wt = grp_mean*wt) %>%
+  # #check that weights for all Pollutants & sites = 1. #looks good
+  # group_by(Pollutant, site_id) %>%
+  # dplyr::summarize(n = sum(wt)) %>%
+  # group_by(Pollutant) %>%
+  # dplyr::summarize(sum_is_not_one = sum(n !=1))
+
+  #calculate each site's weighted mean
+  group_by(Pollutant, site_id) %>%
+  dplyr::summarize(site_only_s_tow2_tod2 = sum(grp_mean_wt))
+  
+```
+
+### season-TOW2
+
+```{r}
+min.t <- n.seasons.sampled*2
+
+```
+
+More sites sampled each season-TOW2 combination (n = `r min.t` unique times).
+
+```{r}
+s_tow2 <- stops_l %>%
+  unique_times_sampled(.,min_samples_required = min.t,
+                       temporal_vars = c("season", "time_of_week"), 
+                       return_site_ids = T) 
+
+s_tow2$n_sampled_min_amount %>%
+  kable(caption = "Number of sites that sampled during each time combination") %>% 
+  kable_styling()
+
+```
+
+Calculate the weighted means for these locations. 
+
+```{r}
+## using tod2, caclulate weighted mean for sites w/ obs during all time combinations
+s_tow2 <- s_tow2$sites_sampled_min_amount %>%
+  left_join(stops_l) %>%
+  # calculate means for each temporal combination & pollutant
+  group_by(Pollutant, site_id, season, time_of_week) %>%
+  dplyr::summarize(grp_mean = mean(Value)) %>%
+  mutate(
+    season.wt = 1/n.seasons.sampled,
+    wk.wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+    wt = season.wt * wk.wt,
+    grp_mean_wt = grp_mean*wt) %>%
+  # #check if any weights for all Pollutants & sites != 1. #looks good
+  # group_by(Pollutant, site_id) %>%
+  # dplyr::summarize(n = sum(wt)) %>%
+  # group_by(Pollutant) %>%
+  # dplyr::summarize(sum_is_not_one = sum(n !=1))
+
+  #calculate each site's weighted mean
+  group_by(Pollutant, site_id) %>%
+  dplyr::summarize(site_only_s_tow2 = sum(grp_mean_wt))
+
+```
+
+### season  
+
+```{r}
 min.t <- n.seasons.sampled
-s <- ufp %>%
-   group_by(site_id, season) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   group_by(site_id) %>%
-   mutate(unique_times = n_distinct(season)) %>%
-   filter(unique_times == min.t) %>%
- #no_tod_df %>% select(site_id) %>% n_distinct()
- #  caclulate weighted mean for sites w/ obs during all time combinations
-   mutate(
-     season.wt = 1/n.seasons.sampled,
-     wt_times_mean = season.wt*mean) %>%
-   #calculate each site's weighted mean
-   group_by(site_id) %>%
-   dplyr::summarize(mean_wt = sum(wt_times_mean))
 
- #month-weighted avg
- #locations w/ samples Mar - Nov
+```
 
- m <- ufp %>%
-   group_by(site_id, month) %>%
-   dplyr::summarize(mean = mean(ptrak)) %>%
-   group_by(site_id) %>%
-   filter(n_distinct(month) == n.months.sampled) %>%
- #  caclulate weighted mean for sites w/ obs during all time combinations
-   mutate(
-     wt_times_mean = mean * 1/n.months.sampled) %>%
-   #calculate each site's weighted mean
-   group_by(site_id) %>%
-   dplyr::summarize(mean_wt = sum(wt_times_mean))
+All sites sampled each season-TOW2 combination (n = `r min.t` unique times).
 
-#105 locations w/ samples each month #nrow(m)
+```{r}
+s <- stops_l %>%
+  unique_times_sampled(.,min_samples_required = min.t,
+                       temporal_vars = c("season"), 
+                       return_site_ids = T) 
 
-``` 
+s$n_sampled_min_amount %>%
+  kable(caption = "Number of sites that sampled during each time combination") %>% 
+  kable_styling()
 
-# Regression of mean annual average
+```
 
-### --> change tables/plots "yhat" --> "regression"/"reg"; "mean" --> ?? "site-specific"
+Calculate the weighted means for these locations. 
 
-# --> estimate annual avg using 7 dys/wk
+```{r}
+## using tod2, caclulate weighted mean for sites w/ obs during all time combinations
+s <- s$sites_sampled_min_amount %>%
+  left_join(stops_l) %>%
+  # calculate means for each temporal combination & pollutant
+  group_by(Pollutant, site_id, season) %>%
+  dplyr::summarize(grp_mean = mean(Value)) %>%
+  mutate(
+    season.wt = 1/n.seasons.sampled,
+    wt = season.wt,
+    grp_mean_wt = grp_mean*wt) %>%
+  # #check if any weights for all Pollutants & sites != 1. #looks good
+  # group_by(Pollutant, site_id) %>%
+  # dplyr::summarize(n = sum(wt)) %>%
+  # group_by(Pollutant) %>%
+  # dplyr::summarize(sum_is_not_one = sum(n !=1))
+
+  #calculate each site's weighted mean
+  group_by(Pollutant, site_id) %>%
+  dplyr::summarize(site_only_s = sum(grp_mean_wt))
+  
+```
+
+### merge all estimates 
+
+```{r}
+# add estimates to stops_l
+
+stops_l <- stops_l %>%
+  # weighted avgs
+  left_join(s_tow2_tod2) %>%
+  left_join(s_tow2) %>%
+  left_join(s) %>%
+  group_by(Pollutant, site_id) %>%
+  # unweighted avg
+  mutate(site_only_uw = mean(Value, na.rm=T))
+
+```
+
+# Regression  
+
+Averaging method weight description
+
+```{r}
+data.frame(
+  Weight = c("uw",
+               "s",
+               "s_tow2",
+               "s_tow2_tod2",
+               "s_tow2_tod5",
+               "s_day_tod5"),
+  Description = c("unweighted annual average",
+                  "season-adjusted annual average",
+                  "season- and time-of-week- (weekend vs weekday) adjusted annual average",
+                  "season-, time-of-week- (weekend vs weekday) and time-of-day (2 categories: 9 AM - 5 PM, 6 PM - 8 AM) adjusted annual average",
+                  "season-, time-of-week- (weekend vs weekday) and time-of-day (5 categories: 3-8 AM, 9-11 AM, 12-3 PM, 4-8 PM, 9 PM - 2 AM) adjusted annual average",
+                  "season-, day-of-week (7 days) and time-of-day (5 categories) adjusted annual average"),
+  Primary_Analysis = c("No",
+                       "No",
+                       "No",
+                       "No",
+                       "Yes",
+                       "No"),
+  Regression_Estimate = "Yes",
+  Site_Only_Estimate = c(rep("Yes", 4),
+                         rep("No", 2))
+  ) %>%
+  kable(caption = "Description of weights used to estimate annual averages from short-term mobile monitoring stop observations for primary and sensitivity analyses using both regression and site-only methods", 
+        col.names = c("Weight", "Description", "Primary Analysis", "Regression Estimate", "Site-Only Estimate" )
+        ) %>%
+  kable_styling()
+   
+```
+
+
+Fit models to predict UFP and BC at different times 
 
 ```{r}
 #df for predictions - all unique variable combinations
-unique_sites <- unique(ufp$site_id)
-unique_seasons <- unique(ufp$season)
-unique_tow <- unique(ufp$time_of_week) 
-unique_tod2 <- unique(ufp$tod2) 
-unique_tod5 <- unique(ufp$tod5) 
 
-preds.uw <- data.frame(site_id = unique_sites)
-
-preds.s <- expand.grid(site_id = unique_sites,
-                       season = unique_seasons)
- 
-preds.s.tow <- expand.grid(site_id = unique_sites, 
-                            season = unique_seasons,
-                            time_of_week = unique_tow)
-
-preds.s.tow.tod2 <- expand.grid(site_id = unique_sites, 
-                            season = unique_seasons,
-                            time_of_week = unique_tow,
-                            tod2 = unique_tod2)
-
-preds.s.tow.tod5 <- expand.grid(site_id = unique_sites, 
-                            season = unique_seasons,
-                            time_of_week = unique_tow, 
-                            tod5 = unique_tod5)
-
-#different fits
-fit.uw <- lm(ptrak ~ site_id , data = ufp)
-fit.s <-  update(fit.uw, ~. + season)
-fit.s.tow <- update(fit.s, ~. + time_of_week)
-fit.s.tow.tod2 <- update(fit.s.tow, ~. + tod2)
-fit.s.tow.tod5 <- update(fit.s.tow, ~. + tod5)
-  #lm(ptrak ~ factor(month, ordered = F) + factor(day, ordered = F) + factor(hour) + site_id , data = ufp)
-#summary(fit.s.tow.tod5)$coef
-
-#predictions
-preds.uw$yhat_uw <- predict(object = fit.uw, newdata= preds.uw)
-preds.s$yhat <- predict(fit.s, preds.s) 
-preds.s.tow$yhat <- predict(fit.s.tow, preds.s.tow) 
-preds.s.tow.tod2$yhat <- predict(fit.s.tow.tod2, preds.s.tow.tod2) 
-preds.s.tow.tod5$yhat <- predict(fit.s.tow.tod5, preds.s.tow.tod5) 
-
-#calculate weighted avgs based on predictions
-season.wt <- 1/n.seasons.sampled
-
-preds.s <- preds.s %>%
-  mutate(
-    season_wt = season.wt,
-    yhat = yhat*season_wt
-  ) %>%
-  group_by(site_id) %>%
-  dplyr::summarize(yhat_s = sum(yhat))
-
-preds.s.tow <- preds.s.tow %>%
-  mutate(
-    season_wt = season.wt,
-    tow_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
-    yhat = yhat*season_wt*tow_wt
-  ) %>%
-  group_by(site_id) %>%
-  dplyr::summarize(yhat_s_tow2 = sum(yhat))
- 
-preds.s.tow.tod2 <- preds.s.tow.tod2 %>%
-  mutate(
-    season_wt = season.wt,
-    tow_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
-    tod_wt = ifelse(tod2 == "9_17", 9/24, (1- 9/24)),
-    yhat = yhat*season_wt*tow_wt*tod_wt
-  ) %>%
-  group_by(site_id) %>%
-  dplyr::summarize(yhat_s_tow2_tod2 = sum(yhat))
+preds_s_ufp0 <- stops %>% ungroup() %>%
+  tidyr::expand(site_id, season) %>%
+  mutate(season_wt = 1/n.seasons.sampled,
+         wt = season_wt)
+preds_s_bc0 <- preds_s_ufp0
   
-#calculate weights based on samling hours available 
- #sort(unique(ufp$hour))
-# hrs.sampled <- sort(unique(ufp$hour))
-# hrs.wt1 <- c(6:22)
-# non.wt1.hrs <- (0:23)[!(0:23) %in% hrs.wt1]
-#  #other hrs sampled w/o a wt=1
-# other.hrs.sampled <- hrs.sampled[!hrs.sampled %in% hrs.wt1]
-# other.hrs.wt <- length(non.wt1.hrs)/length(other.hrs.sampled)
-# 
-# preds.m.day.hr <- preds.m.day.hr %>%
-#   mutate(
-#     #double the weight of the 4 hrs neighboring the 4 night hrs w/o sampling (1-4 AM)
-#     hr_wt = ifelse(hour %in% hrs.wt1, 1/24, other.hrs.wt/24),
-#     month_wt = 1/n.months.sampled,
-#     day_wt = 1/7,
-#     yhat = yhat*hr_wt*month_wt*day_wt
-#     ) %>%
-#   #check that hr weights add up to 1. looks good
-#   # t <-preds.m.day.hr %>% group_by(site_id) %>%
-#   #   dplyr::summarize(sum_wt = sum(hr_wt*month_wt*day_wt)) 
-# 
-#   group_by(site_id) %>%
-#   dplyr::summarize(yhat_m_day_hr = sum(yhat))
+preds_s_tow2_ufp0 <- stops %>% ungroup() %>%
+  tidyr::expand(site_id, season, time_of_week) %>%
+  mutate(season_wt = 1/n.seasons.sampled,
+         tow2_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+         wt = season_wt*tow2_wt)
+preds_s_tow2_bc0 <- preds_s_tow2_ufp0
 
-preds.s.tow.tod5 <- preds.s.tow.tod5 %>%
-  mutate(
-    #double the weight of the 4 hrs neighboring the 4 night hrs w/o sampling (1-4 AM)
-    tod5_wt = recode(tod5, 
-                   "3_8" = 6,
-                   "9_11" = 3,
-                   "12_15" = 4,
-                   "16_20" = 5,
-                   "21_2" = 6
-                   )/24,
-      
-      #ifelse(tod5 %in% "3_8", 6,  
-                   
-                   
-                   #),
-    season_wt = season.wt,
-    tow_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
-    yhat = yhat*tod5_wt*tow_wt*season_wt) %>%
-  #check that hr weights add up to 1. looks good
-  # preds.s.tow.tod5 %>% group_by(site_id) %>%
-  #   dplyr::summarize(sum_wt = sum(tod5_wt*season_wt*tow_wt)) %>%
-  # select(sum_wt) %>%
-  # table()
+preds_s_tow2_tod2_ufp0 <- stops %>% ungroup() %>%
+  tidyr::expand(site_id, season, time_of_week, tod2) %>%
+  mutate(season_wt = 1/n.seasons.sampled,
+         tow2_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+         tod2_wt = ifelse(tod2 == "9_17", 9/24, (1- 9/24)),
+         wt = season_wt*tow2_wt*tod2_wt)
+preds_s_tow2_tod2_bc0 <- preds_s_tow2_tod2_ufp0
 
-  group_by(site_id) %>%
-  dplyr::summarize(yhat_s_tow2_tod5 = sum(yhat))
+preds_s_tow2_tod5_ufp0 <- stops %>% ungroup() %>% 
+  tidyr::expand(site_id, season, time_of_week, tod5) %>%
+  mutate(season_wt = 1/n.seasons.sampled,
+         tow2_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+         tod5_wt = recode(tod5,
+                          "3_8" = 6,
+                          "9_11" = 3,
+                          "12_15" = 4,
+                          "16_20" = 5,
+                          "21_2" = 6)/24,
+         wt = season_wt*tow2_wt*tod5_wt)
+preds_s_tow2_tod5_bc0 <- preds_s_tow2_tod5_ufp0
 
-
-
-#merge all predictions to 1 df
-yhats <- left_join(preds.uw, preds.s) %>%
-  left_join(preds.s.tow) %>%
-  left_join(preds.s.tow.tod2) %>%
-  left_join(preds.s.tow.tod5)
+preds_s_day_tod5_ufp0 <- stops %>% ungroup() %>%
+  tidyr::expand(site_id, season, day, tod5) %>%
+  mutate(season_wt = 1/n.seasons.sampled,
+         day_wt = 1/7,
+         tod5_wt = recode(tod5,
+                          "3_8" = 6,
+                          "9_11" = 3,
+                          "12_15" = 4,
+                          "16_20" = 5,
+                          "21_2" = 6)/24,
+         wt = season_wt*day_wt*tod5_wt)
+preds_s_day_tod5_bc0 <- preds_s_day_tod5_ufp0
 
 ```
 
-Save annual averages from all methods with geocovariates.
+```{r}
+# model fits
+fit_s_ufp <-  lm(Value ~ site_id + season, data = stops_l, subset = (Pollutant =="ufp_pt_cm3"))
+# same model as above but for a different pollutant
+fit_s_bc <-  update(fit_s_ufp, subset = (Pollutant =="bc_ng_m3"))
+ 
+fit_s_tow2_ufp <- update(fit_s_ufp, ~. + time_of_week)
+fit_s_tow2_bc <- update(fit_s_tow2_ufp, subset = (Pollutant =="bc_ng_m3"))
+
+fit_s_tow2_tod2_ufp <- update(fit_s_tow2_ufp, ~. + tod2)
+fit_s_tow2_tod2_bc <- update(fit_s_tow2_tod2_ufp, subset = (Pollutant =="bc_ng_m3"))
+
+fit_s_tow2_tod5_ufp <- update(fit_s_tow2_ufp, ~. + tod5)
+fit_s_tow2_tod5_bc <- update(fit_s_tow2_tod5_ufp,  subset = (Pollutant =="bc_ng_m3"))
+
+fit_s_day_tod5_ufp <- update(fit_s_tow2_tod5_ufp, ~. -time_of_week + factor(day, ordered = F))
+fit_s_day_tod5_bc <- update(fit_s_day_tod5_ufp, subset = (Pollutant =="bc_ng_m3"))
+
+```
+
+Calculate weighted annual averages based on predictions
+
+```{r}
+# season
+preds_s_ufp <- preds_s_ufp0 %>%
+  mutate(yhat = predict(object = fit_s_ufp, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "ufp_pt_cm3")
+
+preds_s_bc <- preds_s_bc0 %>%
+  mutate(yhat = predict(object = fit_s_bc, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "bc_ng_m3")
+
+preds_s <- rbind(preds_s_ufp, preds_s_bc) %>%
+  rename(regression_s = sum_yhat_wt)
+
+```
+
+```{r}
+# season-TOW2
+preds_s_tow2_ufp <- preds_s_tow2_ufp0 %>%
+  mutate(yhat = predict(object = fit_s_tow2_ufp, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "ufp_pt_cm3")
+
+preds_s_tow2_bc <- preds_s_tow2_bc0 %>%
+  mutate(yhat = predict(object = fit_s_tow2_bc, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "bc_ng_m3")
+
+preds_s_tow2 <- rbind(preds_s_tow2_ufp, preds_s_tow2_bc) %>%
+  rename(regression_s_tow2 = sum_yhat_wt)
+
+```
+
+```{r}
+# season-TOW2-TOD2
+preds_s_tow2_tod2_ufp <- preds_s_tow2_tod2_ufp0 %>%
+  mutate(yhat = predict(object = fit_s_tow2_tod2_ufp, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "ufp_pt_cm3")
+
+preds_s_tow2_tod2_bc <- preds_s_tow2_tod2_bc0 %>%
+  mutate(yhat = predict(object = fit_s_tow2_tod2_bc, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "bc_ng_m3")
+
+preds_s_tow2_tod2 <- rbind(preds_s_tow2_tod2_ufp, preds_s_tow2_tod2_bc) %>%
+  rename(regression_s_tow2_tod2 = sum_yhat_wt)
+
+```
+
+```{r}
+# season-TOW2-TOD5
+preds_s_tow2_tod5_ufp <- preds_s_tow2_tod5_ufp0 %>%
+  mutate(yhat = predict(object = fit_s_tow2_tod5_ufp, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "ufp_pt_cm3")
+
+preds_s_tow2_tod5_bc <- preds_s_tow2_tod5_bc0 %>%
+  mutate(yhat = predict(object = fit_s_tow2_tod5_bc, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "bc_ng_m3")
+
+preds_s_tow2_tod5 <- rbind(preds_s_tow2_tod5_ufp, preds_s_tow2_tod5_bc) %>%
+  rename(regression_s_tow2_tod5 = sum_yhat_wt)
+
+```
+
+```{r}
+# season-day-TOD5
+preds_s_day_tod5_ufp <- preds_s_day_tod5_ufp0 %>%
+  mutate(yhat = predict(object = fit_s_day_tod5_ufp, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "ufp_pt_cm3")
+
+preds_s_day_tod5_bc <- preds_s_day_tod5_bc0 %>%
+  mutate(yhat = predict(object = fit_s_day_tod5_bc, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "bc_ng_m3")
+
+preds_s_day_tod5 <- rbind(preds_s_day_tod5_ufp, preds_s_day_tod5_bc) %>%
+  rename(regression_s_day_tod5 = sum_yhat_wt)
+
+```
+
+```{r}
+ # merge regression predictions
+stops_l <- stops_l %>%
+  left_join(preds_s_day_tod5) %>%
+  left_join(preds_s_tow2_tod5) %>%
+  left_join(preds_s_tow2_tod2) %>%
+  left_join(preds_s_tow2) %>%
+  left_join(preds_s) 
+  
+```
 
 ```{r, include=T}
-#join all estimates
-annual <- ufp %>% 
-  ungroup() %>%
-  select(site_no, site_id, 
-         cov_names,
-         mean_uw,
-         ) %>%
-  unique() %>%
-
-  # --> ADD LATER WHEN HAVE MORE WINTER READINGS?
-  # left_join(s_tow2_tod2) %>%
-  # rename(mean_s_tow2_tod2 = mean_wt) %>%
-  
-  left_join(s_tow2) %>%
-  rename(mean_s_tow2 = mean_wt) %>%
-  left_join(s) %>%
-  rename(mean_s = mean_wt) %>%
-  left_join(yhats) %>%
-  select(contains("site"),
-         contains("mean"), contains("yhat"),
-         #mean_uw:yhat_m_day_hr, 
-         everything()) %>%
-  #drop stop_ids w/o geocovariates 
-  drop_na(cov_names) 
-
-method_names_all <- annual %>%
-  select(contains("mean_"), contains("yhat_")) %>%
+# create df for plotting 
+method_names_all <- stops_l %>% ungroup() %>%
+  select(contains(c("site_only", "regression"))) %>%
   names()
 
 #drop estimate/s that can only be calculated w/ regression
-method_names <- setdiff(method_names_all, c("yhat_s_tow2_tod5"))
+method_names <- setdiff(method_names_all, c("yhat_s_tow2_tod5", "regression_s_day_tod5"))
+
+annual <- stops_l %>% ungroup() %>%
+  select(site_no, site_id, Pollutant,
+         method_names_all) %>%
+  unique() 
 
 annual.l <- annual %>%
-  gather(key = "method_weight", value = "ufp", method_names_all) %>%
-  drop_na() %>%
-  separate(method_weight, into=c("method", "weight"), 
-                     sep = "_" , remove = F, extra = "merge") %>%
+  gather(key = "method_weight", value = "value", method_names_all) %>%
   mutate(
-    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2", "s_tow2_tod5"))
-  )
+    method = ifelse(grepl("site_only", method_weight), "site only", "regression"),
+    weight = ifelse(grepl("site_only", method_weight), substr(method_weight, 11, nchar(method_weight)), substr(method_weight, 12, nchar(method_weight))),
+    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2", "s_tow2_tod5", "s_day_tod5"))
+  ) %>%
+  drop_na(value)
 
 ```
-
-Disribution of annual UFP predictions.
-
+ 
 ```{r}
-#plots of sites included & estimate ranges by method
-sites_included_plot <- annual.l %>%
-  ggplot(aes(x=weight, fill=method)) + 
-  geom_histogram(stat = "count", position = "dodge") + 
-  labs(y = "sites included")
-
-method_estimate_distrib_plot <- annual.l %>%
-  ggplot(aes(y= ufp, x= weight, fill=method)) + 
-  geom_boxplot() + 
-  labs(
-    title = "Annual average UFP site estimates using various estimation methods and weights",
-    y = "UFP (pt/cm3)"
-  )
-
-ggarrange(
-  sites_included_plot,
-  method_estimate_distrib_plot, 
-  ncol = 1, 
-  heights = c(1,2)
-)
-
-#table 
-methods_table <- annual.l %>%
-  group_by(method, weight) %>%
-  distribution.table(var.string = "ufp") 
-
-names(methods_table) <- methods_table %>% names() %>% capitalize()
-  
-methods_table %>%
-  kable(caption = "Annual average site estimates using various estimation methods and weights") %>%
-  kable_styling()
-
-```
-
-```{r}
-#histograms
-## native scale 
 annual.l %>%
-  ggplot(aes(x=ufp, fill = weight)) + 
-  geom_histogram() + 
-  facet_grid(rows = vars(method), cols = vars(weight)) + 
-  labs(title = "Annual average site estimates using various methods and weights",
-       x = "UFP concentration  (pt/cm3)"
-       ) + 
-  theme(legend.position = "none")
-
-# log-transformed
-annual.l %>%
-  ggplot(aes(x=log(ufp), fill = weight)) + 
-  geom_histogram() + 
-  facet_grid(rows = vars(method), cols = vars(weight)) + 
-  labs(title = "Annual average site estimates using various methods and weights",
-       subtitle = "log-transformed UFP concentrations",
-       x = "Log UFP concentration (log pt/cm3)"
-       ) + 
-  theme(legend.position = "none")
-
-```
-
-Scatterplots to compare desired yhat_s_tow2_tod5 estimates to other site-specific averaging methods.
-
-```{r}
-rmse.digits. <- 0
-r2.digits. <- 2
-slope_digits. <- 1
-#compare predictsion vs observations
-p1 <- colo.plot(data.wide = annual,
-                    x.variable = "mean_uw",
-                    y.variable = "yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.
-                )
-
-p2 <- colo.plot(data.wide = annual,
-                    x.variable = "mean_s",
-                    y.variable = "yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-p3 <- colo.plot(data.wide = annual,
-                    x.variable = "mean_s_tow2",
-                    y.variable = "yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-# p4 <- colo.plot(data.wide = annual,
-#                     x.variable = "mean_s_tow2_tod2",
-#                     y.variable = "yhat_s_tow2_tod5",
-#                     rmse.digits = rmse.digits.,
-#                     r2.digits =  r2.digits.,
-#                     slope_digits = slope_digits.) #+
-  #theme(plot.background = element_rect(fill = NA, colour = "black", linetype = "solid"))
-
- 
-
- ggarrange(p1, p2, p3, # p4,  
-           common.legend = T, legend = "bottom"
-           ) %>%
-  annotate_figure(fig.lab = paste0("Comparison of desired regression-based estimates (yhat_s_tow2_tod5) to other site-specific averaging methods")
-                  )
- 
-```
-
-Method comparison plots.
-
-#### -->  eval=F
-
-```{r, fig.height = 8, eval = F}
-#TOD2
-annual.l.tod2 <- annual.l %>%
-  filter(site_id %in% s_tow2_tod2$site_id,
-         !weight %in% c("s_tow2_tod5")
-         ) 
-## ranges
-annual.l.tod2.rage <- annual.l.tod2 %>%
-  group_by(site_id, method) %>%
-  dplyr::summarize(
-    min = min(ufp),
-    max = max(ufp),
-    mean = mean(ufp))
-
-ufp_by_method(dt = annual.l.tod2, 
-               dt.range = annual.l.tod2.rage) 
-
-```
-
-```{r, fig.height=20, fig.width=8}
-
-annual.l.tow2 <- annual.l %>%
-  filter(site_id %in% s_tow2$site_id,
-         !weight %in% c("s_tow2_tod5",
-                        "s_tow2_tod2"
-                        )) %>%
-  mutate(group = cut(site_no, breaks = 4, labels = F))
-
-## ranges
-annual.l.tow2.rage <- annual.l.tow2 %>%
-  group_by(group, site_id, method) %>%
-  dplyr::summarize(
-    min = min(ufp),
-    max = max(ufp),
-    mean = mean(ufp))
-
-ufp_by_method(dt = annual.l.tow2, 
-               dt.range = annual.l.tow2.rage) + 
-  facet_wrap(~group, 
-             scales = "free", 
-             ncol=1
-             )
-
-```
- 
-
-# Characterize sites w/ smallest & largest inter-method differences 
-
-- sites w/ high inter-method variabiitly have high extreme values, while those w/ low inter-method variability have either: a) no or b) both high and low extreme values
-
-```{r}
-# TOD2
-tod2 <- annual %>% drop_na()
-
-# not including yhat_m_day_hr b/c only available for regression method
-tod2$min <- apply(tod2[,method_names], 1, function(x)  range(x)[1])  
-tod2$max <- apply(tod2[,method_names], 1, function(x)  range(x)[2])  
-tod2$diff <- tod2$max - tod2$min  
-
-#plot(tod2$diff, apply(tod2[,method_names], 1, function(x)  sd(x)))
-
-```
-
-#### ---> mean_s_tow2_tod2
-
-```{r}
-# TOW2
-tow2 <- annual %>% 
-  select(#-mean_s_tow2_tod2,
-         -yhat_s_tow2_tod2,
-         -yhat_s_tow2_tod5
-         ) %>%
-  drop_na()  
-
-method_names_tow2 <- method_names[!grepl("s_tow2_tod2",method_names)]
-tow2$min <- apply(tow2[,method_names_tow2], 1, function(x)  range(x)[1])
-tow2$max <- apply(tow2[,method_names_tow2], 1, function(x)  range(x)[2])
-tow2$diff <- tow2$max - tow2$min 
-
-```
-
-
-```{r, fig.height= 8}
-left_join(tow2, site_locations, by= "site_id") %>%
-map_fn(color_by = "diff", map_title = "Range in inter-method UFP estimates", 
-       #include_study_area = T
-       
-       )
-
-```
-
-
-Predictors of estimate range. What covariates predict whether annual averages may be effected by estimation method?
-
-```{r}
-high_var_quant <- 0.95
-#create categorical dummy variables
-df <- tow2 %>% 
-  mutate(high_variability = factor(ifelse(diff > quantile(diff, high_var_quant), 1, 0))) %>%
-  select(high_variability, cov_names)  
-
-high_var_lasso <- lasso_fn(dt = df, x = cov_names, y_name = "high_variability", family. = "binomial",
-                           #lambda. = 0.02
-                           )
-
-#distribution of UFP values by lasso variables
-tow2 %>%
-  gather("cov", "value", high_var_lasso$results$cov) %>%
-  ggplot(aes(x=value, y = diff)) +
-  geom_point(alpha=0.3) + 
-  geom_smooth() + 
-  facet_wrap(~cov, scales = "free") + 
-  labs(title = paste0("covariates most predictive of high variability (range > ",
-                      high_var_quant, " quantile) in annual estimates \nwhen using different methods"),
-       y = "difference between estimates (pt/cm3)"
-       )
-
-```
-
-
-plot of estimates for highly variable sites
-
-```{r}
-
-tow2_high_var <- tow2 %>%
-  filter(diff > quantile(diff, high_var_quant)) %>%
-  gather(key = "method_weight", value = "ufp", method_names_tow2) %>%
-  drop_na() %>%
-  separate(method_weight, into=c("method", "weight"),
-                     sep = "_" , remove = F, extra = "merge") %>%
-  mutate(
-    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2", "m_day_hr"))
-  )
-
-## ranges
-tow2_high_var_range <- tow2_high_var %>%
-  group_by(site_id, method) %>%
-  dplyr::summarize(
-    min = min(ufp),
-    max = max(ufp),
-    mean = mean(ufp))
-
-ufp_by_method(dt = tow2_high_var, 
-               dt.range = tow2_high_var_range)  + 
-labs(title = paste0("Annual average (10-month) estimates for sites with most inter-method variability \n(n = ",
-                    length(unique(tow2_high_var$site_id)), 
-                    ", range above the ", high_var_quant, " quantile", ")")
-       )
-
-high_var_sites <- unique(tow2_high_var$site_id)
-
-```
-
-```{r}
-# tow2_high_var$site_id %>%
-#   unique() %>%
-#   sort()
-
-```
- 
- 
-# ANOVA & LS Regression
-
-- most variation comes from site, tiny (but significant) amount from estimation method
-- mean_mo and mean_sea estimates significantly lower than two2 and tow2_tod2
-
-```{r, include=T}
-#### Sea_TOW2_TOD2 
- 
-# #ANOVA for TOD2
-# tod2.anova <- tod2 %>% 
-#   select(site_id:mean_sea) %>%
-#   gather("method", "value", -site_id, -route)  
-# 
-# anovaVCA(value ~ method + site_id, Data=as.data.frame(tod2.anova))
-#  
-# tod2.lm1a <- tod2.anova %>%                               #mean_sea_tow2_tod2
-#   mutate(method = relevel(factor(method, ordered = F), ref = "mean_sea_tow2_tod2")) %>% 
-#   lm(value ~ method + site_id, data = .) 
-# 
-# anova(tod2.lm1a) %>% kable()
-# summary(tod2.lm1a)
-# #CI
-# "confidence intervals"
-# confint(tod2.lm1a)[c(1:4),]
-
-
-```
-
-## Compare averaging method effects (at the annual avg level)     
-UFP_annual_avg ~ method + site_id
-
-Using sites with Season_TOW2 estimates. Only showing first few site_effects in linear regression.
-
-### --> clean up tables for final presentation. what % of total variability is between sites? within sites (temporal)?
-
-```{r, eval=T}
-#ANOVA for TOW2 
- tow2.anova <- tow2 %>%
-  select(site_id, method_names_tow2) %>%
-  gather("method", "value", -site_id) %>%
-  ungroup() %>%
-  mutate(
-    method = as.factor(method),
-    site_id = as.factor(site_id)) %>%
-  as.data.frame()
-
-anovaVCA(value ~ method + site_id, Data = tow2.anova)
- 
-tow2.lm1a <- tow2.anova %>%  
-  mutate(method = relevel(factor(method, ordered = F), ref = "mean_s_tow2")) %>% 
-  lm(value ~ method + site_id, data = .)
-
-anova(tow2.lm1a) #%>% kable()
-summary(tow2.lm1a)$coef[1:10,]
-#CI
-#confint(tow2.lm1a)[c(1:7),]
-
-```
-
-## Compare temporal effects (at the stop-level avg level)      
-UFP_stop_medians ~ season + tow + tod + site_id 
-
-How do the seasonal/TOW/TOD effects impact annual mean UFP estimates relative to the method effects (~100-200 pt/cm3)
-
-```{r, include=T} 
-# Using sites w/ season-TOW2-TOD2 estimates.
-
-# tod.sites <- tod2$site_id
-# 
-# tod2.stops <- ufp %>%
-#   filter(site_id %in% tod.sites) %>%
-#   as.data.frame()
-# 
-# anovaVCA(ptrak~ season + time_of_week + tod2 + site_id,  Data = tod2.stops)
-# tod2_lm1 <- lm(ptrak ~ season + time_of_week + tod2 + site_id, data = tod2.stops)
-# anova(tod2_lm1) #%>% kable()
-# summary(tod2_lm1) 
-#   
-# anovaVCA(ptrak ~ season + day + hour + site_id,  Data = tod2.stops)
-# tod2_lm2 <- lm(ptrak ~ season + factor(day, ordered = F) + factor(hour) + site_id, data = tod2.stops)
-# anova(tod2_lm2) #%>% kable()
-
- 
-```
-
-Using all sites. Only showing first few site_effects in linear regression.
-
-```{r} 
-#using all data 
-#anovaVCA(ptrak ~ season + time_of_week + tod2 + site_id,  Data = as.data.frame(ufp))
-# tow2_lm1 <- lm(ptrak ~ season + time_of_week + tod2 + site_id, data = ufp)
-# anova(tow2_lm1) %>% kable()
-# summary(tow2_lm1) #$coef #[c(1:6),]
-
-anovaVCA(ptrak ~ season + day + hour + site_id,  Data = as.data.frame(ufp))
-tow2_lm2 <- lm(ptrak ~ season + factor(day, ordered = F) + factor(hour) + site_id, data = ufp)
-anova(tow2_lm2)  
-coef(summary(tow2_lm2))[c(1:35),]
-
-```
-
-# Compare the impact of annual average estimation method on LUR predictions  
-
-Fitting LUR using different averaging methods for UFP; plotting observed averages vs model predictions.
-
-Using season-TOW2 estimates (n = `r nrow(tow2)`). 
-
-Does not include AQS sites.
-
-```{r}
-reg_predictors <- annual %>% lasso_fn(x_names = cov_names, y_name = "yhat_s_tow2_tod2", 
-           lambda. = 800
-           )
-reg_predictors <- reg_predictors$results$cov
-
-```
-
-## Values in native scale
-
-```{r, fig.height=8}
-annual_with_LUR <- annual %>%
-  #drop AQS sites from here
-  filter(grepl("MS", site_id)) %>%
-  save.pred.fn(y_name = "mean_s_tow2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "mean_s", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "mean_uw", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s_tow2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_uw", x_names = reg_predictors) %>%
-
-  #save.pred.fn(y_name = "mean_s_tow2_tod2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s_tow2_tod2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s_tow2_tod5", x_names = reg_predictors)
-
-rmse.digits. <- 0
-r2.digits. <- 3
-slope_digits. <- 2
-#compare predictsion vs observations
-LUR_mean_s_tow2_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "mean_s_tow2",
-                    y.variable = "LUR_mean_s_tow2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-LUR_mean_s_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "mean_s",
-                    y.variable = "LUR_mean_s",
-                   rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-LUR_mean_uw_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "mean_uw",
-                    y.variable = "LUR_mean_uw",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-# LUR_mean_s_tow2_tod2_plot <- colo.plot(data.wide = annual_with_LUR,
-#                     x.variable = "mean_s_tow2_tod2",
-#                     y.variable = "LUR_mean_s_tow2_tod2",
-#                     rmse.digits = rmse.digits.,
-#                     r2.digits =  r2.digits.,
-#                     slope_digits = slope_digits.)
-
-
-LUR_yhat_s_tow2_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "yhat_s_tow2",
-                    y.variable = "LUR_yhat_s_tow2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-LUR_yhat_s_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "yhat_s",
-                    y.variable = "LUR_yhat_s",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-LUR_yhat_uw_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "yhat_uw",
-                    y.variable = "LUR_yhat_uw",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-LUR_yhat_s_tow2_tod2_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "yhat_s_tow2_tod2",
-                    y.variable = "LUR_yhat_s_tow2_tod2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-LUR_yhat_s_tow2_tod5_plot <- colo.plot(data.wide = annual_with_LUR,
-                    x.variable = "yhat_s_tow2_tod5",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-ggarrange(#LUR_mean_s_tow2_tod2_plot,
-          LUR_mean_s_tow2_plot,
-          LUR_mean_s_plot ,
-          LUR_mean_uw_plot,
-          LUR_yhat_s_tow2_tod2_plot,
-          LUR_yhat_s_tow2_plot,
-          LUR_yhat_s_plot,
-          LUR_yhat_uw_plot,
-          LUR_yhat_s_tow2_tod5_plot,
-           common.legend = T, legend = "bottom"
-          ) %>%
-  annotate_figure(fig.lab = paste0("Site UFP: Method estimates vs LUR predictions (in-sample)"),
-                  bottom = paste0("UFP ~", paste(reg_predictors, collapse = " + "))
-                  )
-
-```
-
-## Log-transformed values 
-
-All values with tow2 estimates.
-
-```{r, fig.height=8}
-#save lm predictions for dataset
-log_annual_with_LUR <- annual %>%
-  #drop AQS sites from here
-  filter(grepl("MS", site_id)) %>%
-  # log transform estimates
-  mutate_at(vars(contains("mean_"), contains("yhat_")), ~log(.)) %>%
-  save.pred.fn(y_name = "mean_s_tow2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "mean_s", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "mean_uw", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s_tow2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_uw", x_names = reg_predictors) %>%
-
-  #save.pred.fn(y_name = "mean_s_tow2_tod2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s_tow2_tod2", x_names = reg_predictors) %>%
-  save.pred.fn(y_name = "yhat_s_tow2_tod5", x_names = reg_predictors)
-
-rmse.digits. <- 3
-r2.digits. <- 3
-slope_digits. <- 3
-#compare predictsion vs observations
-log_LUR_mean_s_tow2_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "mean_s_tow2",
-                    y.variable = "LUR_mean_s_tow2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.) +
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-log_LUR_mean_s_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "mean_s",
-                    y.variable = "LUR_mean_s",
-                   rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.) +
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-log_LUR_mean_uw_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "mean_uw",
-                    y.variable = "LUR_mean_uw",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.) +
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-log_LUR_yhat_s_tow2_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "yhat_s_tow2",
-                    y.variable = "LUR_yhat_s_tow2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.) +
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-# log_LUR_mean_s_tow2_tod2_plot <- colo.plot(data.wide = log_annual_with_LUR,
-#                     x.variable = "mean_s_tow2_tod2",
-#                     y.variable = "LUR_mean_s_tow2_tod2",
-#                     rmse.digits = rmse.digits.,
-#                     r2.digits =  r2.digits.,
-#                     slope_digits = slope_digits.)+
-#   scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-#   scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-log_LUR_yhat_s_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "yhat_s",
-                    y.variable = "LUR_yhat_s",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.) +
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-log_LUR_yhat_uw_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "yhat_uw",
-                    y.variable = "LUR_yhat_uw",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.) +
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-log_LUR_yhat_s_tow2_tod2_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "yhat_s_tow2_tod2",
-                    y.variable = "LUR_yhat_s_tow2_tod2",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)+
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-log_LUR_yhat_s_tow2_tod5_plot <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "yhat_s_tow2_tod5",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)+
-  scale_x_continuous(sec.axis = sec_axis(~ exp(.))) +
-  scale_y_continuous(sec.axis = sec_axis(~ exp(.)))
-
-ggarrange(#log_LUR_mean_s_tow2_tod2_plot,
-          log_LUR_mean_s_tow2_plot,
-          log_LUR_mean_s_plot,
-          log_LUR_mean_uw_plot,
-          log_LUR_yhat_s_tow2_tod2_plot,
-          log_LUR_yhat_s_tow2_plot,
-          log_LUR_yhat_s_plot,
-          log_LUR_yhat_uw_plot,
-          log_LUR_yhat_s_tow2_tod5_plot,
-           common.legend = T, legend = "bottom" 
-          ) %>%
-  annotate_figure(fig.lab = paste0("Site UFP: Method estimates vs LUR predictions (in-sample)"),
-                  bottom = paste0("log UFP ~", paste(reg_predictors, collapse = " + "))
-                  )
-
-```
-
-### Compare LUR predictions from the desired annual average estimates (yhat_s_tow2_tod5) to predictions from other annual average estimates
- 
-```{r}
-# yhat_s_tow2_tod5 vs other yhat methods
-rmse.digits. <- 2
-r2.digits. <- 2
-slope_digits. <- 2
-p1 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_yhat_s_tow2_tod2",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-p2 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_yhat_s_tow2",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-p3 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_yhat_s",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-p4 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_yhat_uw",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-ggarrange(p1, p2, p3, p4,  
-           common.legend = T, legend = "bottom"
-           ) %>%
-  annotate_figure(fig.lab = paste0("Comparison of LUR predictions"),
-                  bottom = paste0("UFP ~", paste(reg_predictors, collapse = " + "))
-                  )
-
-```
-
-```{r}
-# yhat_s_tow2_tod5 vs site-specific mean methods
-# p1 <- colo.plot(data.wide = log_annual_with_LUR,
-#                     x.variable = "LUR_mean_s_tow2_tod2",
-#                     y.variable = "LUR_yhat_s_tow2_tod5",
-#                     rmse.digits = rmse.digits.,
-#                     r2.digits =  r2.digits.,
-#                     slope_digits = slope_digits.)
-p2 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_mean_s_tow2",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-p3 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_mean_s",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-p4 <- colo.plot(data.wide = log_annual_with_LUR,
-                    x.variable = "LUR_mean_uw",
-                    y.variable = "LUR_yhat_s_tow2_tod5",
-                    rmse.digits = rmse.digits.,
-                    r2.digits =  r2.digits.,
-                    slope_digits = slope_digits.)
-
-ggarrange(#p1, 
-  p2, p3, p4,  
-           common.legend = T, legend = "bottom"
-           ) %>%
-  annotate_figure(fig.lab = paste0("Comparison of LUR predictions"),
-                  bottom = paste0("UFP ~", paste(reg_predictors, collapse = " + "))
-                  )
-```
-
-### ID high residuals: concentrations being missed by LUR    
-
-Map the residuals 
-
-```{r, fig.height= 8}
-left_join(annual_with_LUR, site_locations, by = "site_id") %>%
-  map_fn(color_by = "resid_yhat_s_tow2_tod5")
-
-```
-
-Using log yhat_s_tow2_tod5   
-
-```{r}
-annual.copy <- annual
-#annual <- annual.copy
-
-high.quantile <- 0.95
-
-#save lm predictions & residuals for dataset
-annual <- annual %>%
-  # log transform estimates
-  mutate_at(vars(contains("mean_"), contains("yhat_")), ~log(.)) %>%
-  save.pred.fn(y_name = "yhat_s_tow2_tod5", x_names = reg_predictors) %>%
-  mutate(
-    residual_lvl = ifelse(yhat_s_tow2_tod5 >quantile(yhat_s_tow2_tod5, high.quantile), "high",
-                          ifelse(yhat_s_tow2_tod5 < quantile(yhat_s_tow2_tod5, (1-high.quantile)), "low", "normal")
-                          )
-    ) 
-  
-#compare predictsion vs observations
-colo.plot(data.wide = annual,
-          x.variable = "yhat_s_tow2_tod5", x.label = "estimate",
-          y.variable = "LUR_yhat_s_tow2_tod5", y.label = "LUR",
-          rmse.digits = 2,
-          mytitle =paste0("Annual average estimates (yhat_s_tow2_tod5) vs LUR prediction (in-sample)"),
-          mycaption =paste0("10-month avg log UFP ~", reg_predictors),
-          col.by = "residual_lvl")
-
-```
-
-```{r}
-# Lasso to find variables predictive of residuals
-residuals_lasso <- lasso_fn(dt = annual, x_names = cov_names, y_name = "resid_yhat_s_tow2_tod5", 
-                            lambda. = 0.03
-                            )
-
-covs <- residuals_lasso$results$cov
-
-annual.scaled <- annual %>%
-  select(site_id, contains("yhat_s_tow2_tod5"), residual_lvl, 
-         covs) %>%
-  mutate_at(vars(covs), ~scale(.)) %>%
-  as.data.frame()
-
-annual.scaled %>%
-  ggplot(aes(x=resid_yhat_s_tow2_tod5, 
-             fill=residual_lvl)) + 
-  geom_histogram() + 
-  labs(title = "Annual average (yhat_s_tow2_tod5) site concentration",
-       x = "UFP concentration (pt/cm3) "
-       )
-
-#distribution of UFP values by lasso variables
-annual.scaled %>%
-  gather("cov", "value", covs) %>%
-  ggplot(aes(x=value, fill=residual_lvl)) +
-  geom_density(alpha=0.3) + 
-  facet_wrap(~cov, scales = "free")
-
-myquant <- 0.98
-
-```
-
-```{r}
-#   
-# annual.scaled %>%
-#   filter(resid_yhat_s_tow2_tod5 > quantile(resid_yhat_s_tow2_tod5, myquant)) %>%
-#   select(site_id, 
-#          residual_log_ufp = resid_yhat_s_tow2_tod5
-#          )  %>%
-#   arrange(desc(residual_log_ufp)) #resid_yhat_s_tow2 #site_id
-
-```
-
-
-```{r}
-# # annual average estimates   
-
-# # #Export csv w/ site lat/long
-# site_averages <- annual.scaled %>% 
-#   left_join(unique(ufp[c("site_id", "site_lat", "site_long")])) %>%
-#   select(contains("site"), everything()) %>%
-#   rename(latitude = site_lat,
-#          longitude = site_long)
-# 
-# write.csv(site_averages,
-#           file =  file.path("Data", "Aim 2", "Mobile Monitoring", "site_averages.csv"),
-#           row.names = F)
-
-```
-
-# Correlation between observations
-
-### --> ? show that obsrvations,e.g., diff times of day (when we don't always have observations) are correlated, (?) adjusted for site. 
-
-Hoek et al. (2008) review of LUR approaches cites Sebret et al.'s (2000) work. saw correlations between four (seasonal) 14-dy sampling ranging form 0.63-0.98
-
-```{r}
-
-```
-
-
-# Final annual average UFP concentrations
-
-Select an estimate to use.
-
-```{r}
-# median stop UFP ~ site + tow2 + tod5
-# Prediction fn: fit.s.tow.tod5
-
-annual_ufp_and_cov <- left_join(site_locations, preds.s.tow.tod5) %>%
-  rename(ufp = contains("yhat")) %>%
-  mutate(log_ufp = log(ufp)) %>%
-  left_join(cov_mm)  %>%
-  drop_na()
-    
-# #columns w/ NAs 
-# annual_ufp_and_cov %>%
-#   select_if(~any(is.na(.))) %>%
-#   names()
-
-```
-
-Map Annual Average estimates from selected weighted and unweighted regression methods. Spatial patterns are nearly identical.
-
-
-```{r, fig.height=8}
-
-main_map <- annual_ufp_and_cov %>% 
-  map_fn(map_title = "Primary: yhat_s_tow2_tod5 estimates")
-  
-alt_map <- suppressWarnings(left_join(site_locations, preds.uw, by= "site_id") %>%
-  rename(ufp = contains("yhat")) %>%
-  left_join(cov_mm, by= "site_id")  %>%
-  drop_na()) %>% 
-  map_fn(map_title = "Alternative: unweighted means")
-
-ggarrange(main_map, alt_map, 
-          ncol = 2) %>% 
-  annotate_figure(top = "Annual average UFP concentrations at mobile monitoring locations")
-
-```
-
-Table and plots
-
-```{r}
-annual_ufp_and_cov %>%
-  # mutate(stop = ifelse(grepl("MS", site_id), "ACT", "AQS")) %>%
-  # group_by(stop) %>%
-  distribution.table(var.string = "ufp") %>%
-  kable(caption = "Annual average UFP concentrations to be used in UK", 
-        col.names = c(#"Stop kind", 
-          "N", "Mean (SD)", "Median (IQR)", "Min", "Max")
-        ) %>%
-  kable_styling()
-
-```
-
-
-Correlated geocovariates
-
-```{r, fig.height=8, include=F}
-# don't include - have this at the end
-
-geo_cor <- annual_ufp_and_cov %>%
-  select(log_ufp, cov_names) %>%
-  cor(use = "complete.obs") %>%
-  as.data.frame() %>%
-  select(log_ufp) %>%
-  rownames_to_column() %>%
-  arrange(desc(abs(log_ufp))) %>%
-  filter(rowname != "log_ufp")  %>%
-  rename(cov = rowname,
-         cor_r = log_ufp) %>%
-  # separate buffers from covariates
-  split_cov_name(cov = "cov")
-
-#for use later in LURs
-#reg_predictors <- paste0(geo.cor$cov[1:5], collapse = " + ")
-
-my.alpha <- 0.3
-
-geo_cor %>%
-  #drop these in first points
-  drop_na(buffer) %>%
-  ggplot(aes(x = cor_r, y = cov)) +
-  geom_point(aes(size=buffer),
-             shape=1,
-             alpha=my.alpha) +
-  scale_size(breaks = c(min(geo_cor$buffer, na.rm = T),
-                        max(geo_cor$buffer, na.rm = T)
-                        )) +  
-  geom_point(data = geo_cor[is.na(geo_cor$buffer),],
-           alpha=my.alpha,
-           aes(shape="")) +
-  geom_vline(xintercept=0,
-             linetype="solid",
-             alpha=my.alpha) +
-  labs(#x = paste0("Loading"),
-       y = "Geocovariate",
-       x = "Correlation (R) with Stop UFP Concentrations",
-       shape= "non-buffer",  
-       title = "Correlation (R) between covariates and stop UFP concentrations"
+  ggplot(aes(x=weight, y = ..count.., fill=method)) +
+  geom_bar(position = "dodge") + 
+  facet_wrap(~Pollutant, #ncol=1
+             ) + 
+  labs(title = "Number of sites included in annual average estimation methods",
+       y = "No. Sites Included",
+       x = "Weight",
+       fill = "Averaging Method"
        ) +
+  geom_text(stat = "count", 
+            aes(label = ..count..),
+            hjust= 1,  
+            position = position_dodge(width = 1)
+            ) + 
+  coord_flip() +
   theme(legend.position = "bottom")
 
 ```
 
+Disribution of annual estimates.
+
+Annual average estimates are mostly similar for both UFPs and BC using different averaging methods (site only data vs regression) and different weights (e.g., unweighted; season; season and time-of-week). Site-only estimates weighted by season, time of week and time of day (2 categories) appear to be differently distributed than other estimates, though this is likely due to the small sample size.
+
 ```{r}
-# lasso for variables most predictive of annual avg ufp
-lasso_results <- lasso_fn(dt = annual_ufp_and_cov, x = cov_names, y = "log_ufp", 
-                          lambda. = 0.06)
+#histograms
+annual.l %>%
+  #filter(Pollutant == "ufp_pt_cm3") %>%
+  ggplot(aes(x=value, fill = method_weight)) +   
+  geom_density(alpha=0.2) + 
+  facet_wrap(~Pollutant, scales = "free"
+             ) + 
+  labs(title = "Annual average site concentration estimates by method and weight",
+       x = "Annual Avg Concentration Estimate",
+       fill = "AveragingMethod_Weight"
+       )  + 
+  theme(legend.position = "bottom")
 
-covs <- lasso_results$results$cov 
+```
 
-annual_ufp_and_cov %>%
-  select(log_ufp, covs) %>%
-  gather("cov", "value", covs) %>%
-  ggplot(aes(x=value, y = log_ufp)) + 
-  geom_point(alpha = 0.3) +
-  geom_smooth() +
-  facet_wrap(~cov, scales = "free") + 
-  labs(title = "Annual average UPF concentrations by highly correlated covariates", 
-       y = "UFP (pt/cm3)"
-       )
+Scatterplots comparing annual average site estimates from the desired regression estimation method that adjusts for season, time of week (weekend vs weekday) and time of day (5 categories; yhat_s_tow2_tod5) to site-only averaging methods.
+
+- UFP 
+
+The regression estimates are similar to all site-only estimation methods.
+
+```{r}
+# test <- annual %>%
+#   #filter(Pollutant == "ufp_pt_cm3") %>%
+#   select(Pollutant, regression_s_tow2_tod5, contains("site_only")) %>%
+#   gather(key = "variable", value = "value", contains("site_only")) %>%
+#   drop_na(value)
+# 
+# test %>%
+#   filter(Pollutant == "ufp_pt_cm3") %>%
+#   colo.plot(x.variable = "value", y.variable = "regression_s_tow2_tod5") +
+#   facet_wrap(~variable)
+
+plot_pollutant <- "ufp_pt_cm3"
+
+p1 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_uw", y.variable = "regression_s_tow2_tod5")
+
+p2 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_s", y.variable = "regression_s_tow2_tod5")
+
+p3 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_s_tow2", y.variable = "regression_s_tow2_tod5")
+
+p4 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_s_tow2_tod2", y.variable = "regression_s_tow2_tod5")
+
+ ggarrange(p1, p2, p3, p4,  
+           common.legend = T, legend = "bottom") %>%
+  annotate_figure(fig.lab = paste0("UFP annual average site concentration estimates from desired regression estimation method and site-only averaging methods"))
  
 ```
 
-
-
-## AQS sites
-
-- ??? leavingg them out b/c:    
-a) using these to validate final annual average choice    
-b) AQS sites may not necesarily be representative of where ACT participants live, but are within our study area (thus, we may not want them to influence the modeling choices we make?)   
+- BC
 
 ```{r}
-aqs_ufp <- annual_ufp_and_cov %>%
-  select(site_id, ufp) %>%
-  filter(grepl("MC", site_id)) %>%
-  left_join(unique(mm_stops[c("site_id", "aqs_id", "aqs_location")])) %>%
-  select(site_id, aqs_location, ufp) %>%
-  arrange(desc(ufp)) #%>%
-  
-aqs_lvls <- as.character(aqs_ufp$aqs_location)
+plot_pollutant <- "bc_ng_m3"
 
-# table of annual avgs
-aqs_ufp %>% kable(
-  caption = "Annual average UFP concentration estimates at co-location AQS sites",
-  col.names = c("Site ID", "Location", "UFP (pt/cm3)"), 
-  digits = 0
-  ) %>%
+p1 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_uw", y.variable = "regression_s_tow2_tod5")
+
+p2 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_s", y.variable = "regression_s_tow2_tod5")
+
+p3 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_s_tow2", y.variable = "regression_s_tow2_tod5")
+
+p4 <- annual %>%
+  filter(Pollutant == plot_pollutant) %>%
+  colo.plot(x.variable = "site_only_s_tow2_tod2", y.variable = "regression_s_tow2_tod5")
+
+ ggarrange(p1, p2, p3, p4,  
+           common.legend = T, legend = "bottom") %>%
+  annotate_figure(fig.lab = paste0("BC annual average site concentration estimates from desired regression estimation method and site-only averaging methods"))
+ 
+```
+
+## Method comparison plots.
+
+### Comparison plots of all locations where sampling occurred every season, time of week and time of day (2 categories) combination
+
+### ---> update UFP, BC labels here & below
+
+```{r}
+annual_subset_tod2 <- annual %>%
+  select(-c(regression_s_day_tod5, regression_s_tow2_tod5)) %>%
+  drop_na(site_only_s_tow2, site_only_s_tow2_tod2) %>%
+  gather(method_weight, value, contains(c("site_only", "regression"))) %>%
+  mutate(
+    method = ifelse(grepl("site_only", method_weight), "site only", "regression"),
+    weight = ifelse(grepl("site_only", method_weight), substr(method_weight, 11, nchar(method_weight)), substr(method_weight, 12, nchar(method_weight))),
+    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2" #"s_tow2_tod5", "s_day_tod5"
+                                       )))
+
+tod2_no_sites <- length(unique(annual_subset_tod2$site_id))
+
+```
+
+Annual average UFP and BC estimates are similar across averaging methods for sites with observations each time of day (2 categories), time of week (weekend vs. weekday) and season combination. 
+
+```{r}
+annual_subset_tod2 %>%
+  ggplot(aes(x=factor(site_no), y=value, col=method, shape=weight)) + 
+  geom_point(alpha=0.7) + 
+  facet_wrap(~Pollutant, scales="free") +
+  theme(legend.position = "bottom") +
+  labs(title = "Annual average estimates at sites by averaging method and weight",
+       subtitle = paste0("N = ", tod2_no_sites, " sites total"),
+       #subtitle = paste0("N = ", length(unique()), " sites"),
+       y = "Annual Average Concentration Estimate",
+       x = "Site No."
+       ) +
+  coord_flip() 
+
+#+ scale_x_continuous(breaks = seq(0, tow2_no_sites, by = 20))
+#scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+
+```
+
+### Comparison plots of all locations where sampling occurred every season and time of week combination
+
+```{r}
+annual_subset_tow2 <- annual %>%
+  select(-c(site_only_s_tow2_tod2,
+            regression_s_day_tod5, regression_s_tow2_tod5, regression_s_tow2_tod2)) %>%
+  drop_na(site_only_s_tow2) %>%
+  gather(method_weight, value, contains(c("site_only", "regression"))) %>%
+  mutate(
+    method = ifelse(grepl("site_only", method_weight), "site only", "regression"),
+    weight = ifelse(grepl("site_only", method_weight), substr(method_weight, 11, nchar(method_weight)), substr(method_weight, 12, nchar(method_weight))),
+    weight = factor(weight, levels = c("uw", "s", "s_tow2" #"s_tow2_tod2", "s_tow2_tod5", "s_day_tod5"
+                                       )))
+
+tow2_no_sites <- length(unique(annual_subset_tow2$site_id))
+
+```
+
+```{r, fig.height=10}
+annual_subset_tow2 %>%
+  ggplot(aes(x=site_no, y=value, col=method, shape=weight)) + 
+  geom_point(alpha=0.7) + 
+  facet_wrap(~Pollutant, scales="free") +
+  theme(legend.position = "bottom") +
+  labs(title = "Annual average estimates at sites by averaging method and weight",
+       subtitle = paste0("N = ", tow2_no_sites, " sites"),
+       #subtitle = paste0("N = ", length(unique()), " sites"),
+       y = "Annual Average Concentration Estimate",
+       x = "Site No."
+       ) +
+  coord_flip() 
+
+#+ scale_x_continuous(breaks = seq(0, tow2_no_sites, by = 20))
+#scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
+
+```
+
+Zoomed in plots highlight the small within-site variability of estimation methods.
+
+```{r}
+set.seed(1)
+no_sites <- 20
+
+annual_subset_tow2 %>%
+  #select a random sample of sites (to try to get low/high concentrations from less correlated sites)
+  filter(site_id %in% sample(site_id, size = no_sites, replace = F)) %>%
+  ggplot(aes(x=factor(site_no), y=value, col=method, shape=weight)) + 
+  geom_point(alpha=0.7) + 
+  facet_wrap(~Pollutant, scales="free") +
+  theme(legend.position = "bottom") +
+  labs(title = "Annual average estimates by averaging method and weight for a random sample of sites",
+       subtitle = paste0("N = ", no_sites, " sample sites"),
+       y = "Annual Average Concentration Estimate",
+       x = "Site No."
+       )  +
+  coord_flip()
+  
+```
+ 
+# ANOVA for annual averages
+
+annual concentration ~ method + site_id
+
+- UFP
+
+Almost all of the variation in UFP annual average concentration occurs between sites, with less than 1% occurring as a result of using different averaging (site-only vs regression) and weight (e.g., unweighted vs season) methods.
+
+```{r}
+# using all of the observations to characterize variability 
+anovaVCA(value ~ method_weight + site_id, Data = as.data.frame(subset(annual.l, Pollutant == "ufp_pt_cm3")))$aov.tab %>%
+  kable(caption = "Variance components analysis for annual average UFP",
+        digits = 1) %>%
   kable_styling()
 
-#plot
-aqs_ufp %>%
-  mutate(aqs_location = factor(aqs_location, levels = aqs_lvls)) %>%
-  ggplot(aes(x = aqs_location, y = ufp)) + 
-  geom_bar(stat="identity") + 
-  labs(
-    x = "AQS Site",
-    y = "UFP (pt/cm3)",
-    title = "Annual average UFP concentration estimates at AQS sites"
-  )
+```
+
+Though site ID and averaging method are both significantly associated with variation in annual average UFP concentrations.  
+
+```{r}
+ufp_annual_anova <- annual.l %>%
+  filter(Pollutant == "ufp_pt_cm3") %>%
+  lm(value ~ method_weight + site_id, data = .)
+
+anova(ufp_annual_anova) %>%
+  kable(caption = "ANOVA results for UFP annual average concentrations") %>%
+  kable_styling()
+
+```
+
+The effect of estimation method and weight on the annual average is not scientifically meanigful, however. The table only shows effect estimate for a few sites.
+
+```{r}
+summary(ufp_annual_anova)$coef[1:20,] %>%
+  kable(caption = "Least squares regression of annual average UFP based by site ID and averaging method",
+        digits = 2) %>% 
+  kable_styling()
+
+```
+
+- BC
+
+Similar results as UFP.
+
+```{r}
+# using all of the observations to characterize variability 
+anovaVCA(value ~ method_weight + site_id, Data = as.data.frame(subset(annual.l, Pollutant == "bc_ng_m3")))$aov.tab %>%
+  kable(caption = "Variance components analysis for annual average BC",
+        digits = 1) %>%
+  kable_styling()
+
+```
+
+```{r}
+bc_annual_anova <- annual.l %>%
+  filter(Pollutant == "bc_ng_m3") %>%
+  lm(value ~ method_weight + site_id, data = .)
+
+anova(bc_annual_anova) %>%
+  kable(caption = "ANOVA results for BC annual average concentrations") %>%
+  kable_styling()
+
+```
+
+```{r}
+summary(bc_annual_anova)$coef[1:20,] %>%
+  kable(caption = "Least squares regression of annual average BC based by site ID and averaging method",
+        digits = 2) %>% 
+  kable_styling()
 
 ```
 
 # Sensitivity Analyses
 
-### -->    
-## Study/Monitoring areas   
+Estimate annual average for primary and sensitivity analyses using: 
+
+a) linear regression: stop avg ~ site_id + season + time of week + time of day 
+b) weighting time-specific results appropriately to estimate annual average
 
 ```{r}
-
-```
-
-## covariates used
-
-Use UFP and proximity covariaets in the native scale.
-
-Note that distances < 10 m are converted to 10 m b/c we do not believe any sites are < 10 m from the center of a roadway.
-
-```{r}
-# annual_ufp_and_cov_native_scale <- annual_ufp_and_cov %>%
-#   mutate_at(vars(contains("log_")), ~exp(.)) %>%
-#   rename_at(vars(contains("log_")), ~substr(., 5, nchar(.)) )
-
-## repeate for ACT covariates?
-# cov_mm_native_scale <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_native_scale_preprocessed.rda")) %>% 
-#   select(-contains("pop_"), -contains("pop90_"),
-#   -contains("lambert"), -latitude, -longitude) 
-# 
-# # link to selectd UFP
-# annual_ufp_and_cov_native_scale <- left_join(site_locations, preds.s.tow.tod5) %>%
-#   rename(ufp = contains("yhat")) %>%
-#   left_join(cov_mm_native_scale)  %>%
-#   drop_na()
-
-```
-
-## Averaging of 1 sec data at each stop (vs median)
-
-```{r}
-stop_mean_results <- estimate_annual_avg(dt = ufp_mean, estimate_label = "stop_means")
-
- 
-
-```
-
-## Annual averages 
-
-```{r}
-# Trim 10% observations
-trim10_results <- estimate_annual_avg(dt = ufp_trim10, estimate_label = "trim10")
-
-# Windosrize extreme stop readings (top/bottom 5%) 
-windsorized_results <- estimate_annual_avg(dt = ufp_windsorized, estimate_label = "windsorize")
-
-# Use different annual averages
-# # estimate unweighted annual averages
-uw_results <- estimate_annual_avg(dt = ufp, 
-                                  lm_x_names = "site_id", 
-                                  estimate_label = "uw")
-
-```
-
-```{r}
-#join_dfs_by <- c("site_id", "ufp")
-  
-all_annual <- annual_ufp_and_cov %>% 
-  select(site_id, latitude, longitude, 
-         primary_ufp = ufp) %>%
-  # stop means
-  left_join(stop_mean_results$annual_estimates, by = "site_id") %>%
-  #rename(means_ufp = ufp) %>%
-  # trim 10%
-  left_join(trim10_results$annual_estimates, #[,join_dfs_by], 
-            by = "site_id") %>%
-  #rename(trim10_ufp = ufp) %>%
-  # windsorized
-  left_join(windsorized_results$annual_estimates, by = "site_id") %>%
-  #rename(windsorize_ufp = ufp) %>%
-  # windsorized
-  left_join(uw_results$annual_estimates, by = "site_id") #%>%
-  #rename(uw_ufp = ufp)  
-
-annual_names <- names(all_annual)[grepl("ufp", names(all_annual))]
-
-all_annual_l <- all_annual %>% gather("analysis", "prediction", contains("ufp")) %>%
-  mutate(analysis = str_replace(analysis, "_ufp", ""),
-         analysis = relevel(factor(analysis), ref = "primary")) 
-
-# table 
-all_annual_l %>%
-  group_by(analysis) %>%
-  distribution.table(var.string = "prediction") %>%
-  kable(caption = "Distribution of annual UFP concentrations (pt/cm3) for primary and sensitivity analyses") %>%
+data.frame(
+  analysis_names = annual_ufp_names) %>%
+  label_analysis(var = "analysis_names") %>%
+  select(Analysis) %>%
+  cbind(Description = c("Using stop medians; trimming 5% of each site's highest and lowest stop concentrations; using regression to estimate season-, TOW2- and TOD5-adjusted annual avg concentrations; modeling log-transformed concentrations and proximity covariates",
+             "Like Primary analysis, but using stop means (vs medians) to estimate annual averages",
+             "Like Primary analysis, but trimming 10% of each site's highest and lowest stop concentrations (vs 5%) before estimating annual averages",
+             "Like Primary analysis, but Windsorizing each site's highest and lowest 5% stop concentrations (vs trimming) before estimating annual averages",
+             "Like Primary analysis, but calculating unweighted annual averages for each site (vs regression estimates adjusted for season-, time-of-week- and time-of-day)"
+             )) %>%
+  kable(., caption = "Description of primary and sensitivity analyses") %>%
   kable_styling()
 
+
+```
+
+
+
+```{r}
+predictors <- c("site_id", "season", "time_of_week", "tod5")
+
+```
+
+- UFP
+
+```{r}
+              # primary analysis
+annual_ufp <- estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "ufp_pt_cm3", estimate_label = "ufp_primary") %>%
+  # stop means
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "ptrak_mean_trim5", estimate_label = "ufp_stop_means")) %>%
+  # Trim 10% observations
+  left_join( estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "ptrak_median_trim10", estimate_label = "ufp_trim10")) %>%
+  # Windosrize extreme stop readings (top/bottom 5%)
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "ptrak_median_windsorize", estimate_label = "ufp_windsorize")) %>%
+  # unweighted annual averages
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = "site_id",
+                                       var = "ufp_pt_cm3", estimate_label = "ufp_uw"))
+ 
+```
+
+- BC
+
+```{r}
+              # primary analysis
+annual_bc <- estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "bc_ng_m3", estimate_label = "bc_primary") %>%
+  # stop means
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "bc_mean_trim5", estimate_label = "bc_stop_means")) %>%
+  # Trim 10% observations
+  left_join( estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "bc_median_trim10", estimate_label = "bc_trim10")) %>%
+  # Windosrize extreme stop readings (top/bottom 5%)
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = predictors,
+                                       var = "bc_median_windsorize", estimate_label = "bc_windsorize")) %>%
+  # unweighted annual averages
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = "site_id",
+                                       var = "bc_ng_m3", estimate_label = "bc_uw"))
+
+```
+
+```{r}
+annual <- left_join(annual_ufp, annual_bc)
+
+annual_ufp_names <- names(annual)[grepl("ufp", names(annual))]
+annual_bc_names <- names(annual)[grepl("bc", names(annual))]
+
+annual_l <- annual %>% gather("pollutant_analysis", "prediction", contains(c("ufp", "bc"))) %>%
+  label_analysis(var = "pollutant_analysis")
+  # mutate(
+  #   pollutant = ifelse(grepl("ufp", pollutant_analysis), "UFP (pt/cm3)", "BC (ng/m3)"),
+  #   analysis = ifelse(grepl("ufp", pollutant_analysis), substr(pollutant_analysis, 5, nchar(pollutant_analysis)), substr(pollutant_analysis, 4, nchar(pollutant_analysis))),
+  #   analysis = relevel(factor(analysis), ref = "primary")) 
+                                        
+```
+
+Distribution of annual average estimates for primary and sensitivity analyses
+
+### --> table just for primary BC & UFP
+
+```{r}
+# table 
+annual_l %>%
+  group_by(Pollutant, Analysis) %>%
+  distribution.table(var.string = "prediction") %>%
+  kable(caption = "Distribution of annual average estimates for primary and sensitivity analyses") %>%
+  kable_styling()
+
+```
+
+```{r}
 # density plot
-all_annual_l %>%
-  ggplot(aes(x=prediction, fill = analysis)) + 
+annual_l %>%
+  ggplot(aes(x=prediction, fill = Analysis)) + 
   geom_density(alpha = 0.2) + 
+  facet_wrap(~Pollutant, scales= "free") +
   labs(fill = "Analysis",
-       title = "Distribution of annual UFP concentrations (pt/cm3) for primary and sensitivity analyses")
+       x = "Prediction",
+       title = "Distribution of annual average estimates for primary and sensitivity analyses") + 
+  theme(legend.position = "bottom")
    
 ```
 
 Scatterplots around 1-1 line
 
+Preidctions are similar for primary and sensitivity analyses of annual average estimates of UFP and BC. 
+
+- UFP
+
 ```{r}
-max_plot <- max(all_annual_l$prediction)
-min_plot <- min(all_annual_l$prediction)
-  
-all_annual %>%
-  gather("analysis", "prediction", contains("ufp"), -contains("primary")) %>%
-  mutate(analysis = str_replace(analysis, "_ufp", "")) %>% 
-  ggplot(aes(x = primary_ufp, y = prediction, group = analysis, col = analysis)) + 
-  geom_point(aes(col = analysis), alpha = 0.2) + 
-  geom_abline(intercept = 0, slope = 1) + 
+max_plot <- max(annual_l$prediction[grepl("ufp", tolower(annual_l$Pollutant))])
+min_plot <- min(annual_l$prediction[grepl("ufp", tolower(annual_l$Pollutant))])
+
+annual %>%
+  gather("pollutant_analysis", "prediction", contains(c("ufp")), -contains("primary")) %>%
+  label_analysis(var = "pollutant_analysis") %>%
+  ggplot(aes(x = ufp_primary, y = prediction, col = Analysis)) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_point(alpha = 0.2) + 
   geom_smooth() +
-  xlim(min_plot, max_plot) +
-  ylim(min_plot, max_plot) +
+  xlim(min_plot, max_plot) + ylim(min_plot, max_plot) +
   labs(x = "Primary Analysis",
        y = "Sensitivity Analysis",
-       title = "UFP concentration (pt/cm3) from different estimation methods") + 
-  facet_wrap(~analysis)
+       title = "Comparison of annual average UFP estimates (pt/cm3) from primary and sensitivity analyses") +
+  theme(legend.position = "bottom")
+  
+```
+
+- BC
+
+```{r}
+max_plot <- max(annual_l$prediction[grepl("bc", tolower(annual_l$Pollutant))])
+min_plot <- min(annual_l$prediction[grepl("bc", tolower(annual_l$Pollutant))])
+
+annual %>%
+  gather("pollutant_analysis", "prediction", contains(c("bc")), -contains("primary")) %>%
+  label_analysis(var = "pollutant_analysis") %>%
+  ggplot(aes(x = bc_primary, y = prediction, col = Analysis)) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_point(alpha = 0.2) + 
+  geom_smooth() +
+  xlim(min_plot, max_plot) + ylim(min_plot, max_plot) +
+  labs(x = "Primary Analysis",
+       y = "Sensitivity Analysis",
+       title = "Comparison of annual average BC estimates (ng/m3) from primary and sensitivity analyses") +
+  theme(legend.position = "bottom")
   
 ```
 
 Maps
- 
+
+```{r}
+# add lat/long
+annual_lat_long <- annual %>% 
+  left_join(site_locations) %>%
+  # site MS601 has no lat/long
+  drop_na()
+
+```
+
+- UFP 
+
 ```{r, fig.height=10}
 # dot map
 #list to store maps
-dot_maps <-list()
+annual_maps_ufp <-list()
+annual_names <- annual_ufp_names #update for BC
 
 # min and max difference of all estimates
-ufp_range <- all_annual %>%
+plot_range <- annual %>%
   select(annual_names) %>%
   dplyr::summarize(min = min(.),
                    max = max(.)) %>%
@@ -1871,139 +1494,97 @@ ufp_range <- all_annual %>%
 
 for(i in seq_along(annual_names)) {
   #i=1
-  #mymap <- all_annual %>% map_fn(color_by = annual_names[i], map_title = "")
-  
   mymap <- suppressMessages(
-     all_annual %>% map_fn(color_by = annual_names[i], outline_points = F,
+     annual_lat_long %>% map_fn(color_by = annual_names[i], outline_points = F,
                                    map_title = annual_names[i]) +
     scale_color_gradient(name = "pt/cm3", 
                         low = "yellow", high = "red",
                         #ensure that all plots on same scale
-                        limits = c(ufp_range$min, ufp_range$max),
-                         # breaks= legend_breaks,
-                         # labels = legend_breaks
-                         )
-   )
-  
-  
-  
-  
-  dot_maps[i] <- list(mymap)
-  names(dot_maps)[i] <- annual_names[i]
+                        limits = c(plot_range$min, plot_range$max))
+    )
+
+  annual_maps_ufp[i] <- list(mymap)
+  names(annual_maps_ufp)[i] <- substr(annual_names[i], 5, nchar(annual_names[i]))
 }
 
 ```
 
-```{r, fig.height=10}
-dot_maps$primary_ufp
+Map of UFP predictions from primary analysis
+
+```{r}
+annual_maps_ufp$primary
 
 ```
 
-### --> fix spacing issue
+Comparison maps of UFP predictions from primary and sensitivity analysis 
 
 ```{r, fig.height=15}
 
-ggarrange(plotlist = dot_maps,
+ggarrange(plotlist = annual_maps_ufp,
           ncol = 3, nrow = 2,
-          common.legend = T, legend = "right"
-          ) %>%
+          common.legend = T, legend = "right") %>%
   annotate_figure(top = "Annual average UFP estimates from different methods" ) 
    
 ```
 
-## Prediction differences for ACT cohort
-
-```{r}
-# calculate difference between sensitivity & primary estimates
-pred_differences <- all_annual %>%
-  mutate_at(vars(contains("ufp"), -contains("primary")), ~.-primary_ufp) %>%
-  select(-contains("primary"))
- 
-#density plot
-pred_differences %>% gather("analysis", "prediction_diff", contains("ufp")) %>%
-  ggplot(aes(x = prediction_diff, fill = analysis)) + 
-  geom_density(alpha = 0.3) + 
-  geom_vline(xintercept = 0, linetype = "dashed") +
-  facet_wrap(~analysis, 
-             #scales = "free"
-             ) +
-  labs(x = "UFP estimate differnce (pt/cm3)",
-       title = "Difference in annual average UFP estimate relative to primary method"
-       )
-
-# distribution table
-pred_differences %>% gather("analysis", "prediction_diff", contains("ufp")) %>%
-  group_by(analysis) %>%
-  distribution.table(var.string = "prediction_diff") %>%
-  kable(caption = "Difference in annual average UFP estimate relative to primary method") %>%
-  kable_styling()
-
-```
-
-Maps
+- BC 
 
 ```{r, fig.height=10}
-
-annual_names2 <- setdiff(annual_names, c("primary_ufp" 
-                                         #"windsorize_ufp"
-                                         ))
+# dot map
+#list to store maps
+annual_maps_bc <-list()
+annual_names <- annual_bc_names 
 
 # min and max difference of all estimates
-diff_range <- pred_differences %>%
-  select(annual_names2) %>%
+plot_range <- annual %>%
+  select(annual_names) %>%
   dplyr::summarize(min = min(.),
                    max = max(.)) %>%
   round()
 
-difference_maps <-list()
+for(i in seq_along(annual_names)) {
+  #i=1
+  mymap <- suppressMessages(
+     annual_lat_long %>% map_fn(color_by = annual_names[i], outline_points = F,
+                                   map_title = annual_names[i]) +
+    scale_color_gradient(name = "pt/cm3", 
+                        low = "yellow", high = "red",
+                        #ensure that all plots on same scale
+                        limits = c(plot_range$min, plot_range$max))
+    )
 
-legend_breaks <- c(diff_range$min, 0, diff_range$max)
-
-for(i in seq_along(annual_names2)) {
-  #i=3
-  pred_differences$color_by <- pred_differences[[annual_names2[i]]]
-  
-  mymap <- pred_differences %>% map_base() +
-    geom_point(data = pred_differences,
-               aes(x = longitude, y = latitude, col = color_by),
-               alpha = 0.3, size = 2) +
-    scale_color_gradient2(name = "pt/cm3", 
-                        low = "black", high = "red",
-                        midpoint = 0,  mid = "white", 
-                        limits = c(diff_range$min, diff_range$max),
-                         breaks= legend_breaks,
-                         labels = legend_breaks
-                         )
-  #mymap
-  
-  difference_maps[i] <- list(mymap)
-  names(difference_maps)[i] <- annual_names2[i]
+  annual_maps_bc[i] <- list(mymap)
+  names(annual_maps_bc)[i] <- substr(annual_names[i], 4, nchar(annual_names[i])) 
 }
 
-ggpubr::ggarrange(plotlist = difference_maps,
+```
+
+Map of BC predictions from primary analysis  
+
+```{r}
+annual_maps_bc$primary 
+
+```
+
+Comparison maps of BC predictions from primary and sensitivity analysis 
+
+```{r, fig.height=15}
+
+ggarrange(plotlist = annual_maps_bc,
           ncol = 3, nrow = 2,
-          common.legend = T, legend = "right",
-          labels = annual_names2 
-          ) %>%
-  annotate_figure(top = "Difference in annual average UFP estimate relative to primary method" ) 
- 
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "Annual average BC estimates from different methods" ) 
+   
 ```
 
-save datasets. 
+
+
+
 
 ```{r}
-# all annual estimates
-# saveRDS(all_annual, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_annual.rda"))
+# # save datasets. 
+# ## annual estimates from primary and sensitivity analyses 
+# saveRDS(annual, file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda"))
  
-
 ```
-
-```{r}
-# #data for GIS
-# annual_ufp_and_cov %>%
-#   select(site_id, latitude, longitude, ufp, lasso.results$term) %>%
-# write.csv(., file.path("Data", "Aim 2", "Mobile Monitoring", "annual_ufp_and_some_cov.csv"),
-#             row.names = F, na = "")
-
-```
-
+ 

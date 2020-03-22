@@ -20,6 +20,11 @@ editor_options:
 # --> use FSS for IPWs? 
 # --> NO2 predictions from ST model
 # --> stratify  by all confounders? See other General Exam
+# --> add sensitivity analyses: 1) Restrict primary analysis to (say) people with 80% of their time from 1990 forward at an exact location in Puget Sound; fill in up to 20% with zip center and/or national model. Include extending the first address backward 10 years
+## 2) Sensitivity analysis 1 (most restricted): The subset of those folks who are never movers living within PS at an exact address
+## 3) Sensitivity 2 (least restrictive): Include anyone with zip or better at any location for any amount of time
+## 4) Sensitivity 3 (using only predictions from ST model): People with 80% exact coverage and up to 20% zip, but only using ST model
+##  5) Maybe sensitivity 4 (address extension): Drop address extension time (problem is that all the events before 1999 will be dropped, may cause immortal time bias, check with Lianne)
 
 ```
 
@@ -31,6 +36,11 @@ editor_options:
 ###c. git commit -m "my commit message in parentheses" 
 ###d. git push origin master
 
+##########
+# calculating gap lengths:
+# x = c(1,2,4,NA,NA,6,NA,19,NA,NA)
+# res = rle(is.na(x))
+# rep(res$values*res$lengths,res$lengths)
 
 ```
 

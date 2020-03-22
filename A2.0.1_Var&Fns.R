@@ -526,49 +526,26 @@ map_base <- function(dt,
   
 }
 
-#################
+################
 
-# dt = grid_dens_expand
-# color_by = "z"
-# latitude_name. = "y"
-# longitude_name. = "x"
-# map_title = NULL
-
-# # colors the base map by a variable (3D)
-# map_color <- function(dt, 
-#                    color_by = "ufp", color_units = "pt/cm3",
-#                    latitude_name = "latitude", longitude_name = "longitude",
-#                    map_title = NULL
-#                    ) {
-#   
-#   #label by variable being mapped if no title is provided
-#   if(is.null(map_title)) {map_title <- color_by}
-#   
-#   dt <- rename(dt,
-#                y = color_by,
-#                lat = latitude_name,
-#                long = longitude_name) 
-#   
-#   mymap <- dt %>%
-#     map_base(latitude_name = "lat", longitude_name = "long") +
-#     # color map
-#     geom_point(data = dt,
-#                  aes(x = long, y = lat), col= "black",
-#                  size = 2.5) +
-#       geom_point(data = dt,
-#                  aes(x = long, y = lat, col = y),
-#                  alpha = 0.8, size = 2) +
-#       scale_color_gradient(name = color_units, low = "yellow", high = "red") +
-#     labs(title = map_title
-#          #fill = "Area"
-#          )
-#   
-#   #+ theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0)) 
-#   
-#   return(mymap)
-#   
-# }
-
+# dt <- annual_maps
+# color_map = TRUE
+# color_by = annual_ufp_names[i]
+# color_units = "pt/cm3"
+# outline_points = TRUE
+# latitude_name = "latitude"
+# longitude_name = "longitude"
+# map_title = annual_ufp_names[i]
+# include_monitoring_area = FALSE
+# monitoring_area_alpha = 0.2
+# include_study_area = FALSE
+# study_area_alpha = 0.2
+# include_st_area = FALSE
+# st_area_alpha = 0.2
+# maptype. = "terrain"
+# zoom_lvl = 11
+# low_conc_col = "yellow"
+# high_conc_col = "red"
 
 #################
 # combines map_base() and map_color() fns. but fills by study and monitoring regions (basemap does not - works better for e.g. stat_contour() which uses fill)
@@ -690,91 +667,22 @@ map_fn <- function(dt,
 
 # returns annual average site estimates for "ptrak" variable from repeated stop-level observations. Also returns summary tables and figures. 
 
+# dt <- stops
+# var <- "ufp_pt_cm3"
+# lm_x_names = c("site_id", "season", "time_of_week", "tod5")
+
 estimate_annual_avg <- function(dt,
-                                var = "ptrak",
+                                var,
                                 # model used to estimate annual averages
                                 lm_x_names = c("site_id", "season", "time_of_week", "tod5"),
                                 estimate_label = ""
                                 ) {
-  #rename variables
-  dt <- dt %>%
-    rename(var = var)
-  
-  ##########################################################################################
-  #################### characterize stop-level concentrations at sites ####################
-  ##########################################################################################
-  
-  # # table of distribution
-  # t_stops_distribution <- dt %>% ungroup() %>%
-  #   distribution.table(var.string = "var") %>%
-  #   mutate(time = "Overall") %>%
-  #   select(time, everything()) %>%
-  #   kable(caption = "Distribution of stop-level UFP concentrations") %>%
-  #   kable_styling()
-  # 
-  # # density plot
-  # p_stops_density <- dt %>%
-  #   ggplot(aes(x=var)) + 
-  #   geom_density() + 
-  #   labs(title = "Distribution of stop-level UFP concentrations",
-  #        x = "UFP (pt/cm3)")
-  # 
-  # # plots over time
-  # #by time
-  # p0_hour <- dt %>% 
-  #   mutate(hour = factor(hour)) %>%
-  #   ggplot(aes(x=hour, y=var)) + 
-  #   geom_boxplot() +
-  #   labs(x = "hour") + 
-  #   labs(y="")
-  # 
-  # p0_tod5 <- dt %>% 
-  #   #mutate(hour = factor(hour)) %>%
-  #   ggplot(aes(x=tod5, y=var)) + 
-  #   geom_boxplot() +
-  #   labs(x = "Time of Day (hour)",
-  #        y = "",
-  #        fill = "Time of day") 
-  # 
-  # p0_day <- dt %>%
-  #   ggplot(aes(x=day, y=var)) + 
-  #   geom_boxplot() + 
-  #   labs(y="")
-  # 
-  # p0_season <- dt %>%
-  #   ggplot(aes(x=season, y=var)) + 
-  #   geom_boxplot() + 
-  #   labs(y="")
-  # 
-  # p_stop_concs_over_time <- ggarrange(p0_hour, p0_tod5, p0_day, p0_season, 
-  #                                     common.legend = T, legend = "bottom") %>%
-  #   annotate_figure(left = "UFP (pt/cm3)", 
-  #                   fig.lab = "Stop-level UFP concentrations")
-  
-  ##########################################################################################
-  #################################### stop sample size ####################################
-  ##########################################################################################
-  
-  # ## table of stop counts/site overall & stratified
-  # t_stop_count <- dt %>%
-  #   dplyr::group_by(site_id) %>%
-  #   # no. samples/site
-  #   dplyr::summarize(N = n()) %>%
-  #   # distribution of no. samples
-  #   distribution.table(var.string = "N") %>%
-  #   mutate(Time = "Overall") %>%
-  #   select(Time, everything()) %>%
-  #   kable(caption = "Number of stop samples per site (after trimming; N = No. sites sampled)") %>%
-  #   kable_styling()
-  
-  ##########################################################################################
-  #################################### annual averages ####################################
-  ##########################################################################################
-  # lm_x_names = c("site_id", "season", "time_of_week", "tod5")
-  # lm_x_names <- c("site_id", "season")
-  
+  # #rename variables
+  # dt <- dt %>%
+  #   rename(var = var)
+
   ## grid to save predictions
-  lm_pred0 <- expand.grid(
+  lm_pred <- expand.grid(
     #include all possible variables
     site_id = unique(dt$site_id), 
     season = unique(dt$season),
@@ -799,85 +707,68 @@ estimate_annual_avg <- function(dt,
     #may have multiple rows per combination
     unique()
   
-    lm_fit0 <- lm(formula(paste0("var ~", paste(lm_x_names, collapse = " + "))), data = dt)
+    lm_fit <- lm(formula(paste0(var, "~", paste(lm_x_names, collapse = " + "))), data = dt)
     
-    lm_pred0$ufp <- predict(lm_fit0, lm_pred0) 
+    lm_pred$yhat <- predict(lm_fit, lm_pred) 
     
     # weigh temporally-specific predictions
-    if("season" %in% lm_x_names) {
-    lm_pred0 <- lm_pred0 %>%
-      mutate(ufp = ufp*season_wt)
-    }
+    if("season" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$season_wt}
     
-    if("time_of_week" %in% lm_x_names) {
-      lm_pred0 <- lm_pred0 %>%
-        mutate(ufp = ufp*time_of_week_wt)
-    }
+    if("time_of_week" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$time_of_week_wt}
     
-    if("tod2" %in% lm_x_names) {
-      lm_pred0 <- lm_pred0 %>%
-        mutate(ufp = ufp*tod2_wt)
-    }
+    if("tod2" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$tod2_wt}
     
-    if("tod5" %in% lm_x_names) {
-      lm_pred0 <- lm_pred0 %>%
-        mutate(ufp = ufp*tod5_wt)
-    }
+    if("tod5" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$tod5_wt}
     
-    lm_pred <- lm_pred0 %>%
+    lm_pred <- lm_pred %>%
     group_by(site_id) %>%
-    dplyr::summarize(ufp = sum(ufp)) 
-  
-  # table of UFP distribution
-  t_annual_distribution <- lm_pred %>%
-    distribution.table(var.string = "ufp") %>%
-    kable(caption = "Distribution of annual average estimates") %>%
-    kable_styling()
-  
-  ## plot of UFP distribution
-  p_annual_density <- lm_pred %>%
-    ggplot(aes(x=ufp)) + 
-    geom_density() + 
-    labs(x = "UPF (pt/cm3)",
-         title = "Distribution of annual average estimates")
-  
-  ## --> need to add lat/long if want to plot here
-  ## map of annual estimates
-  # annual_map <- dt %>% map_fn(map_title = "Annual average estimates")
-  
-  ##########################################################################################
-  #################################### results ############################################
-  ##########################################################################################
-  
-  names(lm_pred)[names(lm_pred) == "ufp"] <- paste0(estimate_label, "_ufp")
-  
-  # list to return
-  results <- list( 
-    #stop-level concentrations
-    t_stops_distribution = t_stops_distribution,
-    p_stops_density = p_stops_density,
-    p_stop_concs_over_time =  p_stop_concs_over_time,
+    dplyr::summarize(yhat = sum(yhat))
     
-    # stop sample size
-    t_stop_count = t_stop_count,
-    
-    # annual averages
-    annual_estimates = lm_pred,
-    t_annual_distribution = t_annual_distribution,
-    p_annual_density = p_annual_density
-    
-    # map estimates
-    # #annual_map
-  )
+    names(lm_pred)[names(lm_pred) == "yhat"] <- estimate_label
   
-  return(results)
+    # return results 
+    results <- lm_pred
+    
+    return(results)
+}
+
+##############################################################################################################################
+# returns dataframe with analysis name (e.g., ufp_primary) broken up by pollutant (UFP, BC) and a description label
+
+# dt <- cv_results
+# var <- "Analysis"
+# end_character = 0
+
+label_analysis <- function(dt, 
+                           var,
+                           end_character = 0
+                           ) {
+  dt <- dt %>%
+    rename(var = var) %>%
+    mutate(
+      Pollutant = ifelse(grepl("ufp", var), "UFP (pt/cm3)", "BC (ng/m3)" ),
+      var = as.character(var),
+      var = ifelse(grepl("ufp", var), substr(var, 5, nchar(var)-end_character), substr(var, 4, nchar(var)-end_character)),
+      var = factor(var, levels = c("primary", "stop_means", "trim10", "windsorize", "uw", "native_scale")),
+      var = recode_factor(var, 
+                          "primary" = "Primary",
+                          "stop_means" = "Stop means",
+                          "trim10" = "10% trimmed mean",
+                          "windsorize" = "Windsorized mean",
+                          "uw" = "Unweighted mean",
+                          "native_scale" = "Native scale modeling"
+                          )
+      ) %>%
+    select(Pollutant, Analysis = var, everything())
+  
+  return(dt)
   
 }
 
 #################################################################################################################
 ################################################# UK ########################################################
 
-#1. returns CV RMSE and R2 for a series of PLS components and maximum variogram plotting distances. "dt2" includes y outcome (UFP), site location and covariates 
+#1. loops over pls_uk_cv_predictions() fn below to return CV RMSE and R2 for a series of PLS components and maximum variogram plotting distances. 
 pls_uk_cv_eval <- function(dt2 = annual_train_test,
                            pls_comps = c(1:6),
                            dist_fract = c(0.05, seq(0.1, 0.5, by=0.1)),
@@ -896,7 +787,10 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
     expand.grid(pls_comp = pls_comps,
                 dist_fract = dist_fract),
     RMSE = NA,
-    R2 = NA)
+    R2 = NA,
+    max_plot_dist = NA,
+    max_dist = NA
+    )
   
   ################## CV loops ##################################
   # estimate CV RMSE and r2 for diff number of PLS components
@@ -916,18 +810,24 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
                               # site_locations. = site_locations..
                               )
       
-      # calculate performance statistics on native scale (?? what we care about?)
+      # calculate performance statistics on native scale 
         ## exponeniate before calculating RMSE, R2 (e.g., if on log scale)
-        dt_obs <- cv_prediction$y_name
-        uk_pred <- cv_prediction$cv_prediction
+        dt_obs <- cv_prediction$dt$y_name
+        uk_pred <- cv_prediction$dt$cv_prediction
         
         if(exponentiate_obs_and_pred == TRUE) {
         dt_obs <- exp(dt_obs)
         uk_pred <- exp(uk_pred)
         } 
       
+        # CV RMSE & R2 
         cv_eval$RMSE[cv_eval$pls_comp== i & cv_eval$dist_fract==j] <- rmse(obs = dt_obs, pred = uk_pred)
         cv_eval$R2[cv_eval$pls_comp== i & cv_eval$dist_fract==j] <-  r2_mse_based(obs = dt_obs, pred = uk_pred)
+        
+        # variogram plotting paramters
+        cv_eval$max_plot_dist[cv_eval$pls_comp== i & cv_eval$dist_fract==j] <- cv_prediction$max_plot_dist
+        
+        cv_eval$max_dist[cv_eval$pls_comp== i & cv_eval$dist_fract==j] <- cv_prediction$max_dist
         
     }
   }
@@ -940,15 +840,16 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
   cv_comp <- cv_eval$pls_comp[rmse_inx]
   cv_dist_fract <- cv_eval$dist_fract[rmse_inx]
   
-  #cv_comp_names <- paste0("Comp", c(1:cv_comp))
-  
-  # #trends
-  # cv_cov_trend <-  as.formula(paste0("~ ", paste0(cv_comp_names, collapse = " + " )))
+  cv_plot_dist <- cv_eval$max_plot_dist[rmse_inx] 
+  #cv_max_dist <- cv_eval$max_dist[rmse_inx]  
   
   cv_table <- data.frame(PLS_Components = cv_comp,
                          Variogram_Distance_Fraction = cv_dist_fract,
-                         RMSE = cv_rmse,
-                         R2 = cv_r2)
+                         Variogram_Plotting_Dist_m = round(cv_plot_dist),
+                         #Max_Dist_m = round(cv_max_dist),
+                         RMSE = round(cv_rmse),
+                         R2 = round(cv_r2, 2)
+                         )
   #return(cv_table)
   
   eval_results <- list(cv_eval = cv_eval,
@@ -960,8 +861,15 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
 }
 
 
-# [fn used in pls_uk_cv_eval()]
+# [fn used above in pls_uk_cv_eval()]
 # returns CV predictions for a selected number of PLS components and maximum variogram plotting distance. "dt" includes y outcome (UFP), site location (lambert_x, lambert_y) and covariates 
+
+# dt = annual
+# y_name = analysis_names[1]
+# cov_names. = cov_names_log
+# k=2
+# use_n_scores. = 2
+# dist_fract. = 0.1
 
 pls_uk_cv_predictions <- function(
   dt = annual_train_test,
@@ -972,7 +880,7 @@ pls_uk_cv_predictions <- function(
                                   # max PLS components to evaluate
                                   use_n_scores. = 3, 
                                   # variogram maximum distance fraction to model
-                                  dist_fract. = 0.1 #, #dist_fract, 
+                                  dist_fract. = 0.1 
                                   
 ) {  
   
@@ -1012,11 +920,9 @@ pls_uk_cv_predictions <- function(
     names(scores_test) <- score_n_names
     
     # dataset w/ UFP measurements, geocovariates, location
-    pls_df_train <- cbind(dt_train, #[c("site_id", "y_name")],
-                          scores_train) #%>% left_join(site_locations., by = "site_id") 
+    pls_df_train <- cbind(dt_train, scores_train)  
     
-    pls_df_test <- cbind(dt_test, #[c("site_id", "y_name")],
-                         scores_test) # %>% left_join(site_locations.,by = "site_id")
+    pls_df_test <- cbind(dt_test, scores_test)  
     
     ################################ UK ################################
     geo_train <- as.geodata(pls_df_train, 
@@ -1047,16 +953,20 @@ pls_uk_cv_predictions <- function(
                            trend = cov_trend, 
                            messages = F)
     
+    #plot(variog_train)
+    
     #use geoR try to estimate intitial range & sill values. using WLS and an exponential fit
     wls_ests_train <- variofit(variog_train, cov.model = "exp", 
                                messages = F)
     
+    #don't need initial values above since estimates seem to be the same w/ or w/o ini = wls_ests_train (based on small sample)?
     resid_model_train <- variofit(vario = variog_train, 
                                   ini = wls_ests_train, 
                                   cov.model = "exp",
                                   #weights = "equal", #ols
                                   weights = "npairs",#wls
-                                  messages = F) 
+                                  #messages = F
+                                  ) 
     
     #trend
     train_trend <- trend.spatial(trend = cov_trend, geo_train)
@@ -1075,16 +985,29 @@ pls_uk_cv_predictions <- function(
     dt$cv_prediction[!train_grp] <- kc_cv$predict
   }
   
-  return(dt)
+  result <- list(dt = dt,
+                 max_plot_dist = max.plot.dist,
+                 max_dist = max.dist)
+  
+  return(result)
+  #return(dt)
 }
 
-#t <- pls_uk_cv_predictions()
 
 # 2. returns UK predictions for new locations. Fits PLS to a modeling dataset using a selected number of PLS components, variogram distance fraction; creates geodatasets; predicts at new locations using UK. 
+# unlike pls_uk_cv_predictions() fn above, does not create trainin/test sets over which it loops over to estimate CV predictions
+
+# dt = annual[!validation_idx,]
+# cov_loc_new = annual[validation_idx,]
+# y_name = pls_cv_names[i]
+# cov_names. = cov_names_log
+# pls_comp = pls_components 
+# variogram_dist_fract = pls_variogram_dist
+
+
 uk_predictions <- function ( 
   #data used to build PLS model and for kriging
   dt = annual_train_test,
-  #dt_locations = site_locations,
   #df w/ location & covariate info for new location where predictions should be made
   cov_loc_new = cov_act,
   # for PLS model/kriging
@@ -1123,11 +1046,9 @@ uk_predictions <- function (
   ##################################### create geodatasets & other UK inputs #####################################
   
   # add site_id, ufp & lat/long
-  scores_loc_dt <- cbind(dt, #[c("site_id", "y_name")],
-                         scores_dt) #%>% left_join(dt_locations) 
+  scores_loc_dt <- cbind(dt, scores_dt)  
   
-  scores_loc_new <- cbind(cov_loc_new, # [c("site_id", "lambert_x", "lambert_y")],
-                          scores_new)
+  scores_loc_new <- cbind(cov_loc_new, scores_new)
   
   # create geodatasets
   geo_dt <- as.geodata(scores_loc_dt, 

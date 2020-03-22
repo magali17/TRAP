@@ -21,6 +21,8 @@ r2_mse_based <- function(obs, pred) {
 
 ############################################################################################## 
 #returns table of distribution of a variable
+
+# note var.string should not have NAs, otherwise can return wrong results 
 distribution.table <- function(dt,
                                var.string = "ptrak_pt_cm3",
                                round.int = 0) {

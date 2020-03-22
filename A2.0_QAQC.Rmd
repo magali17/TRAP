@@ -168,6 +168,9 @@ mm_full <- mm_full %>%
 
 Instruments Used
 
+### --> shape by pollutant or actual instrument name; col by route? add legend; 
+
+
 ```{r}
 #instrument used each day
 mm_full %>%
@@ -183,6 +186,20 @@ mm_full %>%
        ) 
  
 ```
+
+### --> samples size: total & per instrument, % of total, distribution of concentrations
+
+```{r}
+
+
+```
+
+### --> ? drop PTRAK readings from instruments PMPT_2 and PMPT_4 since these were barely used and never on their own? PMPT_1 was used on its own but for very little time (keep/drop?)
+
+```{r}
+
+```
+
 
 Set up common variables 
 
@@ -201,20 +218,7 @@ low_ufp_lvl <- 300
 
 ```
 
-# Correct BC readings suing the Optimized Noise-Reduction Algorithm (ONA) 
-
-Distribution of raw BC readings. See that both instruments have negative BC readings.  
-
-```{r}
-
-mm_full %>% 
-  filter(grepl("ma200_ir_bc", variable)) %>%
-  group_by(instrument_id) %>%
-distribution.table(., var.string = "value") %>%
-  kable(caption = "Distribution of raw 10-sec Aethelometer readings") %>%
-  kable_styling()
-
-```
+# Correct BC readings using the Optimized Noise-Reduction Algorithm (ONA) 
 
 ```{r}
 # this does not need to be done separatebly by instrument, results are the same. May be related to different tape positions for differnet instruments, which is already taken into account?
@@ -235,17 +239,33 @@ bc <- bc.w %>%
   
 ```
 
-Distribution of ONA-corrected BC readings. Still see some negative values, but there are fewer and they are not as negative. The highest values are a bit lower than the raw values.
+Distribution of raw & ONA-corrected BC readings. Still see some negative values, but there are fewer and they are not as negative. The highest values are a bit lower than the raw values.
+
+### --> add ","s to N, min, max in distribution.table()
 
 ```{r}
-
-bc %>%  
-  group_by(instrument_id) %>%
+raw_bc <- mm_full %>% 
+  filter(grepl("ma200_ir_bc", variable)) %>%
+  #group_by(instrument_id) %>%
 distribution.table(., var.string = "value") %>%
-  kable(caption = "Distribution of ONA-corrected 10-sec Aethalometer readings") %>%
+  mutate(Value = "Raw") %>%
+  select(Value, everything())
+
+ona_bc <- bc %>%  
+  #group_by(instrument_id) %>%
+distribution.table(., var.string = "value") %>%
+  mutate(Value = "ONA-Corrected") %>%
+  select(Value, everything())
+
+rbind(raw_bc, ona_bc) %>%
+  kable(caption = "Distribution of raw and ONA-corrected 10-sec aethalometer readings") %>%
   kable_styling()
 
 ```
+
+### --> make plot symetrical 
+### --> add hline(yintercept = 0, linetype = "dashed", col = "red")
+### --> ? col points by instrument_id?
 
 ```{r}
 #BC/IR
@@ -254,13 +274,32 @@ bc.w %>%
   geom_point() + 
   geom_abline(intercept = 0, slope = 1) + 
   geom_smooth() + 
+  # xlim() +
+  # ylim() +
   labs(title = "IR (880 nm, black carbon) concentrations before and after ONA correction",
-      x = "Aethelometer (ng/m3)",
-      y = "ONA-corrected (ng/m3)"
+      x = "Raw aethalometer Reading (ng/m3)",
+      y = "ONA-Corrected Reading (ng/m3)"
        )
 ```
 
 replace old aethalometer readings with ONA corrected IR (880 nm) BC readings in full dataset
+
+### --> compare raw to ONA in time series plots. is there one value that's driving many of the negative values? 
+#### --> See raw file from 9/21 before its uploaded   
+Elena was most concerned about tops where All of the reading were < 0.
+
+
+
+### --> ? look at other wavelengths to see what they are doing
+### --> look at how high the % attenuation is reaching (IR ATN1). instrument may be less sensitive at detecting change above 50%
+
+### --> may have to pick a diff attenuation. the default is 5%
+
+```{r}
+
+```
+
+### --> keep raw and/or high values & adjust in a sensitivity anaysis (e.g., drop top 1% of values)? 
 
 ```{r}
 mm_full <- mm_full %>%
@@ -284,7 +323,7 @@ PMPT_93 and PMPT_94 have both had 0 readings. PMPT_94 has had a maximum reading 
 
 mm_full %>% 
   filter(grepl("ptrak", variable)) %>%
-  group_by(instrument_id) %>%
+  #group_by(instrument_id) %>%
   #rename("Instrument ID" = instrument_id) %>%
 distribution.table(., var.string = "value") %>%
   kable(caption = "summary of 1 sec PTRAK distribution (all data)") %>%
@@ -293,6 +332,9 @@ distribution.table(., var.string = "value") %>%
 ```
 
 Time series plots of runs with very low instrument readings.
+
+### --> ? fn to recode variable, e.g., "P-TRAK (pt/cm3)"
+### --> add labels: runname: ___; Site ID: __
 
 ```{r}
 
@@ -304,19 +346,20 @@ low_ptrak <- mm_full %>%
 
 ```
 
-Plot of entire day.
 
 ```{r, fig.height=8}
 
 y_max <- 5000
 
-mm_full %>%
-  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
-  filter(runname %in% low_ptrak$runname) %>%
-  time_series_plots(., mytitle = paste0("time series for sites with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
-                    hline_value = low_ufp_lvl, 
-                    ymax = y_max) +
-  labs(subtitle = paste0("only showing concentrations up to", y_max, " pt/cm3"))
+## Plot of entire day.
+# # don't show for now?
+# mm_full %>%
+#   mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+#   filter(runname %in% low_ptrak$runname) %>%
+#   time_series_plots(., mytitle = paste0("time series for sites with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
+#                     hline_value = low_ufp_lvl, 
+#                     ymax = y_max) +
+#   labs(subtitle = paste0("only showing concentrations up to", y_max, " pt/cm3"))
 
 ```
 
@@ -428,40 +471,44 @@ low_bc <- mm_full %>%
 
 ```
 
+##--> make BC axis on left
 
-Plot of entire day.
 
 ```{r, fig.height=8}
 y_max <- 3000
 
-unique_low_bc_runs <- unique(low_bc$runname)  
-
-bc_day_plots <- mm_full %>%
-  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
-  filter(runname %in% unique_low_bc_runs) %>%
-  time_series_plots(., mytitle = paste0("time series for runs with BC concentrations < ", low_bc_lvl, " pt/cm3"),
-                    hline_value = low_bc_lvl, 
-                    ymax = y_max, 
-                    facet_runname = F) + 
-  labs(subtitle = paste0("only showing concentrations up to ", y_max, " pt/cm3"))
-
-
-# plot on separate pages since there are many
-# need this many pages if plot 9 plots/page
-page_no <- ceiling(length(unique_low_bc_runs)/9)
-
-for (i in seq(page_no)) {
-  
-  myplot <- bc_day_plots +
-    ggforce::facet_wrap_paginate(~runname, 
-                             nrow = 3, ncol = 3, 
-                             page = i, 
-                             scales = "free")  
-  
-  print(myplot)
-}
+## Plot of entire day.
+# # don't show for now?
+# unique_low_bc_runs <- unique(low_bc$runname)  
+# 
+# bc_day_plots <- mm_full %>%
+#   mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+#   filter(runname %in% unique_low_bc_runs) %>%
+#   time_series_plots(., mytitle = paste0("time series for runs with BC concentrations < ", low_bc_lvl, " pt/cm3"),
+#                     hline_value = low_bc_lvl, 
+#                     ymax = y_max, 
+#                     facet_runname = F) + 
+#   labs(subtitle = paste0("only showing concentrations up to ", y_max, " pt/cm3"))
+# 
+# 
+# # plot on separate pages since there are many
+# # need this many pages if plot 9 plots/page
+# page_no <- ceiling(length(unique_low_bc_runs)/9)
+# 
+# for (i in seq(page_no)) {
+#   
+#   myplot <- bc_day_plots +
+#     ggforce::facet_wrap_paginate(~runname, 
+#                              nrow = 3, ncol = 3, 
+#                              page = i, 
+#                              scales = "free")  
+#   
+#   print(myplot)
+# }
 
 ```
+
+##--> make BC axis on left
 
 zoom in on specific sites   
 * no site-specific note associated with low BC readings  
@@ -503,6 +550,13 @@ for (i in seq(page_no)) {
 
 ```
 
+### ---> example of ~ 3 stops for dissertation
+
+```{r}
+
+```
+
+
 total BC readings before dropping any values:
 
 ```{r}
@@ -527,7 +581,7 @@ paste0(negative_bc_no, " (", negative_bc_pct, "%)")
 
 ### --> ?? drop BC < 0 since these readigns seem to generally be different than neighboring BC readings and diffrent from the patterns of other particle instruments? 
 
-### --> [will email Elena] ?? Drop or keep values < 0 or < threshold (or set to ~ 0/min) since so few and don't know wha cutoff to use for high values? 
+### -->?? Drop or keep values < 0 or < threshold (or set to ~ 0/min) since so few and don't know wha cutoff to use for high values? 
 
 **Not doing anything for now since some of the very low values are in series (next to each other), indicating that readings are truly low?? Will averaging very low/high readings result in positive, unbiased readings in the end?**
 
@@ -557,7 +611,7 @@ mm_full %>%
   filter(grepl("bc", variable)) %>%
   group_by(instrument_id) %>%
 distribution.table(., var.string = "value") %>%
-  kable(caption = "Distribution of final 10-sec Aethalometer readings") %>%
+  kable(caption = "Distribution of resulting 10-sec Aethalometer readings") %>%
   kable_styling()
 
 ```
@@ -659,7 +713,7 @@ bc_high_quant <- quantile(mm_full$value[mm_full$variable=="bc_ng_m3"], high_quan
 
 ```
 
-Runs with BC readings above quantile: `r bc_high_quant`
+Runs with BC readings above quantile (r `high_quant`): `r round(bc_high_quant)` ng/m3
 
 ```{r}
 high_bc <- mm_full %>%
@@ -724,6 +778,8 @@ df %>%
 Compare collocated PTRAK readings. These will later be averaged when duplicate instruments are used. PMPT_94 has collected most of the measurements and been co-located with PMPT_93, PMPT_4 and PMPT_2. PMPT_1 and PMPT_93 collected measurements early on in the study. PMPT_93 was co-located with PMPT_94 and PMPT_4. Can't compare PMPT_1 to other PTRAKs because it was never co-located.
 
 ### PTRAK - PTRAK
+
+### --> put these on one plot. keep PMPT 93 vs 4 separate?
 
 PTRAK 93 tends to have slightly lower readings than primary PTRAK 94.
 
@@ -808,71 +864,80 @@ Compare NanoScan (24-422 nm) to ptrak (20-1000 nm) since NanoScan tends to be mo
 
 Dropping PTRAK readings above 500k pt/cm3 (instrument threshold)
 
-
-### --> issue: rolling avg for PTRAKs takes VERY long time to run
+### ---> Tim G: "P-Trak clocks have a tendency to gain, reading perhaps 10 sec fast (but varies by unit) after 6 or 7 hrs or run time.  The NanoScan clock will lose time but at a rate that doesn't vary more than a few seconds in a day of operation.  Since the NanoScan measurement is weighted toward the earlier part of the 1-min interval, make sure you are comparing P-Trak and NanoScan spikes for P-Trak readings in the first half of a minute, h:mm:00 to h:mm:30.  The NS spike would be time stamped on the minute and corresponding P-Trak value up to 30 sec later."
 
 ```{r, eval=F}
+window_duration_s <- 30
+
 unique_times <- mm_full %>%
     filter(variable == "ptrak_pt_cm3") %>%
   select(runname, site_id, 
-         #instrument_id
+         instrument_id
          ) %>%
   unique()
 
-rolling_ptrak <- data.frame()
-
-library(zoo)
-library(RcppRoll)
-
-mm_full_zoo <- mm_full %>% as.zoo()
-
-for(i in 1:nrow(unique_times) ) {
-  #i=1
-  
-  df <- mm_full %>% 
-    
-    filter(
-      runname == unique_times$runname[i] &
-        site_id == unique_times$site_id[i] &
-        instrument_id == unique_times$instrument_id[i]
-      ) %>%
-    # ?? help run faster? 
-    #as.zoo() %>%
-    mutate(
-      rolling_value = roll_mean(x = value, n = 60, align = "left", fill = NA)
-      #rolling_mean = rollmean(x=value, k=60, align = "left", na.pad = T) #fill = NA
-      #rolling_value = rollapply(value, FUN=mean, width=60, align="left", fill=NA),
-           )
-  
-  rolling_ptrak <- rbind(rolling_ptrak, df)
-  
-}
+# # ISSUE: TAKes a VERY long time to run
+# rolling_ptrak <- data.frame()
+# 
+# # library(zoo)
+# #mm_full_zoo <- mm_full %>% as.zoo()
+# 
+# for(i in 1:nrow(unique_times) ) {
+#   #i=1
+#   
+#   df <- mm_full %>% 
+#     filter(
+#       runname == unique_times$runname[i] &
+#         site_id == unique_times$site_id[i] &
+#         instrument_id == unique_times$instrument_id[i]
+#       ) %>%
+#     # ?? help run faster? 
+#     #as.zoo() %>%
+#     mutate(
+#       rolling_value = RcppRoll::roll_mean(x = value, n = window_duration_s, align = "left", fill = NA)
+#       #rolling_mean = rollmean(x=value, k=60, align = "left", na.pad = T) #fill = NA
+#       #rolling_value = rollapply(value, FUN=mean, width=60, align="left", fill=NA),
+#            )
+#   
+#   rolling_ptrak <- rbind(rolling_ptrak, df)
+#   
+# }
 
  
 ############
-# # DOESNT group properly  
-# library(RcppRoll) #supposed to be faster, but still slow
-# 
-# test <- mm_full %>%
-#   slice(1:5000) %>%
-#   group_by(runname, site_id, instrument_id) %>%
-#   arrange(runname, site_id, instrument_id, time) %>%
-#   mutate(
-#     rolling_value = roll_mean(x = value, n = 60, align = "left", fill = NA)
-#     #rolling_value = rollapply(value, FUN=mean, width=60, align="left", fill=NA),
-#     #rolling_mean = rollmean(x=value, k=60, align = "left",na.pad = T #fill = NA,
-#                             )
+ptrak_rolling0 <- mm_full %>%
+  filter(variable == "ptrak_pt_cm3") %>%
+  # DOESNT group properly, so have to later delete last few rolling avg estimates for each stop
+  group_by(runname, site_id, instrument_id) %>%
+  arrange(runname, site_id, instrument_id, time) %>%
+  mutate(
+    rolling_value = zoo::rollapply(value, FUN=mean, width=window_duration_s, align="left", fill=NA),
+    #rolling_mean = zoo::rollmean(x=value, k=window_duration_s, align = "left", na.pad = T) # fill=NA
+  )
+
+ptrak_rolling_stop <- ptrak_rolling0 %>%
+  group_by(runname, site_id, instrument_id) %>%
+  dplyr::summarize(stop_time = max(time) - window_duration_s)
+
+ptrak_rolling <- left_join(ptrak_rolling0, ptrak_rolling_stop) %>%
+  mutate(
+    #drop last seconds of rolling avg since its using values from the next stop rather than the next seconds
+    rolling_value = ifelse(time > stop_time, NA, rolling_value),
+    # replace
+    value = rolling_value,
+    variable = "ptrak_rolling"
+    ) %>%
+  select(-c(rolling_value,
+            stop_time
+         )
+  ) %>%
+  # add to rest of data (for plotting)
+  rbind(mm_full)
+
+
 
 ##########
-# rolling_ptrak_copy <- rolling_ptrak
-
-test <- rolling_ptrak %>%
-  #select(-value) %>%
-  rename(value = rolling_mean) %>%
-  mutate(variable = "ptrak_60s_rolling")
-
- mm_full_rolling <- rbind(mm_full, test)
-
+ 
 ```
 
 
@@ -942,8 +1007,20 @@ First, round reading time to nearest 10-seconds since instrument time stamps may
  
 ```
 
+## ?? Calibrate Instrument Readings to the mean to avoid having systematic differences across instruments 
+
+### --> 
+
+```{r}
+
+```
+
+
+
 ### --> ? compare BC readings to AQS site readings (2 min & overnight). select a reference instrument that is most similar?   
 ### --> minute & hour DOE data is only available for BC through April 2019
+
+note from Jill  Schulte: "1-min averages are never validated. We recommend you line up the validated 1-hour data with the corresponding minutes and remove any that don’t have a valid 1-hour average"
 
 (cite: Minet 2017 & their refs: Deville Cvaellin 2016; Lin 2015)
 
@@ -956,6 +1033,8 @@ First, round reading time to nearest 10-seconds since instrument time stamps may
 
 
 Distribution of final cleaned data
+
+## --> update "variable" name 
 
 ```{r}
 mm_full %>% 

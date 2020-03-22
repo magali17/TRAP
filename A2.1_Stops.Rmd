@@ -193,6 +193,8 @@ mm %>%
 
 Final distribution of stop means and medians. These are right skewed as well. 
 
+### --> rename variable & seprate into a medians vs means table 
+
 ```{r}
 mm %>%
   filter(grepl("ptrak|bc", variable)) %>%

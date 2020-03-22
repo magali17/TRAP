@@ -31,11 +31,17 @@ params:
 * [temporary?] made sure all datasets had same covariates
 * used ST model’s covariate.preprocess() function to clean up geocovariates for MM stops & ACT locations:
 	+ common.value: excluded variables which have less than 20% of being different from the most common value in monitoring data
+	  - eliminates variables with little variability that are not likely to improve (or even worsen) the model fit   
 	+ low.landuse:  excluded varlabies with maximum land use variables less than 10 in monitoring data
+	  - this land use is a small fraction and likely to not have a significant impact relative to everything else in within a buffer    
 	+ sd.ratio: excluded variables with SD of cohort data greater than 5 times of SD of monitoring data
+	  -	drops variables whose distribution is very different in the ACT cohort than the monitoring region in an effort to reduce model extrapolation later on   
 	+ outlier: excluded variables with outliers more than 2% in monitoring and cohort data combined
+	  -	variables may worsen model fit   
 	+ log transformed proximities variables, made min distance 10 m
-	+ other
+	  -	TRAP tends to exponentially decays with increasing distance from the source    
+    -	Setting the minimum distance to 10 m is to protect against any possible ACT location geocoding issue since we do not believe that participant locations were closer than 10 m to proximity covariates (e.g., the middle of a roadway)    
+	+ other 
 	  - dropped RLU
 	  - created some new proximity variables (e.g. distance to a123)
 * dropped variables in MM and ACT dataset that I won’t use
@@ -284,7 +290,7 @@ cov_descrip <- data.frame(Covariate = final_cov) %>%
   mutate(Covariate= as.character(Covariate)) %>%
     split_cov_name(cov = "Covariate")%>%
   group_by(Covariate = cov) %>%
-  dplyr::summarize("Available Buffer Sizes" = paste0(sort(unique(buffer)), collapse = ", ")) %>%
+  dplyr::summarize("Buffers" = paste0(sort(unique(buffer)), collapse = ", ")) %>%
   mutate(Description = recode(Covariate,
                           elev_above = "number of points (out of 24) more than 20 m and 50 m uphill of a location for a 1000 m and 5000 m buffer, respectively",
                          elev_below = "number of points (out of 24) more than 20 m and 50 m downhill of a location for a 1000 m and 5000 m buffer, respectively",
@@ -421,30 +427,32 @@ cov_act %>%
 
 ```
 
+### --> add area size 
+
 ```{r}
 
 data.frame(
-  Area = c("Entire Cohort", 
-                "Mobile Monitoring",
-                "Study",
-                "Spatiotemporal Modeling"
+  Area = c("United States", 
+           "Study",
+           "Mobile Monitoring",
+                #"Spatiotemporal Modeling"
                 ),
   N = c(nrow(cov_act),
-        length(monitoring_ids),
         length(study_ids),
-        length(st_ids)
+        length(monitoring_ids),
+        #length(st_ids)
         )) %>%
   mutate("Proportion of Total"  = N/nrow(cov_act)) %>%
-kable(caption = "ACT cohort locations included in this study", 
+kable(caption = "ACT cohort locations included in the monitoring and study areas relative to all U.S. locations on record", 
       col.names = c("Area", "No. Locations", "Proportin of Total"),
       digits = 2) %>% 
   kable_styling()
 
 ```
 
-Save datasets
 
 ```{r}
+# # Save datasets
 
 # saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda"))
 # saveRDS(cov_act,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))

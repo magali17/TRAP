@@ -88,7 +88,7 @@ source("A2.0.1_Var&Fns.R")
 cov_act <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
 
 # all annual estimates
-annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda")) %>%
+annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda")) %>%
   # filter for now since don't have covariates for this site yet
   filter(site_id != "MS0601")
 
@@ -178,6 +178,8 @@ grid_covars <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_g
 
 Description of analyses 
 
+### --> add ACT locations in study area sensitivity analysis
+
 ```{r}
 as.data.frame(
   analysis_names) %>%
@@ -199,7 +201,7 @@ as.data.frame(
 Cross-validation parameters considered.
 
 ```{r, echo = T}
-fast <- FALSE
+fast <- T
 
 if (fast == FALSE) {
     k <- 10
@@ -271,26 +273,22 @@ for (i in seq_along(analysis_names)) {
 }
 
 ### --> ? replace cv_each_combo above w/ cv_results?
-cv_results <- cv_each_combo    
+cv_results <- cv_each_combo
 
 ```
 
-Table of CV results.
-
-A slightly different number of PLS components and variogram parameters were selected via cross-validation for both UFP and BC. CV RMSE and R2 (MSE-based) estimates varied slightly.
 
 ```{r}
-cv_results %>%
-  # relable analysis variable
-  label_analysis(var = "Analysis") %>%
-  kable(caption = "PLS components and variogram parameters selected via cross-validation for primary and sensitivity analyses", 
-        col.names = c("Pollutant", "Analysis", "PLS Components", "Variogram Plotting Max Dist Fraction", "Variogram Plotting Dist (m)", "RMSE", "R2"),
-        digits = 2) %>%
-  kable_styling() %>%
-  add_footnote("MSE-based R2")
+# cv_results %>%
+#   # relable analysis variable
+#   label_analysis(var = "Analysis") %>%
+#   kable(caption = "PLS components and variogram parameters selected via cross-validation for primary and sensitivity analyses", 
+#         col.names = c("Pollutant", "Analysis", "PLS Components", "Variogram Plotting Max Dist Fraction", "Variogram Plotting Dist (m)", "CV RMSE", "CV R2"),
+#         digits = 2) %>%
+#   kable_styling() %>%
+#   add_footnote("MSE-based R2")
 
 ```
-
 
 ```{r, results = "hide", eval=F}
 # don't include this for now to simplify analyses 
@@ -375,7 +373,6 @@ cv_alt %>%
 
 calculate the out-of-sample R2 and RMSE for the UK model using the CV-selected parameters.
 
-### --> 1-1 plot of prediction vs observation    
 ### --> need to use the variogram paramters selected through CV (e.g., nugget, partial sill, range) here and in all further analyses?
 
 ```{r, results = "hide"}
@@ -428,27 +425,38 @@ for (i in seq_along(analysis_names)) {
 
 ```
 
-The table below shows the out-of-sample UFP and BC model performance after fitting the UK model selected via CV and evaluting it against the validation set (~10% of the data). 
+Table of modeling parameters selected via CV and the out-of sample model performance.
+
+A slightly different number of PLS components and variogram parameters were selected via cross-validation for both UFP and BC. CV RMSE and R2 (MSE-based) estimates varied slightly.
 
 For UFP, the primary and unweighted annual average analysis performed best (RMSE: __ , R2: __ ), while the analyses using stop means and windsorized observtaions perfomred worst (RMSE: __ , R2: __ ). 
 
 For BC, the primary and unweighted annual average analysis performed best (RMSE: __ , R2: __ ), while the analyses using the native scale and windsorized observtaions perfomred worst (RMSE: __ , R2: __ ). 
 
 ```{r}
-out_of_sample_valid %>%
+cv_results %>%
+  rename(CV_RMSE = RMSE,
+         CV_R2 = R2) %>% 
+  left_join(out_of_sample_valid)  %>%
+  rename(OOS_RMSE = RMSE,
+         OOS_R2 = R2) %>%
   label_analysis(var = "Analysis") %>%
-  kable(caption = "Out-of-sample RMSE and R2 using model parameters from CV (calculated on validation set).") %>%
-  kable_styling() %>%
+  
+  kable(caption = "PLS components and variogram parameters selected via cross-validation for primary and sensitivity analyses, as well as out-of-sample (OOS) model performances", 
+        col.names = c("Pollutant", "Analysis", "PLS Components", "Variogram Plotting Max Dist Fraction", "Variogram Plotting Dist (m)", "CV RMSE", "CV R2", "OOS RMSE", "OOS R2"),
+        digits = 2) %>%
+    kable_styling() %>%
   add_footnote("MSE-based R2") 
 
+
+# out_of_sample_valid %>%
+#   label_analysis(var = "Analysis") %>%
+#   kable(caption = "Out-of-sample RMSE and R2 using model parameters from CV (calculated on validation set).") %>%
+#   kable_styling() %>%
+#   add_footnote("MSE-based R2") 
+
 ```
-
-### --> ? table w/ CV selected parameters, CV RMSE & R, & out-of-sample RMSE, R2?
-
-```{r}
-
-```
-
+ 
 
 ```{r, results = "hide", eval=F}
 #Using same PLS component number and variogram distance fraction as primary analysis. 
@@ -702,6 +710,186 @@ for (i in seq_along(analysis_names)) {
 
 ```
 
+### --> compare my results form primary analysis (3 PLS, 10% plotting distance) to using likfit()
+
+```{r}
+# PLS
+scores(pls_models$ufp_primary_uk)
+
+ 
+```
+
+```{r}
+
+  dt = annual
+  y_name = "ufp_primary"
+  cov_names. = cov_names_log
+  #CV folds
+  k = 3
+  # max PLS components to evaluate
+  use_n_scores. = 3
+   
+  score_n_names <- paste0("Comp", 1:use_n_scores.)
+  
+  dt <- dt %>% rename(y_name = y_name) %>%
+    drop_na() %>%
+    #create folds for test/train set
+    mutate(set = sample(c(1:k), size = nrow(.), replace = T),
+           cv_prediction = NA)
+ 
+  for(f in seq_len(k)) {
+    #f=1
+    train_grp <- dt$set != f
+    
+    dt_train <- dt %>% filter(train_grp)  
+    
+    dt_test <- dt %>% filter(!train_grp)   
+    
+    #fit PLS to training data
+    pls_train <- plsr(y_name ~.,
+                      data=dt_train[,c("y_name", cov_names.)], 
+                      ncomp = use_n_scores.,
+                      scale=T)
+    
+    # extract scores for UK
+    scores_train <- scores(pls_train)[,c(1:use_n_scores.)] %>% 
+      as.data.frame()
+    scores_test <- predict(object = pls_train,
+                           newdata = dt_test,
+                           ncomp = 1:use_n_scores.,
+                           type = "score") %>%
+      as.data.frame()
+    
+    # take out spaces in names
+    names(scores_train) <- score_n_names
+    names(scores_test) <- score_n_names
+    
+    # dataset w/ UFP measurements, geocovariates & location info
+    pls_df_train <- cbind(dt_train, scores_train)  
+    
+    pls_df_test <- cbind(dt_test, scores_test)  
+    
+    ################################ UK ################################
+    geo_train <- as.geodata(pls_df_train, 
+                            coords.col = c("lambert_x", "lambert_y"), 
+                            data.col = "y_name", 
+                            covar.col = score_n_names)
+    
+    # --> ? don't need this now?
+    geo_test <- as.geodata(pls_df_test, 
+                           coords.col = c("lambert_x", "lambert_y"), 
+                           data.col = "y_name", 
+                           covar.col = score_n_names)
+    
+    ##trend
+    cov_trend <-  as.formula(paste0("~ ", paste0(score_n_names,  collapse = " + " )))
+    
+    # # issue: still have to tell it a plotting distance 
+    # variog_train <- variog(geo_train,
+    #                         uvec=c(seq(0, 1000, by = 300), seq((1000 + 1000),  by= 1000)))
+    
+    
+    # can run variog() w/o plotting maximum, but range is very large ~ 10k
+    #variog_train <- variofit(variog(geo_train), cov.model = "exp" ) 
+     
+    #plot(variog(geo_train))
+set.seed(1)
+lf1 <- likfit(geodata = geo_train, 
+       trend = cov_trend,
+       #sig squared (partial sill), phi/theta (range). manually estimate these by looking at variogram plots
+       
+       #ini.cov.pars = c(0.025, 4000),  # Dr. Sampson suggested a range of 5000 ##variog_train
+       
+       # ? or use a matrix
+       ini.cov.pars = as.matrix(cbind(seq(0, 1, l=4), seq(1000, 5000, l=4)) ) , 
+        
+       
+       #ini.cov.pars = variog_train,
+
+       # ? helps? is this like using a matrix of values for ini.cov.pars?
+       limits = pars.limits(sigmasq=c(.01, .9), phi=c(300, 10000)),
+       
+       fix.nugget = FALSE,
+       cov.model = "exponential",
+       lik.method = "ML"
+       )
+
+# doesn't work? #use summary.likGRF() to pring summary of fitted model. e.g., see $parameters.summary    
+lf1$parameters.summary
+
+
+### --> ?? how do u make predictions? 
+predict(lf1, newdata = geo_test) 
+    
+     
+    
+  }
+  
+    #save CV predictions
+    dt$cv_prediction[!train_grp] <- kc_cv$predict
+    
+    
+  #   max.dist <- summary(geo_train)$distances.summary[["max"]]
+  #   
+  #   # --> ? select this variogram parameter through CV??
+  #   max.plot.dist <- max.dist*dist_fract. #[dist_fract_index] 
+  #   
+  #   ############################ model residuals ###################################### 
+  #   ##Empirical Variogram
+  #   brk_pt <- 1000
+  #   by1_pt <- 300
+  #   by2_pt <- 1000
+  #   
+  #   variog_train <- variog(geo_train,
+  #                          uvec=c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
+  #                          #UK
+  #                          trend = cov_trend, 
+  #                          messages = F)
+  #   
+  #   #use geoR try to estimate intitial range & sill values. using WLS and an exponential fit
+  #   wls_ests_train <- variofit(variog_train, cov.model = "exp", 
+  #                              messages = F)
+  #   
+  #   # --> ? select this variogram parameter through CV??
+  #   #don't need initial values above since estimates seem to be the same w/ or w/o ini = wls_ests_train (based on small sample)?
+  #   resid_model_train <- variofit(vario = variog_train, 
+  #                                 ini = wls_ests_train, 
+  #                                 cov.model = "exp",
+  #                                 #weights = "equal", #ols
+  #                                 weights = "npairs",#wls
+  #                                 #messages = F
+  #                                 ) 
+  #   
+  #   #trend
+  #   train_trend <- trend.spatial(trend = cov_trend, geo_train)
+  #   test_trend <- trend.spatial(trend = cov_trend, geo_test)
+  #   
+  #   ############################# Predict #############################
+  #   kc_cv <- krige.conv(coords = geo_train$coords,
+  #                       data = geo_train$data,
+  #                       locations = geo_test$coords,
+  #                       krige = krige.control(type = "ok",
+  #                                             obj.model = resid_model_train, 
+  #                                             trend.d = train_trend,
+  #                                             trend.l = test_trend))
+  #   
+  #   #save CV predictions
+  #   dt$cv_prediction[!train_grp] <- kc_cv$predict
+  # 
+  # }
+  # 
+  # 
+  # result <- list(dt = dt,
+  #                max_plot_dist = max.plot.dist,
+  #                max_dist = max.dist)
+  # 
+  # return(result)
+  # #return(dt)
+ 
+
+```
+
+
 ## PLS results 
 
 ### PLS component loadings for primary analysis
@@ -830,9 +1018,11 @@ compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
 
 ```
 
-### --> ? change these to ousdie study are if arguing for not predicting outside study area? 
 
 ```{r} 
+### --> ? change these to ousdie study are if arguing for not predicting outside study area? 
+
+
 # ACT cohort locations outside the monitoring area but still within the ST modeling area have a slightly lower PLS scores than mobile monitoring stops.
 
 # # in ST but outside monitoring area
@@ -970,9 +1160,6 @@ legend("bottomright",
        lty=c(1:2), col = c(1:2))
 ```
 
-
-
-
 ## LUR vs Kriging 
 
 UK Yhat = LUR + kriging 
@@ -1049,6 +1236,7 @@ p_study <- uk_decompose %>%
           x.variable = "regression_prediction", x.label = "LUR", 
           mytitle = "ACT locations in the study area", 
           col.by = "site_location")  
+p_study_ufp <- p_study
 
 p_st <- uk_decompose %>%
     filter(st_area) %>%
@@ -1063,8 +1251,7 @@ p_all <- uk_decompose %>%
           mytitle = "All ACT locations in the U.S.", 
           col.by = "site_location") 
 
-# study area 
-p_study
+ 
 
 # other areas
 ggarrange(p_monitoring, p_study, p_st, p_all) %>%
@@ -1078,7 +1265,6 @@ Locations near the Port of Seattle and northeast of the airport are krigged the 
 - Higher kriging near the Port of Seattle and the airport indicate that these are locations where the LUR piece of UK is  characterizing concentrations less well (based on geocovariates alone).
 
 ### --> make bubbles bigger or jitter lat/long of ACT locations. Or map to grid locations within the study area   
-### --> plot primary UFP & BC map together   
 
 ```{r}
 uk_decompose %>%
@@ -1162,6 +1348,7 @@ p_study <- uk_decompose %>%
           x.variable = "regression_prediction", x.label = "LUR", 
           mytitle = "ACT locations in the study area", 
           col.by = "site_location")  
+p_study_bc <- p_study
 
 p_st <- uk_decompose %>%
     filter(st_area) %>%
@@ -1178,6 +1365,14 @@ p_all <- uk_decompose %>%
 
 ggarrange(p_monitoring, p_study, p_st, p_all) %>%
   annotate_figure(top = "UK vs regression BC predictions (ng/m3) from the primary analysis for ACT locations")
+
+```
+
+Compare UFP vs BC 
+
+```{r}
+ggarrange(p_study_ufp, p_study_bc) %>%
+  annotate_figure(top = "UK vs regression UFP (pt/cm3) & BC predictions (ng/m3) from the primary analysis for ACT locations")
 
 ```
 
@@ -1210,9 +1405,11 @@ uk_predictions_df_l <- uk_predictions_df %>% gather("Analysis", "prediction", co
 
 ```
 
+### --> add ACT locations in study area sensitivity analysis
+
 Predictions are overall similar for primary and sensitivity analyses of both annual average BC and UFP concentrations. 
 
-- Similar results acros these analyses indicate that model predictions are robust and simply an artifact of our modeling decisions.
+- Similar results across these analyses indicate that model predictions are robust and simply an artifact of our modeling decisions.
 
 ```{r}
 # table 

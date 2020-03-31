@@ -191,21 +191,53 @@ add.temporal.variables <- function(data,
 
 }
 
+############################## combines multiple ptrak or aethalometer MA200 files ##############################
+# ptrak.bind.fn # OLD NAME
+
+#returns single file of ptrak data
+read_directory_files <- function(folder_path, 
+                                 instrument = "ptrak"
+) {
+  
+  #names of files in folder
+  files_list <- list.files(folder_path)
+  
+  #create empty df w/ correct number of columns for specific files
+  df <- data.frame()
+  
+  #rbind files
+  for (i in 1:length(files_list)) {
+    
+    if(instrument == "ptrak") {df1 <- read.ptrak(myfilepath = file.path(folder_path, files_list[i]))} 
+    
+    if(instrument == "bc") {df1 <- read_bc(myfilepath = file.path(folder_path, files_list[i]))}
+    
+    df <- rbind(df, df1)
+  } 
+  
+  tz(df$time) <- "America/Los_Angeles"
+  
+  return(df)
+  
+}
 
 ################################ reads raw ptrak files ################################
 #returns clean ptrak files from raw files 
 
 #data.table allows us to look for text in a line, otherwise use a row #
+
+#myfilepath <- file.path(my_path, "2019-04-18_PMPT_93_LAB_a.txt")
+
 read.ptrak <- function(myfilepath) {
   
-  library(stringi)
+  #library(stringi)
   
   dt <- data.table::fread(myfilepath,
                            #skip lines until see this text & make it column headers
                            skip = "MM/dd/yyyy", 
                            #keeps reading after blank row
                            fill=T) %>%
-  rename(
+ dplyr::rename(
     date = "MM/dd/yyyy", 
     time = "hh:mm:ss", 
     Conc_pt_cm3 = "pt/cc"
@@ -217,39 +249,63 @@ read.ptrak <- function(myfilepath) {
     datetime = mdy_hms(paste(date, time), tz = "America/Los_Angeles")
   ) %>%
   select(
-    datetime,
+    time = datetime,
     Conc_pt_cm3
-  ) %>% 
-    mutate(#look at file path to ID AQS location
-           location = ifelse(stri_detect_fixed(myfilepath, "10W"), "10W", "BH"
-                             )
-           )
+   ) 
+  
+  #location ID
+  dt$location <- NA
+  dt$location[grepl("10W", toupper(myfilepath))] <- "10W"
+  dt$location[grepl("BH", toupper(myfilepath))] <- "BH"
+  dt$location[grepl("LAB", toupper(myfilepath))] <- "Lab"
+  dt$location[grepl("RM114", toupper(myfilepath))] <- "Rm 114"
+  dt$location[grepl("_R0", toupper(myfilepath))] <- "End of route"
+  
+  # instrument ID
+  dt$instrument_id <- NA
+                                    # (?i) # ignore lower case
+  dt$instrument_id <- str_extract(myfilepath, "(?i)(PMPT_)[0-9]*")  
   
   return(dt)
   
   }
 
-############################## combines multiple ptrak files ##############################
+#   str_extract(myfilepath, "(?i)(?<=PMPT)[0-9]")
 
-#returns single file of ptrak data
-ptrak.bind.fn <- function(folder_path) {
+
+################################ reads raw BC files ################################
+
+read_bc <- function(myfilepath) {
   
-  #names of files in folder
-  files_list <- list.files(folder_path)
+  dt <- read.csv(myfilepath) %>%
+    select(date = Date.local..yyyy.MM.dd., 
+           time = Time.local..hh.mm.ss.,
+           ir_atten = IR.ATN1,
+           ir_bc =  IR.BC1
+    ) %>%
+    mutate(
+      time = ymd_hms(paste(date, time), tz = "America/Los_Angeles")
+    ) %>%
+    select(-date)
   
-  #create empty df
-  df <- as.data.frame(matrix(ncol=3,nrow=0))
+  #location ID
+  dt$location <- NA
+  dt$location[grepl("10W", toupper(myfilepath))] <- "10W"
+  dt$location[grepl("BH", toupper(myfilepath))] <- "BH"
+  dt$location[grepl("LAB", toupper(myfilepath))] <- "Lab"
+  dt$location[grepl("RM114", toupper(myfilepath))] <- "Rm 114"
+  dt$location[grepl("_R0", toupper(myfilepath))] <- "End of route"
   
-  #rbind files
-  for (i in 1:length(files_list)) {
-    df1 <- read.ptrak(myfilepath = file.path(folder_path, files_list[i]))
-    
-    df <- rbind(df, df1)
-  } 
+  #instrument ID
+  dt$instrument_id <- NA
+  # (?i) # ignore lower case
+  dt$instrument_id <- str_extract(myfilepath, "(?i)(bc_)[0-9]*")  
   
-  return(df)
+  return(dt)
   
-  }
+}
+
+
  
 ###################### Time series plots #####################################################
 # returns time series plots of all values in the dataset, facetted by run
@@ -283,7 +339,8 @@ time_series_plots <- function(dt,
                        ) +
     labs(title= mytitle,
          y = "UFP (pt/cm3)",
-         shape = "Instrument ID"
+         shape = "Instrument ID",
+         col = ""
     ) +
     theme(legend.position = "bottom") 
     
@@ -553,6 +610,7 @@ map_fn <- function(dt,
                    color_map = TRUE,
                    color_by = "ufp", color_units = "pt/cm3",
                    outline_points = TRUE,
+                   dot_size = 2,
                    latitude_name = "latitude", longitude_name = "longitude",
                    map_title = NULL,
                    include_monitoring_area = FALSE, monitoring_area_alpha = 0.2,
@@ -615,10 +673,9 @@ map_fn <- function(dt,
       geom_polygon(data = study_area, 
                 aes(x = long, y = lat, group = group, 
                     fill = "Study"),
-                #fill = "plum2",
-                #col = "plum2",
                 alpha = study_area_alpha,
-                size = 0.5 )
+                size = 0.5 
+                )
   }
   # add monitoring area
   if(include_monitoring_area) {
@@ -641,12 +698,12 @@ map_fn <- function(dt,
     mymap <- mymap +
       geom_point(data = dt,
                  aes(x = long, y = lat), col= "black",
-                 size = 2.5)
+                 size = dot_size+0.5)
     }
     mymap <- mymap +
       geom_point(data = dt,
                  aes(x = long, y = lat, col = y),
-                 alpha = 0.8, size = 2,
+                 alpha = 0.8, size = dot_size,
       ) +
       scale_color_gradient(name = color_units, low = low_conc_col, high = high_conc_col) 
   }
@@ -730,6 +787,49 @@ estimate_annual_avg <- function(dt,
     results <- lm_pred
     
     return(results)
+}
+
+
+####################################################
+# returns df w/ relabeled pollutant names in the "variable" column
+
+label_pollutant <- function(dt, 
+                           var = "variable",
+                           label = "instrument"
+                           ) {
+  dt <- dt %>%
+    dplyr::rename(var = var) 
+  
+  if(label == "instrument") {
+  
+    dt <- dt %>%
+      mutate(var = recode_factor(var,
+                          "ptrak_pt_cm3" = "P-TRAK UFP (20-1,000 nm)",
+                          "scan_20_420_pt_cm3" = "NanoScan UFP (20-420 nm)",
+                          "ona_bc" = "ONA-corrected BC",
+                          "ma200_bc" = "BC")) 
+  }
+  
+  if(label == "pollutant") {
+    
+    dt <- dt %>%
+      mutate(var = recode_factor(var,
+                                 "ptrak_pt_cm3" = "UFP (pt/cm3)",
+                                 "ufp_pt_cm3" = "UFP (pt/cm3)",
+                                 #"scan_20_420_pt_cm3" = "UFP (20-420 nm)",
+                                 "ona_bc" = "ONA-corrected BC (ng/m3)",
+                                 "ma200_bc" = "BC (ng/m3)",
+                                 "bc_ng_m3" = "BC (ng/m3)"
+                                 )) 
+  }
+  
+  
+  
+  #change variable name back
+  names(dt)[names(dt) == "var"] <- var
+
+  return(dt)
+  
 }
 
 ##############################################################################################################################
@@ -919,7 +1019,7 @@ pls_uk_cv_predictions <- function(
     names(scores_train) <- score_n_names
     names(scores_test) <- score_n_names
     
-    # dataset w/ UFP measurements, geocovariates, location
+    # dataset w/ UFP measurements, geocovariates & location info
     pls_df_train <- cbind(dt_train, scores_train)  
     
     pls_df_test <- cbind(dt_test, scores_test)  
@@ -939,6 +1039,7 @@ pls_uk_cv_predictions <- function(
     
     max.dist <- summary(geo_train)$distances.summary[["max"]]
     
+    # --> ? select this variogram parameter through CV??
     max.plot.dist <- max.dist*dist_fract. #[dist_fract_index] 
     
     ############################ model residuals ###################################### 
@@ -953,12 +1054,11 @@ pls_uk_cv_predictions <- function(
                            trend = cov_trend, 
                            messages = F)
     
-    #plot(variog_train)
-    
     #use geoR try to estimate intitial range & sill values. using WLS and an exponential fit
     wls_ests_train <- variofit(variog_train, cov.model = "exp", 
                                messages = F)
     
+    # --> ? select this variogram parameter through CV??
     #don't need initial values above since estimates seem to be the same w/ or w/o ini = wls_ests_train (based on small sample)?
     resid_model_train <- variofit(vario = variog_train, 
                                   ini = wls_ests_train, 
@@ -973,8 +1073,8 @@ pls_uk_cv_predictions <- function(
     test_trend <- trend.spatial(trend = cov_trend, geo_test)
     
     ############################# Predict #############################
-    kc_cv <- krige.conv(coords = geo_train$coords,
-                        data = geo_train$data,
+    kc_cv <- krige.conv(geo_train, #coords = geo_train$coords,
+                        #data = geo_train$data,
                         locations = geo_test$coords,
                         krige = krige.control(type = "ok",
                                               obj.model = resid_model_train, 
@@ -1110,9 +1210,8 @@ uk_predictions <- function (
   )  
   
   ############################################# predict at participant homes #############################################
-  
-  uk_new <- krige.conv(coords = geo_dt$coords,
-                       data = geo_dt$data,
+              # could also use likfit(here)
+  uk_new <- krige.conv(geo_dt, #coords = geo_dt$coords, data = geo_dt$data,
                        locations = geo_new$coords,
                        krige=krige.control(type = "ok",
                                            obj.model = resid_model,

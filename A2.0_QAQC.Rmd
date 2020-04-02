@@ -62,7 +62,7 @@ editor_options:
 # Analyses  
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F, 
+knitr::opts_chunk$set(echo = F,  
                       cache=T, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE,
@@ -92,7 +92,7 @@ source("0.Global_Fns.R")
 source(file.path("A2.0.1_Var&Fns.R"))
 
 #read in data
-mm_full0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_raw_2020-03-18.rda"))
+mm_full0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_raw_2020-03-17.rda"))
 
 ### --> why do these runs have missing variable/value? 2019-05-14_R03, 2019-07-17_R07	
 
@@ -163,13 +163,134 @@ mm_full <- mm_full %>%
 
 ```
 
-Instruments Used
+upload zero
+
+```{r}
+my_tz <- "America/Los_Angeles"
+
+# PTRAKS
+my_path <- file.path("Data", "Aim 2", "Zero Checks", "ptrak")
+lab_ptrak_zero <- read_directory_files(folder_path = my_path, instrument = "ptrak") %>%
+  #only 2 daytes have filter start/end times. keep all readings for rest
+  filter(
+    # these days do not have notes on start/end filter times
+    (time > ymd_hms("2019-03-13 13:39:30", tz = my_tz) & time < ymd_hms("2019-03-13 13:45:00", tz = my_tz)) |
+    (time > ymd_hms("2019-10-22 16:34:00", tz = my_tz) & time < ymd_hms("2019-10-22 16:44:00", tz = my_tz)) |
+    
+    # NOT DOING THIS - these days have notes on start/end filter times. added 2 min to start/end
+    (time > ymd_hms("2019-10-02 13:53:19", tz = my_tz)  & time < ymd_hms("2019-10-02 14:04:00", tz = my_tz)) |
+    (time > ymd_hms("2019-11-21 11:05:50", tz = my_tz)  & time < ymd_hms("2019-11-21 11:18:20", tz = my_tz) )
+    ) #%>%
+  # mutate(
+  #   zero_check = ifelse(
+  #     (time > ymd_hms("2019-10-02 13:53:19", tz = my_tz)  & time < ymd_hms("2019-10-02 14:04:00", tz = my_tz)) |
+  #   (time > ymd_hms("2019-11-21 11:05:50", tz = my_tz)  & time < ymd_hms("2019-11-21 11:18:20", tz = my_tz)), TRUE, NA)
+  #   )
+
+ptrak_zero_start_end <- ymd_hms(
+  "2019-10-02 13:53:19",
+  "2019-10-02 14:04:00",
+  
+  "2019-11-21 11:05:50",
+  "2019-11-21 11:18:20",
+  
+  #file not found?
+  #"2019-11-21 11:07:10", 
+  tz = "America/Los_Angeles"
+)
+
+```
+
+```{r}
+# BC
+my_path <- file.path("Data", "Aim 2", "Zero Checks", "bc")
+lab_bc_zero <- read_directory_files(folder_path = my_path, instrument = "bc") %>%
+  #only 2 daytes have filter start/end times. keep all readings for rest
+  filter(
+    # these days do not have notes on start/end filter times  
+    ##  16:25:00 - 16:30:00 ??
+    (time > ymd_hms("2019-10-22 16:20:00", tz = my_tz) & time < ymd_hms("2019-10-22 16:35:00", tz = my_tz)) |
+
+    # NOT DOING THIS : these days have notes on start/end filter times. added 2 min to start/end
+    (time > ymd_hms("2019-10-02 14:07:30", tz = my_tz)  & time < ymd_hms("2019-10-02 14:27:00", tz = my_tz)) |
+    (time > ymd_hms("2019-11-21 11:09:16", tz = my_tz)  & time < ymd_hms("2019-11-21 11:21:45", tz = my_tz) )
+    ) # %>%
+  # mutate(
+  #   zero_check = ifelse(
+  #     (time > ymd_hms("2019-10-02 14:07:30", tz = my_tz)  & time < ymd_hms("2019-10-02 14:27:00", tz = my_tz)) |
+  #   (time > ymd_hms("2019-11-21 11:09:16", tz = my_tz)  & time < ymd_hms("2019-11-21 11:21:45", tz = my_tz)), TRUE, NA)
+  #   )
+
+bc_zero_start_end <- ymd_hms(
+  "2019-10-02 14:07:30",
+  "2019-10-02 14:27:00",
+  
+  "2019-11-21 11:09:16",
+  "2019-11-21 11:21:45",
+  
+  tz = "America/Los_Angeles")
+
+
+# lab_ptrak_zero %>%
+#   ggplot(aes(x=time, y= Conc_pt_cm3, col=instrument_id, shape=location)) + 
+#   geom_point() + 
+#   geom_vline(xintercept = ptrak_zero_start_end, col="red") +
+#   geom_hline(yintercept = 0, col="black") +
+#   scale_y_log10() +
+#   facet_wrap(~date(time), scales = "free") + 
+#   labs(
+#     title = "P-TRAK Zero checks",
+#     y = "UFP (pt/cm3)",
+#     col = "Instrument ID",
+#     shape = "Location"
+#   )
+# 
+# lab_bc_zero %>%
+#   ggplot(aes(x=time, y= ir_bc, col=instrument_id, shape=location)) + 
+#   geom_point() + 
+#   geom_vline(xintercept = bc_zero_start_end, col="red") +
+#   geom_hline(yintercept = 0, col="black") +
+#   scale_y_log10() +
+#   facet_wrap(~date(time), scales = "free") + 
+#   labs(
+#     title = "Aethalometer (IR) Zero checks",
+#     y = "Raw BC reading (ng/m3)",
+#     col = "Instrument ID",
+#     shape = "Location"
+#   )
+
+```
+
+upload lab collocations 
+
+```{r}
+# PTRAKS
+my_path <- file.path("Data", "Aim 2", "Lab Collocations", "ptrak")
+lab_ptrak_collos <- read_directory_files(folder_path = my_path, instrument = "ptrak") %>%
+  dplyr::rename(value = Conc_pt_cm3) %>%
+  #only keep these times, PMPT_94 had weird readings before - setup issues?
+  filter(time > ymd_hms("2019-04-18 12:30:00",tz = my_tz)) 
+
+# BC
+my_path <- file.path("Data", "Aim 2", "Lab Collocations", "bc")
+lab_bc_collos <- read_directory_files(folder_path = my_path, instrument = "bc") %>%
+  dplyr::rename(value = ir_bc) %>%
+  select(-ir_atten) %>%
+  # round to nearest 10s to align readings from different instruments
+  mutate(time_round = round_date(time, unit = "10s"))  
+ 
+```
+
+Instruments Used.
+
+Note: the last day of sampling in 2020 before COVID-19 may have impacted traffic and air pollution patterns was ~ 3/5. Cutting data off here would still give us 12-months of data (though with fewer than the number of desired samples at some locations).
 
 ```{r}
 #instrument used each day
 mm_full %>%
   filter(grepl("ptrak|scan|ir_bc", variable)) %>%
   select(instrument_id, time, variable) %>%
+  label_pollutant(var = "variable") %>%
   mutate(date = date(time)) %>%
   unique() %>%
   ggplot(aes(x=date, y=instrument_id, colour = variable)) + 
@@ -188,19 +309,61 @@ Sample size: total & per instrument
 mm_full %>%
   filter(grepl("ptrak|ir_bc", variable)) %>%
   group_by(variable) %>%
-  mutate(variable_n = n()) %>% 
-  group_by(variable, instrument_id) %>%
   dplyr::summarize(
-    variable_n = variable_n[1],
-    instrument_n = n()
-    ) %>% 
+    no_sampling_days = length(unique(runname)),
+    no_samples = n(),
+    start_date = min(date),
+    end_date = max(date)
+    ) %>%
+  kable(caption = "Total samples per pollutant") %>% 
+  kable_styling()
+  
+```
+
+```{r}
+mm_full %>% 
+  dplyr::filter(grepl("ptrak|ir_bc", variable)) %>%
+  group_by(variable) %>%
   mutate(
-    instrument_prop = round(instrument_n/variable_n, 2)
-  ) %>%
+    N = n()) %>%
+group_by(variable, instrument_id) %>%
+  dplyr::summarize(
+    instrument_samples = n(),
+    instrument_sampling_days = length(unique(runname)),
+    start_date = min(date),
+    end_date = max(date),
+    instrument_prop = round(instrument_samples/N[1], 2)) %>%
   kable(caption = "Samples per instrument") %>% 
   kable_styling()
 
 ```
+
+Drop PTRAK readings from instruments PMPT_2 and PMPT_4 since these were barely used and never on their own. Drop PMPT_1 since it was never collocated, it was only used on its own for 5 days in 2019, and we have resampled these 5 days in 2020. 
+ 
+```{r}
+mm_full <- mm_full %>%
+  filter(!instrument_id %in% c("PMPT_1", 
+                               "PMPT_2", "PMPT_4"
+                               ))
+```
+
+```{r}
+#instrument used each day
+mm_full %>%
+  filter(grepl("ptrak|ir_bc", variable)) %>%
+  select(instrument_id, time, variable) %>%
+  label_pollutant(var = "variable") %>%
+  mutate(date = date(time)) %>%
+  unique() %>%
+  ggplot(aes(x=date, y=instrument_id, colour = variable)) + 
+  geom_point(alpha=0.5) + 
+  theme(legend.position = "bottom") + 
+  labs(title = "UFP and BC Instruments Used",
+       x = "Date",
+       y = "Instrument ID"
+       ) 
+```
+
 
 Distribution of raw data 
 
@@ -209,32 +372,19 @@ mm_full %>%
   filter(grepl("ptrak|ir_bc", variable)) %>%
   group_by(variable) %>%
   distribution.table(var.string = "value") %>%
+  mutate(variable =recode_factor(factor(variable),
+                                  "ptrak_pt_cm3" = "P-TRAK UFP (pt/cm3)",
+                                  "ma200_ir_bc1" = "MA200 BC (ng/m3)")) %>%
+  rename(Pollutant = variable) %>% 
   kable(caption = "Distribution of raw data",
         align = "r") %>%
   kable_styling()
 
 ```
 
-Drop PTRAK readings from instruments PMPT_2 and PMPT_4 since these were barely used and never on their own.
-
-### --> ?? drop PMPT_1 since it was used on its own but for very little time & never on its onw? does lab have collocaitons for PMPMT_1 w/ 93 or 94?
-
-```{r}
-mm_full <- mm_full %>%
-  filter(!instrument_id %in% c("PMPT_2", "PMPT_4"))
-
-```
-
-
 Set up common variables 
 
 ```{r, echo=T}
-
-# site note: distribution of pollutants
-# summary(mm_full$value[mm_full$variable=="bc_ng_m3"])
-# summary(mm_full$value[mm_full$variable=="ptrak_pt_cm3"])
-
-
 max_bc_limit <- 1e6 #ng/m3
 bc_factor <-10 
 
@@ -257,7 +407,7 @@ mm_full %>%
   geom_density(alpha=0.3) + 
   geom_vline(xintercept = 0, col = "red") +
   labs(
-    title = "Distribution of raw aethalometer readings"
+    title = "Distribution of raw aethalometer readings from each wavelength"
   )
 
 ```
@@ -266,7 +416,9 @@ mm_full %>%
 mm_full %>%
   filter(grepl("_bc1", variable)) %>%
   group_by(variable) %>%
-  distribution.table(var.string = "value")
+  distribution.table(var.string = "value") %>%
+  kable(caption = "Distribution of raw aethalometer readings from each wavelength") %>%
+  kable_styling()
   
 ```
 
@@ -285,10 +437,11 @@ mm_full %>%
 
 ```
 
-
 # Correct BC readings using the Optimized Noise-Reduction Algorithm (ONA) 
 
 ```{r}
+## could pick a diff attenuation if corrections are still noisy. the default is 5%
+
 # this does not need to be done separatebly by instrument, results are the same. May be related to different tape positions for differnet instruments, which is already taken into account?
 bc.w <- mm_full %>%
   filter(grepl("ma200", variable)) %>%
@@ -311,30 +464,14 @@ Distribution of raw & ONA-corrected BC readings. We still see some negative valu
 
 ```{r}
 bc %>%
+  label_pollutant(.) %>%
   group_by(BC = variable) %>%
-  distribution.table(var.string = "value") %>% 
-  mutate(BC = recode_factor(factor(BC),
-                             ma200_bc = "Raw",
-                             ona_bc = "ONA-Corrected")) %>%
-  kable(caption = "Distribution of raw and ONA-corrected 10-sec aethalometer readings") %>%
+  distribution.table(var.string = "value") %>%
+  # mutate(BC = recode_factor(factor(BC),
+  #                            ma200_bc = "Raw",
+  #                            ona_bc = "ONA-Corrected")) %>%
+  kable(caption = "Distribution of raw and ONA-corrected 10-sec aethalometer readings (BC ng/m3)") %>%
   kable_styling()
-
-# raw_bc <- mm_full %>% 
-#   filter(grepl("ma200_ir_bc", variable)) %>%
-#   #group_by(instrument_id) %>%
-# distribution.table(., var.string = "value") %>%
-#   mutate(Value = "Raw") %>%
-#   select(Value, everything())
-# 
-# ona_bc <- bc %>%  
-#   #group_by(instrument_id) %>%
-# distribution.table(., var.string = "value") %>%
-#   mutate(Value = "ONA-Corrected") %>%
-#   select(Value, everything())
-# 
-# rbind(raw_bc, ona_bc) %>%
-#   kable(caption = "Distribution of raw and ONA-corrected 10-sec aethalometer readings") %>%
-#   kable_styling()
 
 ```
 
@@ -360,7 +497,7 @@ bc %>%
        )
 ```
 
-ONly keep desired aethalometer readings (raw & ONA corrected IR, 880 nm)  
+Only keep desired aethalometer readings (raw & ONA corrected IR, 880 nm)  
 
 ```{r}
 mm_full <- mm_full %>%
@@ -372,26 +509,82 @@ mm_full <- mm_full %>%
 
 ```
 
-### --> compare raw to ONA in time series plots. is there one value that's driving many of the negative values? 
-#### --> See raw file from 9/21 before its uploaded   
-Elena was most concerned about tops where All of the reading were < 0.
+# Zero Checks
 
-### --> may have to pick a diff attenuation. the default is 5%
+Days with vertical red lines are those with documented filter on/off times. Other days do not have notes.
+
+## UFP
+
+Readings are mostly 0, with the exception of 10/2/19 where there are some elevated counts
 
 ```{r}
 
+lab_ptrak_zero %>%
+  ggplot(aes(x=time, y= Conc_pt_cm3, col=instrument_id, shape=location)) + 
+  geom_point() + 
+  geom_smooth() +
+  geom_vline(xintercept = ptrak_zero_start_end, col="red") +
+  geom_hline(yintercept = 0, col="black") +
+  scale_y_log10() +
+  facet_wrap(~date(time), scales = "free") + 
+  labs(
+    title = "P-TRAK Zero checks",
+    y = "UFP (pt/cm3)",
+    col = "Instrument ID",
+    shape = "Location"
+  )
+
 ```
 
-### --> keep raw and/or high values & adjust in a sensitivity anaysis (e.g., drop top 1% of values)? 
+Zero check summary table.
+
+```{r}
+lab_ptrak_zero %>%
+  group_by(Date = date(time)) %>%
+  distribution.table(var.string = "Conc_pt_cm3") %>%
+  kable(caption = "Distribution of P-TRAK readings (pt/cm3) during zeroc checks") %>%
+  kable_styling()
+
+```
+
+
+## BC
+
+Raw aethalemter readings are noisy very.
+
+```{r}
+lab_bc_zero %>%
+  ggplot(aes(x=time, y= ir_bc, col=instrument_id, shape=location)) + 
+  geom_point() +
+  geom_smooth() +
+  geom_vline(xintercept = bc_zero_start_end, col="red") +
+  geom_hline(yintercept = 0, col="black") +
+  #scale_y_log10() +
+  facet_wrap(~date(time), scales = "free") + 
+  labs(
+    title = "Aethalometer (IR) Zero checks",
+    y = "Raw BC reading (ng/m3)",
+    col = "Instrument ID",
+    shape = "Location"
+  )
+
+```
+
+```{r}
+lab_bc_zero %>%
+  group_by(Date = date(time)) %>%
+  drop_na(ir_bc) %>%
+  distribution.table(var.string = "ir_bc") %>%
+  kable(caption = "Distribution of Aethalometer readings (ng/m3) during zeroc checks") %>%
+  kable_styling()
+```
 
 
 # Low instrument readings 
 
 ## UFP - PTRAKS 
 
-very low concentrations: Elena (MOVUP Study) excluded UPF < 100 b/c: a) had very few samples that were less than 100 (less then 1%), b) they did not correlate to low measures on other particle measurement instruments, c) these values also resulted in extreme values on some the ratio metrics.
-
-PMPT_93 and PMPT_94 have both had 0 readings. PMPT_94 has had a maximum reading of 500k pt/cm3. 
+very low concentrations: Elena (MOVUP Study) excluded UPF < `r low_ufp_lvl` b/c: a) had very few samples that were less than 100 (less then 1%), b) they did not correlate to low measures on other particle measurement instruments, c) these values also resulted in extreme values on some the ratio metrics.
 
 ```{r}
 
@@ -405,10 +598,7 @@ PMPT_93 and PMPT_94 have both had 0 readings. PMPT_94 has had a maximum reading 
 
 ```
 
-Time series plots of runs with very low instrument readings.
-
-### --> ? fn to recode variable, e.g., "P-TRAK (pt/cm3)"
-### --> add labels: runname: ___; Site ID: __
+Time series plots of runs with very low instrument readings. Plots are labeled by runname (date_route) and site ID.
 
 ```{r}
 
@@ -442,7 +632,6 @@ Zoomed in to sites with low readings.
 * 7-13-2019: low alc noted. has clear wick issues in the middle and readings seem too stable immediately before and after.  
 * 1-4-2020: no notes on alc issues. has low readings at nearby stops MS0176 also has low BC readings. MS0177 has some low BC readings, but not all. readings seem too stable. Sign of wick issues?
 
-
 ```{r, fig.height=8}
 df <- data.frame()
 
@@ -456,11 +645,13 @@ for (i in 1:nrow(low_ptrak)) {
 }
 
 df %>%
-  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+  mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>% 
+  label_pollutant(., var = "variable") %>%
   time_series_plots(., mytitle = paste0("time series for sites with PTRAK concentrations < ", low_ufp_lvl, " pt/cm3"),
                     hline_value = low_ufp_lvl) + 
-  facet_wrap(~runname+site_id,
-             scales = "free_x") 
+  facet_wrap(~runname+site_id, 
+             scales = "free_x") + 
+  labs(col = "")
 
 ```
 
@@ -517,7 +708,7 @@ mm_full %>%
 
 ## BC 
 
-Time series plots of runs with very low instrument readings.
+Time series plots of runs with very low instrument readings **for ONA-corrected BC readings**.
 
 ```{r}
 low_bc_quant <- 0.001
@@ -539,9 +730,6 @@ low_bc <- mm_full %>%
 #   as.character()
 
 ```
-
-##--> make BC axis on left
-
 
 ```{r, fig.height=8}
 y_max <- 3000
@@ -577,8 +765,6 @@ page_no <- ceiling(length(unique_low_bc_runs)/plots_per_page)
 
 ```
 
-##--> make BC axis on left
-
 zoom in on specific sites   
 * no site-specific note associated with low BC readings  
 
@@ -596,10 +782,11 @@ for (i in 1:nrow(low_bc)) {
 
 bc_site_plots <- df %>%
   mutate(value = ifelse(grepl("bc", variable), value*bc_factor, value)) %>%
+  label_pollutant(.) %>%
   time_series_plots(., plot_bc_factor = bc_factor, 
                     mytitle = paste0("time series for sites with BC concentrations <= ", low_bc_lvl, " pt/cm3"),
                     hline_value = low_bc_lvl, 
-                    ymax = y_max, 
+                    #ymax = y_max, 
                     facet_runname = F) + 
   labs(subtitle = paste0("only showing concentrations up to ", y_max, " pt/cm3"))
 
@@ -607,7 +794,7 @@ bc_site_plots <- df %>%
 # page_no <- ceiling(length(unique_low_bc_runs)/9)
 
 for (i in seq(page_no)) {
-  #i=6  #i=3 has 9/21 plot
+  #i=1  #i=3 has 9/21 plot
   
   myplot <- bc_site_plots +
     ggforce::facet_wrap_paginate(~runname + site_id, 
@@ -620,17 +807,15 @@ for (i in seq(page_no)) {
 
 ```
 
-### ---> example of ~ 3 stops for dissertation
+Example of a few stops with low BC readings (for dissertation example)
 
 ```{r}
-
-```
-
-```{r}
-# total BC readings before dropping any values:
-total_bc_readings <- mm_full %>%
-  filter(grepl("bc", variable)) %>%
-  nrow()
+bc_site_plots +
+    ggforce::facet_wrap_paginate(~runname + site_id, 
+                             nrow = 2, ncol = 2, 
+                             page = 9, 
+                             scales = "free") + 
+  labs(title = "Example of a few stops with low BC readings")
 
 ```
 
@@ -640,58 +825,33 @@ The number of zero & negative (<= 0) 10-sec BC readings is very low for ONA-corr
 # proportion of negative BC readings
 mm_full %>%
   filter(grepl("bc", variable)) %>%
+  label_pollutant(.) %>%
   group_by(variable) %>%
   dplyr::summarize(
     total_readings = nrow(.),
     at_or_below_0 = sum(value<=0),
     prop_at_or_below_0 = at_or_below_0/total_readings
-  )
-
-# # BC variable to use
-# bc_var <- "ma200_bc"
-# #bc_var <- "ona_bc"
-# 
-# negative_bc_no <- sum(mm_full$value[mm_full$variable == bc_var] <= 0) 
-# negative_bc_pct <- round(negative_bc_no/total_bc_readings*100, 2)
-# 
-# paste0(negative_bc_no, " (", negative_bc_pct, "%)")
-
-```
-
-### --> ?? drop BC < 0 since these readigns seem to generally be different than neighboring BC readings and diffrent from the patterns of other particle instruments? 
-
-### -->?? Drop or keep values < 0 or < threshold (or set to ~ 0/min) since so few and don't know wha cutoff to use for high values? 
-
-**Not doing anything for now since some of the very low values are in series (next to each other), indicating that readings are truly low?? Will averaging very low/high readings result in positive, unbiased readings in the end?**
-
-```{r}
-# [??] Set values < 0 equal to ___ the minimum positive BC reading divided by sqrt(2) ___
-# 556 notes suggest: LOD/sqrt(2), but manual does not have a LOD for a 10-sec aethalometer reading. 
- 
-# low_bc_to_drop <- 0
-# 
-# min_positive_bc <- mm_full %>% 
-#   filter(grepl("bc", variable),
-#          value >0
-#          ) %>%
-#   dplyr::summarise(min_positive_bc = min(value)) %>% 
-#   as.numeric()
-# 
-# mm_full <- mm_full %>%
-#   #filter(value >0)
-#   mutate(value = ifelse(value <= 0, min_positive_bc/sqrt(2), value))
-
-```
-
-Distribution of resulting BC readings 
-
-```{r}
-mm_full %>%  
-  filter(grepl("bc", variable)) %>%
-  #group_by(instrument_id) %>%
-distribution.table(., var.string = "value") %>%
-  kable(caption = "Distribution of resulting 10-sec Aethalometer readings") %>%
+  ) %>% 
+  kable(caption = "Readings at or below 0 ng/m3", 
+        col.names = c("BC", "All Readings", "No.", "Proportion"), 
+        digits = 3
+        ) %>%
   kable_styling()
+
+```
+
+Keeping all BC values for now since some of the very low values are in series (next to each other), indicating that readings are truly low? Will averaging very low/high readings result in positive, unbiased readings in the end?
+
+
+```{r}
+# # Distribution of resulting BC readings 
+# mm_full %>%  
+#   filter(grepl("bc", variable)) %>%
+#   label_pollutant(.) %>%
+#   group_by(variable) %>%
+# distribution.table(., var.string = "value") %>%
+#   kable(caption = "Distribution of resulting 10-sec aethalometer readings") %>%
+#   kable_styling()
 
 ```
 
@@ -706,8 +866,6 @@ distribution.table(., var.string = "value") %>%
 * MOVUP study: dropped BC readings > 27k ng/m3 (1% of data)   
 * Kompmaker 2015: did minimal data cleaning b/c averaged 1-min readings to 30-mins   
 * others have taken other approaches for dealing with noisy measurements and spike concentrations (e.g., Apte 2011 SI details dealing w/ spikes due to instrument jolts)
-
-### --> ? take 1 min rolling avg for PTRAK & plot time series? Can see when concentrations diverge
 
 ## High PTRAK readings 
 
@@ -744,22 +902,11 @@ Plot of entire day.
 mm_full %>%
   mutate(value = ifelse(variable == "bc_ng_m3", value*bc_factor, value)) %>%
   filter(runname %in% high_ptrak$runname) %>%
+  label_pollutant(var = "variable") %>%
   time_series_plots(., plot_bc_factor = bc_factor, 
                     hline_value = ptrak_lim,
                     mytitle = "time series for runs with high PTRAK concentrations") + 
   facet_wrap(~runname, scales="free")
-
-# page_no <- ceiling(length(unique(high_ptrak$runname))/plots_per_page)
-# 
-# for (i in seq(page_no)) {
-#   #i=1  
-#   myplot <- ptrak_day_plots +
-#     ggforce::facet_wrap_paginate(~runname, #+ site_id, 
-#                              nrow = 3, ncol = 4, 
-#                              page = i, 
-#                              scales = "free")  
-#   print(myplot)
-# }
 
 ```
 
@@ -783,23 +930,11 @@ for (i in 1:nrow(high_ptrak)) {
 
 df %>%
   mutate(value = ifelse(variable == "bc_ng_m3", value*bc_factor, value)) %>%
+  label_pollutant(var = "variable") %>%
   time_series_plots(., plot_bc_factor = bc_factor, 
                     hline_value = ptrak_lim,
                     mytitle = "time series for sites with high PTRAK concentrations") + 
   facet_wrap(~runname+site_id, scales="free") 
-
-
-# page_no <- ceiling(nrow(high_ptrak)/plots_per_page)
-# 
-# for (i in seq(page_no)) {
-#   #i=2  
-#   myplot <- ptrak_site_plots +
-#     ggforce::facet_wrap_paginate(~runname + site_id, 
-#                              nrow = 3, ncol = 4, 
-#                              page = i, 
-#                              scales = "free")  
-#   print(myplot)
-# }
 
 ```
 
@@ -830,6 +965,8 @@ high_bc <- mm_full %>%
 
 Plot of entire day.
 
+Elevated BC readings are associated with elevated particle instrument readings.
+
 ```{r}
 # plot of entire day
 mm_full %>%
@@ -841,7 +978,7 @@ mm_full %>%
 
 ```
 
-Zoom in on sites of interest.    
+Zoom in on sites of interest.     
 * no notes associated with high BC readings   
 
 ```{r}
@@ -866,36 +1003,41 @@ df %>%
 
 ```
 
-```{r}
-### --> plot where have divergent estimates. e.g. very high NS readings. near airport? is this where discMini has high readings? 
-
-```
-
-
 # Compare collocated instruments 
 
 ## UFP
 
 Compare collocated PTRAK readings. These will later be averaged when duplicate instruments are used. PMPT_94 has collected most of the measurements and been co-located with PMPT_93, PMPT_4 and PMPT_2. PMPT_1 and PMPT_93 collected measurements early on in the study. PMPT_93 was co-located with PMPT_94 and PMPT_4. Can't compare PMPT_1 to other PTRAKs because it was never co-located.
 
-### PTRAK - PTRAK
-### --> add lab collocations? 
-### --> put these on one plot. keep PMPT 93 vs 4 separate?
+### PTRAK - PTRAK (field & lab collocations)
 
 PTRAK 93 tends to have slightly lower readings than primary PTRAK 94.
 
 ```{r}
-
-mm_full %>%
+all_ptrak_colo <- mm_full %>%
+  filter(grepl("ptrak", variable)) %>%
+  select(time, value, location = route, instrument_id) %>%
+  # add lab collocations
+  rbind(lab_ptrak_collos) %>%
   spread(instrument_id, value) %>%
+  drop_na()
+
+ptrak_collo_dates <- (sort(unique(date(all_ptrak_colo$time))))
+
+```
+
+P-TRAKs were collocated on `r length(ptrak_collo_dates)` unique days: `r ptrak_collo_dates`
+
+```{r}
+# all data 
+all_ptrak_colo %>%
   colo.plot(data.wide = .,
             x.variable = "PMPT_94",  
             y.variable = "PMPT_93", 
             mytitle = paste0("Comparison of collocated PTRAKs (pt/cm3)"), 
-            col.by = "route")
+            col.by = "location")  
+  
 ```
-
-
 
 ```{r}
 # # PMPT_4 has slightly higher reaadings than primary PMPT_94.
@@ -932,12 +1074,8 @@ mm_full %>%
 
 ```
 
-```{r}
-### PTRAK - diSCMini
 
-```
-
-### NanoScan - NanoScan
+### NanoScan - NanoScan (field collocations)
 
 PMPSCAN_3 has slightly lower reaadings than primary PMSCAN_5.
 
@@ -957,13 +1095,19 @@ mm_full %>%
 
 ```
 
-### PTRAK - NanoScan
+### PTRAK - NanoScan (field collocations)
 
-Compare NanoScan (24-422 nm) to ptrak (20-1000 nm) since NanoScan tends to be more steady. Assuming few particles > 420 nm, such that NanoScan and PTRAK readings are comparable.
+Compare NanoScan (24-422 nm) to ptrak (20-1000 nm) since NanoScan tends to be more steady. 
+
+Assuming few particles > 420 nm, such that NanoScan and PTRAK readings are comparable.
+
+First, calculate 30-second rolling means for PTRAKs. The last seconds of the rolling averages are dropped since they use values from the next stop rather than the next few seconds (data is only from stationary monitoring). We calculate floored times to the minute (h:mm:00) for all readings and calculate minute averages. Compare PTRAK to NanoScan readings.
 
 Dropping PTRAK readings above 500k pt/cm3 (instrument threshold)
 
-Note from Tim G: "P-Trak clocks have a tendency to gain, reading perhaps 10 sec fast (but varies by unit) after 6 or 7 hrs or run time.  The NanoScan clock will lose time but at a rate that doesn't vary more than a few seconds in a day of operation. Since the NanoScan measurement is weighted toward the earlier part of the 1-min interval, make sure you are comparing P-Trak and NanoScan spikes for P-Trak readings in the first half of a minute, h:mm:00 to h:mm:30. The NS spike would be time stamped on the minute and corresponding P-Trak value up to 30 sec later."
+**note:** NanoScan 3 & 5 had poor agreement. Not sure how useful this comparison is.
+
+**Note from Tim G:** "P-Trak clocks have a tendency to gain, reading perhaps 10 sec fast (but varies by unit) after 6 or 7 hrs or run time.  The NanoScan clock will lose time but at a rate that doesn't vary more than a few seconds in a day of operation. Since the NanoScan measurement is weighted toward the earlier part of the 1-min interval, make sure you are comparing P-Trak and NanoScan spikes for P-Trak readings in the first half of a minute, h:mm:00 to h:mm:30. The NS spike would be time stamped on the minute and corresponding P-Trak value up to 30 sec later."
 
 ```{r, eval=F}
 window_duration_s <- 30
@@ -975,35 +1119,7 @@ unique_times <- mm_full %>%
          ) %>%
   unique()
 
-# # ISSUE: TAKes a VERY long time to run
-# rolling_ptrak <- data.frame()
-# 
-# # library(zoo)
-# #mm_full_zoo <- mm_full %>% as.zoo()
-# 
-# for(i in 1:nrow(unique_times) ) {
-#   #i=1
-#   
-#   df <- mm_full %>% 
-#     filter(
-#       runname == unique_times$runname[i] &
-#         site_id == unique_times$site_id[i] &
-#         instrument_id == unique_times$instrument_id[i]
-#       ) %>%
-#     # ?? help run faster? 
-#     #as.zoo() %>%
-#     mutate(
-#       rolling_value = RcppRoll::roll_mean(x = value, n = window_duration_s, align = "left", fill = NA)
-#       #rolling_mean = rollmean(x=value, k=60, align = "left", na.pad = T) #fill = NA
-#       #rolling_value = rollapply(value, FUN=mean, width=60, align="left", fill=NA),
-#            )
-#   
-#   rolling_ptrak <- rbind(rolling_ptrak, df)
-#   
-# }
 
- 
-############
 # calculate 30-second rolling mean
 ptrak_rolling0 <- mm_full %>%
   filter(variable == "ptrak_pt_cm3") %>%
@@ -1067,63 +1183,285 @@ full_join(t_ptrak, t_ns) %>%
 
 ```
 
-## Aethalometer - Aethalometer
+## Aethalometer - Aethalometer (field & lab collocations)
 
-### --> add lab collocations? 
+First, we round reading time to nearest 10-seconds since instrument time stamps may not be for the exact same 10 seconds. Then we compare collocated instrument readings. 
 
-First, round reading time to nearest 10-seconds since instrument time stamps may not be for the exact same 10 seconds.
+BC_66 (backup) may have some slightly lower readings.
 
 ```{r}
- mm_full %>%
-  filter(grepl("bc", variable)) %>%
-  # 2020-01-07 has issues where the time stamp jumps from being 5 sec into the interval to being 4 sec into the interval. creates merging issues where some points are dropped. round to nearest 5-sec to adjust for this.
-  mutate(time_round = round_date(time, unit = "5s")) %>%
+#dates w/ BC collocations
+bc_collo_dates <- sort(as.Date(c("2019-07-09", "2019-06-13", "2019-09-05", "2019-03-20", "2019-09-06", "2019-12-29", "2020-03-11", "2019-03-22", "2019-09-12", "2019-11-07", "2019-12-30", "2019-05-10", "2019-08-09")))
+
+all_bc_colo <- mm_full %>%
+  filter(grepl("ma200_bc", variable),
+         # only keep dates w/ collocaitons. get spreading issues otherwise from some other dates & have to round to 5/9 sec
+         date(time) %in% bc_collo_dates) %>%
+  select(time, value, location = route, instrument_id) %>%
+  # one day (?? used to be 2020-01-07) has issues where the time stamp jumps from being 5 sec into the interval to being 4 sec into the interval. 
+  mutate(time_round = round_date(time, unit = "10s")) %>%  
+  # add lab collocations
+  rbind(lab_bc_collos) %>%
   #drop time, otherwise merging has fewer pairs 
   select(-time) %>%
-   spread(instrument_id, value) %>%
-  colo.plot(x.variable = "BC_63", #x.label = "BC_63 ng/m3",
-          y.variable = "BC_66", #y.label = "BC_66 ng/m3",
-          mytitle = "Co-located aethalometer readings (ng/m3)", 
-          col.by = "route" 
-          )
- 
+  spread(instrument_id, value) %>%
+  drop_na()  
+
 ```
 
-## ?? Calibrate Instrument Readings to the mean to avoid having systematic differences across instruments 
+Aethalometers were collocated on `r length(bc_collo_dates)` unique days: `r paste(bc_collo_dates, collapse = ", ")`
 
-### --> 
+Collocations are not great because aethalometer readings are very noisy. Fit is worse when the top 1% of observations are dropped (R2 = 0, RMSE = 561, slope = 0.51).
+
+```{r}
+# all data
+all_bc_colo %>%
+  colo.plot(x.variable = "BC_63",  
+          y.variable = "BC_66",  
+          mytitle = "All data - Collocated aethalometer instruments (ng/m3)", 
+          col.by = "location")
+
+# drop top 2 observations
+drop_quantile <- 0.9999
+
+all_bc_colo %>%
+  filter_at(vars(contains("BC")), ~. <= quantile(., drop_quantile)) %>%
+  colo.plot(x.variable = "BC_63",  
+          y.variable = "BC_66",  
+          mytitle = paste0("Q", drop_quantile, " - Collocated aethalometer instruments (ng/m3)"), 
+          col.by = "location")
+
+```
+
+```{r}
+# just looking at route data 
+all_bc_colo %>%
+  filter_at(vars(contains("BC")), ~. <= quantile(., drop_quantile)) %>%
+  filter(grepl("R0", location)) %>%
+  colo.plot(x.variable = "BC_63",  
+          y.variable = "BC_66",
+          alpha_value = 0.1,
+          mytitle = paste0("Q", drop_quantile, " - Collocated aethalometer instruments (ng/m3), in field"), 
+          col.by = "location")
+
+# just lab data
+all_bc_colo %>%
+  filter_at(vars(contains("BC")), ~. <= quantile(., drop_quantile)) %>%
+  filter(!grepl("R0", location)) %>%
+  colo.plot(x.variable = "BC_63",  
+          y.variable = "BC_66", 
+          alpha_value = 0.01,
+          mytitle = paste0("Q", drop_quantile, " - Collocated aethalometer instruments (ng/m3), inside"), 
+          col.by = "location")
+
+```
+
+
+# Calibrate instrument readings to the mean 
+
+This is done to avoid having systematic differences across instruments 
+
+Sources of calibration to the mean of duplicate collocated instruments: Austin, 2019; Xiang 2020
+
+Fit calibration curves.
+
+```{r}
+# PTRAK 
+## calculate mean of duplicate collocated instrument readings
+all_ptrak_colo <- all_ptrak_colo %>%
+  group_by(time) %>%
+  dplyr::summarize(mean = mean(c(PMPT_93, PMPT_94))) %>% 
+  left_join(all_ptrak_colo)
+## calibrate individual instrument readings to the mean
+lm93 <- lm(mean~PMPT_93, data = all_ptrak_colo)
+lm94 <- update(lm93, ~ PMPT_94)
+
+# BC 
+all_bc_colo <- all_bc_colo %>%
+  group_by(time_round) %>%
+  dplyr::summarize(mean = mean(c(BC_63, BC_66))) %>% 
+  # keep original instrument readings
+  left_join(all_bc_colo) %>%
+  # [?? DO?] drop top observations fro aeth instruments 
+  filter_at(vars(contains("BC")), ~. <= quantile(., drop_quantile))  
+
+
+
+lm63 <- lm(mean~BC_63, data = all_bc_colo)
+lm66 <- update(lm63, ~ BC_66)
+# summary(lm66)
+
+```
+
+Plots depicting instrument vs mean reading (using all field & lab collocations).
+
+```{r}
+alpha_val <- 0.2
+
+
+# PTRAKS
+plot_range <- all_ptrak_colo %>%
+  select(PMPT_94, PMPT_93) %>%
+  dplyr::summarize(
+    min = min(.),
+    max = max(.))
+
+all_ptrak_colo %>%
+  gather("instrument", "value", contains("PMPT")) %>%
+  ggplot(aes(y=mean, x=value)) +
+  geom_point(alpha=alpha_val) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_smooth(method = "lm") + 
+  xlim(plot_range$min, plot_range$max) +
+  ylim(plot_range$min, plot_range$max) +
+  facet_wrap(~instrument) +
+  labs(
+    title = "Mean BC concentration from collocated instruments (PMPT_93 & PMPT_94) vs PMPT_93 or PMPT_94 reading (ng/m3)"
+  )
+
+```
 
 ```{r}
 
+plot_range <- all_bc_colo %>%
+  select(BC_63, BC_66) %>%
+  dplyr::summarize(
+    min = min(.),
+    max = max(.))
+
+# aethalometers
+all_bc_colo %>%
+  gather("instrument", "value", contains("BC")) %>%
+  ggplot(aes(y=mean, x=value)) +
+  geom_point(alpha=alpha_val) +
+  geom_abline(intercept = 0, slope = 1) +
+  geom_smooth(method = "lm") + 
+  xlim(plot_range$min, plot_range$max) +
+  ylim(plot_range$min, plot_range$max) +
+  facet_wrap(~instrument) +
+
+  labs(
+    title = "Mean BC concentration from collocated instruments (BC_66 & BC_63) vs BC_66 or BC_63 reading (ng/m3)"
+  )
+
+# plot_range <- all_bc_colo %>%
+#   select(mean, BC_63) %>%
+#   dplyr::summarize(
+#     min = min(.),
+#     max = max(.))
+# 
+# all_bc_colo %>%
+#   ggplot(aes(y=mean, x=BC_63)) +
+#   geom_point(alpha=alpha_val) +
+#   geom_abline(intercept = 0, slope = 1) +
+#   geom_smooth(method = "lm") + 
+#   xlim(plot_range$min, plot_range$max) +
+#   ylim(plot_range$min, plot_range$max) +
+#   labs(
+#     title = "Mean BC concentration from collocated instruments (BC_66 & BC_63) vs BC_63 reading (ng/m3)"
+#   )
+
 ```
 
 
+Calibrate raw P-TRAK & aethalometer readings 
 
-### --> ? compare BC readings to AQS site readings (2 min & overnight). select a reference instrument that is most similar?   
-### --> minute & hour DOE data is only available for BC through April 2019
+ONA-corrected BC readings are not calibrated here.
 
-note from Jill  Schulte: "1-min averages are never validated. We recommend you line up the validated 1-hour data with the corresponding minutes and remove any that don’t have a valid 1-hour average"
-
-(cite: Minet 2017 & their refs: Deville Cvaellin 2016; Lin 2015)
+Calibrating BC using quantile `r drop_quantile` of the data (drops 2 extreme observations).
 
 ```{r}
+mm_full_calib <- mm_full %>% 
+  filter(!grepl("ona", variable)) %>%
+  # make wide format
+  spread(instrument_id, value) %>%
+  # replace raw readings w/ calibrated predictions
+  mutate(
+    PMPT_93 = predict(lm93, newdata = .),
+    PMPT_94 = predict(lm94, newdata = .),
+    BC_63 = predict(lm63, newdata = .),
+    BC_66 = predict(lm66, newdata = .)
+    ) %>%
+  # make long format again
+  gather("instrument_id", "value", contains(c("BC", "PMPT", "SCAN")), na.rm = T )
 
-
+################
+# # check that dimentions are the same. looks good.
+# dim(mm_full_w)
+# dim(mm_full)
+# 
+# mm_full_w %>%
+#   group_by(instrument_id) %>%
+#   dplyr::summarize(
+#     n = n())
+# 
+# mm_full %>%
+#   group_by(instrument_id) %>%
+#   dplyr::summarize(
+#     n = n())
 
 ```
 
+Use calibrated readings to calculate ONA-corrected BC. 
 
+### --> ONA correction only uses stop data 
+
+```{r}
+# merge calibrated BC readings w/ raw file w/ attenuation
+# select calibrated bc values
+bc_calib <- mm_full_calib %>%
+  filter(grepl("ma200", variable)) %>%
+  spread(variable, value) %>%
+  dplyr::rename(ma200_ir_bc1 = ma200_bc)
+
+# replace raw, uncalibrated IR values w/ calibrated values
+bc.w_calib <- bc.w %>%
+  select(
+    #remove old ONA corrected values from raw aeth readings
+    -contains("ona"),
+    # drop uncalibrated IR values
+    -ma200_ir_bc1) %>% 
+  # add calibrated IR values
+  left_join(bc_calib) %>%
+  ONA() 
+
+# only keep desired raw & ONA-corrected values
+bc_calib2 <- bc.w_calib %>%
+  select(site_id:date, 
+        ona_bc = ona_ir,
+        ma200_bc = ma200_ir_bc1) %>%
+  gather("variable", "value", contains("bc")) %>%
+  # BC_63 has a few missing values during a 2.5-minute period
+  drop_na(value)
+
+# Only keep desired aethalometer readings (raw & ONA corrected IR, 880 nm)
+mm_full_calib2 <- mm_full_calib %>%
+  #drop old BC readings
+  filter(!grepl("bc", variable)) %>%
+  # attach new BC readings (raw & ONA IR)
+  rbind(bc_calib2) %>%
+  mutate(variable = droplevels(variable))
+  
+```
+
+
+```{r}
+### --> minute & hour DOE data is only available for BC through April 2019. ? should we compare BC readings to AQS site readings (2 min & overnight). ? Select a reference instrument that is most similar? 
+
+# note from Jill  Schulte: "1-min averages are never validated. We recommend you line up the validated 1-hour data with the corresponding minutes and remove any that don’t have a valid 1-hour average"
+# 
+# (cite: Minet 2017 & their refs: Deville Cvaellin 2016; Lin 2015)
+
+```
 
 Distribution of final cleaned data
 
-## --> update "variable" name 
-
 ```{r}
-mm_full %>% 
+mm_full_calib2 %>% 
   filter(grepl("ptrak|bc", variable)) %>%
-  group_by(variable,
-           #instrument_id
-           ) %>%
+  label_pollutant(var = "variable", label = "pollutant") %>%
+  group_by(variable) %>%
+  dplyr::rename(Pollutant = variable) %>%
 distribution.table(., var.string = "value") %>%
   kable(caption = "Distribution of clean intrument readings") %>%
   kable_styling()
@@ -1132,10 +1470,11 @@ distribution.table(., var.string = "value") %>%
 
 
 ````{r}
-# Save dataset
-# mm_full %>%
+# # # Save dataset
+# mm_full_calib2 %>%
+#   # don't need NanoScan data anymore
 #   filter(grepl("ptrak|bc", variable)) %>%
 #   mutate(variable = droplevels(variable)) %>%
-#   saveRDS(., file.path("Data", "Aim 2", "Mobile Monitoring", "mm_clean_2020-03-08.rda"))
+#   saveRDS(., file.path("Data", "Aim 2", "Mobile Monitoring", "mm_clean_2020-03-17.rda"))
 
 ```

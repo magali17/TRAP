@@ -30,6 +30,8 @@ editor_options:
 
 ```{r, echo=F}
 #NOTES
+# network/pacific/rad/transfer
+
 ##4. merge with github. always do these 4 steps all together. enter the following into the Terminal (does not work any other way for some reason)
 ###a. git pull origin master #do this before start editing & before you're read to upload changes again
 ###b. git add A1.1_Survival.Rmd 
@@ -81,6 +83,7 @@ pacman::p_load(knitr, kableExtra,
                tidyverse, dplyr
                )  
 
+
 #other directory:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
 # dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
 
@@ -93,14 +96,19 @@ source("A1.0.2_Var&Fns.R")
 ##########
 
 # main dataset
-dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "200228", "issue_001.sas7bdat"), NULL)
+dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "200331", "issue_001.sas7bdat"), NULL)
 # exposure at age 65
-dem0.0_65 <-  haven::read_sas(file.path("Data", "Aim 1", "200228", "issue_001_supp.sas7bdat"), NULL)
+dem0.0_65 <-  haven::read_sas(file.path("Data", "Aim 1", "200331", "issue_001_supp.sas7bdat"), NULL)
 
 #remove SAS labels
 labelled::var_label(dem0.0) <- NULL
 labelled::var_label(dem0.0_65) <- NULL
 
+```
+
+create a primary dataset.
+
+```{r}
 #data that can be used for all analyses 
 dem0.1 <- dem0.0 %>% 
   #drop PM10 predictions
@@ -119,7 +127,14 @@ dem0.1 <- dem0.0 %>%
     final_nindx,
 
     #M1, 6, sensitivity analyses
-    exposure_year:exp_wks_coverage20_yr,
+    exposure_year, #age_at_exposure,
+    pollutant, 
+    
+    ### --> update _SP to _ST later
+    
+    # exp avg & coverage variables
+    contains("_SP"), #exp_avg01_yr_SP:exp_wks_coverage20_yr_ST,
+    
 
     #M2
     apoe,
@@ -143,13 +158,13 @@ dem0.1 <- dem0.0 %>%
     #M4b
     casi_irt, casi_valid,
     #address exactness
-    exact_coverage01_yr:exact_coverage20_yr,
+    #exact_coverage01_yr:exact_coverage20_yr,
 
     # sensitivity analyses
-    ## 1 if participants never moved
     one_location,
     imputed_coverage10_yr, imputed_coverage01_yr,
-    exact_coverage10_yr, exact_coverage01_yr
+    exact_coverage10_yr, exact_coverage01_yr,
+    imp_qual10_yr
     ) %>%
   #create/clean up variables
   mutate(
@@ -214,13 +229,19 @@ dem0.1 <- dem0.0 %>%
   dementia_now, ad_now,
 
   age_start_exposure, age_end_exposure,
-  exposure_year, pollutant, exp_avg01_yr:exp_wks_coverage20_yr,
-
+  exposure_year, pollutant, 
+  
+  ### --> update SP to ST later 
+  
+  contains("_SP"), #exp_avg01_yr_SP:exp_wks_coverage20_yr_ST,
+                            
+  
   apoe:degree, tr_med_inc_hshld, income_cat,race, race_white, smoke:bmi4, casi_irt,
 
   one_location,
+  exact_coverage10_yr, exact_coverage01_yr,
   imputed_coverage10_yr, imputed_coverage01_yr,
-  exact_coverage10_yr, exact_coverage01_yr
+  imp_qual10_yr
   )
  
 #how long have participants been followed? 
@@ -259,7 +280,8 @@ dem1 <-  dem0.1 %>%
 
   one_location,
   imputed_coverage10_yr, # "doesn't exist"?? #imputed_coverage01_yr,
-  exact_coverage10_yr, exact_coverage01_yr
+  exact_coverage10_yr, exact_coverage01_yr,
+  imp_qual10_yr
   ) %>%
   filter(
     #drop ppl with only a baseline observation
@@ -271,12 +293,12 @@ dem1 <-  dem0.1 %>%
   mutate(
     # Delete _original?
     #copy all original predictions (for sensitivity analysis using min.pct = 0.75 vs 0.95)
-    exp_avg01_yr_original = exp_avg01_yr,
-    exp_avg05_yr_original = exp_avg05_yr,
-    exp_avg10_yr_original = exp_avg10_yr,
-    exp_avg20_yr_original = exp_avg20_yr,
-    exp_avg10_yr10yrlag_original = exp_avg10_yr10yrlag,
-    exp_avg10_yr05yrlag_original = exp_avg10_yr05yrlag,
+    # exp_avg01_yr_original = exp_avg01_yr,
+    # exp_avg05_yr_original = exp_avg05_yr,
+    # exp_avg10_yr_original = exp_avg10_yr,
+    # exp_avg20_yr_original = exp_avg20_yr,
+    # exp_avg10_yr10yrlag_original = exp_avg10_yr10yrlag,
+    #exp_avg10_yr05yrlag_original = exp_avg10_yr05yrlag,
     
     # [don't do this for now b/c coverage variable is impacted by interpolation assumption when participants first enroll]
     #only keep predictions w/ at least x% coverage (for primary analysis)
@@ -295,99 +317,136 @@ no2 <- dem1 %>%
   select(-pollutant) %>%
   rename(
     #rename values to be used in main analysis
-    no2_1yr = exp_avg01_yr,
-    no2_5yr = exp_avg05_yr,
-    no2_10yr = exp_avg10_yr,
-    no2_20yr = exp_avg20_yr,
-    no2_10yr10yrlag = exp_avg10_yr10yrlag,
-    no2_10yr05yrlag = exp_avg10_yr05yrlag,
+
+    ### --> change SP to ST when have new predictions
+    
+    no2_1yr = exp_avg01_yr_SP,
+    no2_5yr = exp_avg05_yr_SP,
+    no2_10yr = exp_avg10_yr_SP,
+    no2_20yr = exp_avg20_yr_SP,
+    no2_10yr10yrlag = exp_avg10_yr10yrlag_SP,
+    no2_10yr05yrlag = exp_avg10_yr05yrlag_SP,
     
     # delete _original? don't need?
-    #rename original columns
-    no2_1yr_original = exp_avg01_yr_original,
-    no2_5yr_original = exp_avg05_yr_original,
-    no2_10yr_original = exp_avg10_yr_original,
-    no2_20yr_original = exp_avg20_yr_original,
-    no2_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
-    no2_10yr05yrlag_original = exp_avg10_yr05yrlag_original,
+    # #rename original columns
+    # no2_1yr_original = exp_avg01_yr_original,
+    # no2_5yr_original = exp_avg05_yr_original,
+    # no2_10yr_original = exp_avg10_yr_original,
+    # no2_20yr_original = exp_avg20_yr_original,
+    # no2_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
+    # no2_10yr05yrlag_original = exp_avg10_yr05yrlag_original,
     
-    no2_coverage_1yr = exp_wks_coverage01_yr,
-    no2_coverage_5yr = exp_wks_coverage05_yr,
-    no2_coverage_10yr = exp_wks_coverage10_yr,
-    no2_coverage_20yr = exp_wks_coverage20_yr,
-    no2_coverage_10yr10yrlag = exp_wks_coverage10_yr10yrlag,
-    no2_coverage_10yr05yrlag = exp_wks_coverage10_yr05yrlag,
+    no2_coverage_1yr = exp_wks_coverage01_yr_SP,
+    no2_coverage_5yr = exp_wks_coverage05_yr_SP,
+    no2_coverage_10yr = exp_wks_coverage10_yr_SP,
+    no2_coverage_20yr = exp_wks_coverage20_yr_SP,
+    no2_coverage_10yr10yrlag = exp_wks_coverage10_yr10yrlag_SP,
+    no2_coverage_10yr05yrlag = exp_wks_coverage10_yr05yrlag_SP,
     
-    no2_imputed_coverage10_yr = imputed_coverage10_yr,
-    no2_exact_coverage10_yr = exact_coverage10_yr, no2_exact_coverage01_yr = exact_coverage01_yr
+    # don't need these anymore b/c all pollutant values Should be the same since this is based on residential address  alone
+    # no2_imputed_coverage10_yr = imputed_coverage10_yr,
+    # no2_exact_coverage10_yr = exact_coverage10_yr, 
+    # no2_exact_coverage01_yr = exact_coverage01_yr
     
-    ) 
+    )  
 
 pm25 <- dem1 %>% 
   filter(pollutant == "pm25") %>%
   select(-pollutant) %>%
   rename(
-    pm25_1yr = exp_avg01_yr,
-    pm25_5yr = exp_avg05_yr,
-    pm25_10yr = exp_avg10_yr,
-    pm25_20yr = exp_avg20_yr,
-    pm25_10yr10yrlag = exp_avg10_yr10yrlag,
-    pm25_10yr05yrlag = exp_avg10_yr05yrlag,
+    
+    ### --> change SP to ST when have new predictions
+    
+    pm25_1yr = exp_avg01_yr_SP,
+    pm25_5yr = exp_avg05_yr_SP,
+    pm25_10yr = exp_avg10_yr_SP,
+    pm25_20yr = exp_avg20_yr_SP,
+    pm25_10yr10yrlag = exp_avg10_yr10yrlag_SP,
+    pm25_10yr05yrlag = exp_avg10_yr05yrlag_SP,
     
     # delete _original? don't need?
-    #rename original columns
-    pm25_1yr_original = exp_avg01_yr_original,
-    pm25_5yr_original = exp_avg05_yr_original,
-    pm25_10yr_original = exp_avg10_yr_original,
-    pm25_20yr_original = exp_avg20_yr_original,
-    pm25_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
-    pm25_10yr05yrlag_original = exp_avg10_yr05yrlag_original,
+    # #rename original columns
+    # pm25_1yr_original = exp_avg01_yr_original,
+    # pm25_5yr_original = exp_avg05_yr_original,
+    # pm25_10yr_original = exp_avg10_yr_original,
+    # pm25_20yr_original = exp_avg20_yr_original,
+    # pm25_10yr10yrlag_original = exp_avg10_yr10yrlag_original,
+    # pm25_10yr05yrlag_original = exp_avg10_yr05yrlag_original,
     
-    pm25_coverage_1yr = exp_wks_coverage01_yr,
-    pm25_coverage_5yr = exp_wks_coverage05_yr,
-    pm25_coverage_10yr = exp_wks_coverage10_yr,
-    pm25_coverage_20yr = exp_wks_coverage20_yr,
-    pm25_coverage_10yr10yrlag = exp_wks_coverage10_yr10yrlag,
-    pm25_coverage_10yr05yrlag = exp_wks_coverage10_yr05yrlag,
+    pm25_coverage_1yr = exp_wks_coverage01_yr_SP,
+    pm25_coverage_5yr = exp_wks_coverage05_yr_SP,
+    pm25_coverage_10yr = exp_wks_coverage10_yr_SP,
+    pm25_coverage_20yr = exp_wks_coverage20_yr_SP,
+    pm25_coverage_10yr10yrlag = exp_wks_coverage10_yr10yrlag_SP,
+    pm25_coverage_10yr05yrlag = exp_wks_coverage10_yr05yrlag_SP,
     
-     pm25_imputed_coverage10_yr = imputed_coverage10_yr,
-    pm25_exact_coverage10_yr = exact_coverage10_yr, pm25_exact_coverage01_yr = exact_coverage01_yr
-    )   
+    #  pm25_imputed_coverage10_yr = imputed_coverage10_yr,
+    # pm25_exact_coverage10_yr = exact_coverage10_yr, pm25_exact_coverage01_yr = exact_coverage01_yr
+    )    
+
 dem.w <- full_join(no2, pm25)  
+
+```
+
+Add estimates at age 65 to main dataset. 
+
+### --? change _SP to _ST later
+
+```{r}
 
 # add exposure at age 65
 dem0.1_65 <- dem0.0_65 %>%
   select(
     study_id,
     exposure_year_65 = exposure_year,
-    pollutant, exp_avg10_age_65,
-    exp_wks_coverage10_age_65, exact_coverage10_age_65, imputed_coverage10_age_65
+    pollutant, 
+    
+    ### --> change _SP to _ST later
+    
+    exp_avg10_age_65_SP,  
+    exp_wks_coverage10_age_65_SP,
+    
+    exact_coverage10_age_65, 
+    imputed_coverage10_age_65
   )
  
 dem_65_no2 <- dem0.1_65 %>% 
    filter(pollutant== "no2") %>%
    select(-pollutant) %>%
    rename(
-    no2_exp_avg10_age_65 = exp_avg10_age_65,
-    no2_exp_wks_coverage10_age_65 = exp_wks_coverage10_age_65,
-    no2_exact_coverage10_age_65 = exact_coverage10_age_65,
-    no2_imputed_coverage10_age_65 = imputed_coverage10_age_65
+     
+    # ---> change _SP to _ST later
+     
+     no2_exp_avg10_age_65 = exp_avg10_age_65_SP,
+     no2_exp_wks_coverage10_age_65 = exp_wks_coverage10_age_65_SP,
+    
+    # don't need this anymore b/c these are soley based on location
+     # no2_exact_coverage10_age_65 = exact_coverage10_age_65,
+    # no2_imputed_coverage10_age_65 = imputed_coverage10_age_65
    )
     
 dem_65_pm25 <- dem0.1_65 %>% 
    filter(pollutant== "pm25") %>%
    select(-pollutant) %>%
    rename(
-    pm25_exp_avg10_age_65 = exp_avg10_age_65,
-    pm25_exp_wks_coverage10_age_65 = exp_wks_coverage10_age_65,
-    pm25_exact_coverage10_age_65 = exact_coverage10_age_65,
-    pm25_imputed_coverage10_age_65 = imputed_coverage10_age_65
+     
+     # ---> change _SP to _ST later
+     
+    pm25_exp_avg10_age_65 = exp_avg10_age_65_SP,
+    pm25_exp_wks_coverage10_age_65 = exp_wks_coverage10_age_65_SP,
+    # pm25_exact_coverage10_age_65 = exact_coverage10_age_65,
+    # pm25_imputed_coverage10_age_65 = imputed_coverage10_age_65
    )
  
 dem_65 <- full_join(dem_65_no2, dem_65_pm25)
 
 dem.w <- left_join(dem.w, dem_65)
  
+```
+
+create a dataset for alternative analyses using onset age rather than diagnosis age.
+
+```{r}
 #add variables for alternative analysis using age at onset (cases) or age at last visit (noncases)
 dem.w2 <- dem.w %>%
   mutate(
@@ -402,8 +461,12 @@ dem.w2 <- dem.w %>%
   #drop exposure predictions after individuals are no longer "at risk"  
   filter(exposure_year <= last_act_fu_yr)
 
+```
 
-# create a fixed covariates dataset 
+create a person-level (non-time-varying, fixed covariate) dataset 
+
+```{r}
+# create a person-level, fixed covariates dataset 
 fixed.covariates <- dem.w %>%
   select(
     study_id:ad_nincds,
@@ -2024,6 +2087,23 @@ ad_age_entry_hrs <- ad_age_entry$hrs %>%
     Description = "Fixed exposure at entry") 
 
 ```
+
+### Imputation quality 
+
+?? only include people w/ impuaiton quality < 1? or 0? 
+
+Dementia
+
+```{r}
+
+```
+
+AD
+
+```{r}
+
+```
+
 
 ### Road Proximity exposure
 

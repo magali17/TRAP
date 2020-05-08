@@ -281,18 +281,15 @@ Notes:
 ```{r, eval=T}
 ## 2005-2009
 p2005 <- compare.fn(mydata = compare, 
-                    x= "AADT_sections_2005_09",
-           y = "AADT_points_2005_09", 
-           plot.title = "",
-                    x.label = "DOT AADT Estimates", 
-                    y.label = "AADT Based on 2 Nearest Hwy Points")
+                    x= "AADT_sections_2005_09", x.label = "DOT AADT Estimates", 
+           y = "AADT_points_2005_09", y.label = "AADT Based on 2 Nearest Hwy Points",
+           plot.title = ""
+           )
 
 ## 2010 - 2014
 p2010 <- compare.fn(mydata = compare,
-                    x= "AADT_sections_2010_14",
-                    y = "AADT_points_2010_14",
-                    x.label = "DOT AADT Estimates", 
-                    y.label = "AADT Based on 2 Nearest Hwy Points"
+                    x= "AADT_sections_2010_14", x.label = "DOT AADT Estimates", 
+                    y = "AADT_points_2010_14", y.label = "AADT Based on 2 Nearest Hwy Points"
                     )
 
 ## 2015 - 2018
@@ -515,7 +512,7 @@ Using DOT road shapefiles
 ```
 
 ```{r}
-fp <- file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS")
+fp <- file.path("..", "GIS", "Shapefiles")
 #using only in study data.
 
 routes <- read.csv(file.path(fp, "Hx Traffic Counts", "routes_row_no", "routes_row_no.csv")) %>%
@@ -529,7 +526,7 @@ hx_cts <- read.csv(file.path(fp, "Hx Traffic Counts", "hwy_InStudy.csv")) %>%
   select(counter_row_no = row_number, X1990:X2015) #hwy_pt_id
 
 #  [don't need now?] hwy as pts every 100 m
-hwy_100m <- read.csv(file.path(fp, "Roads", "Traffic Sections", "2005_TPTTrafficSections", "Hwy_Pts_InStudy_100m.csv")) %>%
+hwy_100m <- read.csv(file.path(fp, "Other features", "Roads", "Traffic Sections", "2005_TPTTrafficSections", "Hwy_Pts_InStudy_100m.csv")) %>%
   #cat is same as OBJECTID, 
   select(hwy_row_no = row_number, fid, OBJECTID, segment_length_m = length) #SRID, segment_location = Location, Shape_Leng, 
 
@@ -573,7 +570,7 @@ routes <- routes %>%
 #export AADT estimates on 100 m centroids in order to link these to 100 m road segments
 # routes %>%
 #   select(-OBJECTID) %>%
-# write.csv(x=., file = "AADT estimates on 100 m centroids.csv", row.names = F, na = "")
+# write.csv(x=., file = file.path("Output", "Aim 3", "Tables", "AADT estimates on 100 m centroids.csv"), row.names = F, na = "")
 
 ```
 

@@ -82,9 +82,6 @@ source("0.Global_Fns.R")
 source("A2.0.1_Var&Fns.R")
 source("A2.0.3_functions_covariate_preprocessing_regional.R")
 
-images_path <- file.path(images_path0, "0. Geocovariates")
-tables_path <- file.path(tables_path0, "0. Geocovariates")
-
 cov_mm0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "dr0311_mobile_locations.txt")) 
 cov_act0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "cohort_covars_20200107.csv")) 
 
@@ -96,35 +93,6 @@ act_area <- read.csv(file.path("..", "GIS", "Shapefiles", "ACT", "all_act_addres
 
 # grid
 grid_covars0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "grid_covars.csv" ))  
-
-```
-
-
-```{r}
-# # SIDE PROJECT: CREATE NEW GRID W/ EQUAL SPACING
-# min_lat <- min(grid_covars0$latitude)
-# max_lat <- max(grid_covars0$latitude)
-# min_long <- min(grid_covars0$longitude)
-# max_long <- max(grid_covars0$longitude)
-# 
-# 
-# grid2 <-
-
-
-```
-
-
-
-
-```{r}
-# # --> delete? not imp here
-# # ## Mobile Monitoring  
-# cov_mm0 %>%
-#   mutate(`Stop Kind` = ifelse(grepl("MS", native_id), "ACT stop", "AQS site")) %>%
-#   group_by(`Stop Kind`) %>%
-#     dplyr::summarize(N = n()) %>%
-#   kable(caption = "Mobile monitoring stops. ACT stops are those chosen to represent the ACT cohort, AQS site stops are AQS co-location sites within the monitoring area") %>%
-#   kable_styling()
 
 ```
 
@@ -363,7 +331,8 @@ cov_descrip <- data.frame(Covariate = final_cov) %>%
   arrange(Kind)
 
 # table   
-cov_descrip %>% kable(caption = paste0("Geocovariates and buffers to be used in analysis (n = ", length(final_cov), ")"), row.names = T) %>%
+cov_descrip %>% kable(caption = paste0("Geocovariates and buffers to be used in analysis (n = ", length(final_cov), ")"), row.names = T
+                      ) %>%
   kable_styling() %>%
   add_footnote("see MESA DOOP for additional details") #%>% save_kable(file.path("A2_Images", "test.png"))
 
@@ -396,25 +365,10 @@ st_ids <- append(study_ids,
 
 ```
 
+Map of ST, study and modeling area
+
 ```{r}
-
-cov_act %>% 
-  filter(site_id %in% study_ids) %>%
-  map_fn(color_map = F,
-         color_by = "site_id", 
-         map_title = "",
-    include_monitoring_area = T, #monitoring_area_alpha = 1,
-    include_study_area = T, #study_area_alpha = 0.4,
-    #include_st_area = T #st_area_alpha = 0.3
-         )
-  
-  # map_base(include_monitoring_area = T, #monitoring_area_alpha = 1,
-  #          include_study_area = T, #study_area_alpha = 0.4,
-  #          include_spatiotemporal_area = T,
-  #          map_title = "Monitoring and study areas"
-  #          )
-
-# with ST area
+# ST area
 cov_act %>% 
   filter(site_id %in% st_ids) %>%
   map_fn(color_map = F,
@@ -427,23 +381,63 @@ cov_act %>%
 
 ```
 
+Map of ST modeling area
+
+```{r}
+# ST area
+cov_act %>% 
+  filter(site_id %in% st_ids) %>%
+  map_fn(color_map = F,
+         color_by = "site_id", 
+         map_title = "",
+    include_monitoring_area = F, 
+    include_study_area = F, 
+    include_st_area = T #st_area_alpha = 0.3
+         )
+
+```
+
+
+Map of study & monitoring area
+
+```{r}
+# study & monitoring area
+cov_act %>% 
+  filter(site_id %in% study_ids) %>%
+  map_fn(color_map = F,
+         color_by = "site_id", 
+         map_title = "",
+    include_monitoring_area = T, #monitoring_area_alpha = 1,
+    include_study_area = T #study_area_alpha = 0.4,
+    #include_st_area = T #st_area_alpha = 0.3
+         )
+  
+  # map_base(include_monitoring_area = T, #monitoring_area_alpha = 1,
+  #          include_study_area = T, #study_area_alpha = 0.4,
+  #          include_spatiotemporal_area = T,
+  #          map_title = "Monitoring and study areas"
+  #          )
+
+
+```
+
 ### --> add area size 
 
 ```{r}
 
 data.frame(
   Area = c("United States", 
-           "Study",
+           "Study Area",
            "Mobile Monitoring",
-                #"Spatiotemporal Modeling"
+           "Spatiotemporal Modeling"
                 ),
   N = c(nrow(cov_act),
         length(study_ids),
         length(monitoring_ids),
-        #length(st_ids)
+        length(st_ids)
         )) %>%
   mutate("Proportion of Total"  = N/nrow(cov_act)) %>%
-kable(caption = "ACT cohort locations included in the monitoring and study areas relative to all U.S. locations on record", 
+kable(caption = "ACT cohort locations included in the monitoring, study and spatiotemporal modeling areas relative to all U.S. locations on record", 
       col.names = c("Area", "No. Locations", "Proportin of Total"),
       digits = 2) %>% 
   kable_styling()

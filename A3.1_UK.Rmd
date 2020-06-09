@@ -1,49 +1,695 @@
 ---
 title: "Aim 3"
 author: "Magali Blanco"
-date: "12/14/2019"
-output: html_document
+date: ' `r Sys.Date()` '
+output: 
+  html_document:
+    toc: yes
+    toc_depth: '3'
+editor_options: 
+  chunk_output_type: console
 ---
 
-```{r}
- 
-```
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+ knitr::opts_chunk$set(echo = F, 
+                      cache=T, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      fig.height = 5, fig.width = 8
+                      )  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(knitr, kableExtra, 
+               #descriptive statistics
+               Hmisc, EnvStats, 
+               # modeling
+               pls, geoR, #gstat - alternative for UK
+               akima, # interp() - interpolate predictions on map
+               ggpubr, tidyverse,
+               
+               parallel  # mclapply() for parallized processing;  detectCores()
+               )    
+#Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
+
+set.seed(1)
+
+options(knitr.kable.NA = '')
+source("0.Global_Fns.R")
+source("A2.0.1_Var&Fns.R")
+source("A3.0.0_Var&Fns.R")
+
+```
+
+# Purpose & Approach
+
+## UK Model
+
+This script builds off of the Universal Kriging work completed for Aim 2 (in A2.3_UK_v4.Rmd) by incorporating time-varying covariates and using a temporal trend adjustment factor to predict historical BC and UFP levels back in time. Our primary model is: 
+
+$$ Ln(TRAP) = \theta_0 + \sum_{s=1}^{3}\theta_s Z_{i,s} + \theta_{4}Z_{i,Pop} + \theta_{5}Z_{i,NDVI} + \theta_{6}Z_{i,EC} + \alpha_{trend} + \epsilon_i $$
+
+$i=1,...,n$ observations 
+
+Where:
+
+
+$Ln (TRAP)$ denotes the log-tranformed annual-average BC (ng/m3) or UFP (pt/cm3) from 2019.
+
+$\theta$ are the estimated model coefficients from fitting a 2019 UK model.
+
+$\alpha_{trend}$ is the temporal trend adjustment based on historical observations of EC at Beacon Hill.
+
+$\epsilon_i$ is the residual term with mean zero and a geostatistical structure modeled as an exponential function with range $\phi$, partial sill $\sigma$ and nugget $\theta$.
+
+$Z_{i}$ are dimension-reduced, linear combinations space-varying ($\sum_{s=1}^{3}Z_{i,s}$), population density ($Z_{i,Pop}$), NDVI ($Z_{i,NDVI}$) and EC emission ($Z_{i,EC}$) geocovariates from PLS regression, such that: $Z_m = \sum_{j=1}^p \phi_{j,m}X_j$, where $p$ are our original predictors.
+
+
+The model separates space-varying and time-varying geocovarites in order to:
+
+a) inter-/intra-polate a single linear combinations composed of related geocovariates (e.g., different buffers for the same covariate) rather than many individual covariate buffers each year, and    
+b) estimate model coeffiecients for time-varying covariate
+
+
+## Validation
+
+Furthermore, this script conducts out-of-sample validation to check the model's historical BC (and UFP) predictions at AQS sites. Specifically, we compare model predictions to historical observations at AQS sites:   
+
+* overall
+* by site
+* stratified by whether or not AQS sites are in study area
+* by year/decade 
+  
+
+For quality control purposes, we:   
+
+* Check that model predictions are not increasingly bias back in time
+* Check whether some sites are more accurately predicted than others 
+
+## Sensitivity Analyses 
+
+
+```{r}
+### --> ? diff ML approaches: lasso, random forests...with stacked ensemble?
+
+
+cbind(
+  Analysis = c("Primary: EC emissions, additive temporal trend adjustment", 
+               "NOx Emissions (vs EC)",
+               "Ratio temporal trend adjustment (vs additive)",
+               "No temporal trend adjustment"
+               ) #,
+  # Description = c("EC emissions, additive temporal trend adjustment, ",
+  #                 "Use NOx emission covariates  (vs EC emissions)",
+  #                 "Multiplicative temporal trend adjust (vs additive)", 
+  #                 "No temporal trend adjustment" 
+  #                 )
+  ) %>%
+  kable(., caption = "Description of primary and sensitivity analyses") %>%
+  kable_styling()
+
+
+```
+
+
+
+### --> check that using latest MM stops 
+
+```{r}
+#?? unique(cov_mm$site_id)[!unique(cov_mm$site_id) %in% unique(annual0$site_id)] #[1] MS0000 MS0398 
+```
+
+
+```{r}
+# upload datasets 
+#mm annual estimates & covariates
+mm0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda")) %>%
+  # drop sensitivity analysis estimaets for Aim 2
+  select(site_id, contains("primary")) %>%
+  rename_at(vars(contains("primary")), ~gsub("_primary", "", .))
+
+## still has: [1] MS0000 MS0398     #MS0601 replaced MS0398
+cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda")) %>%
+  #drop Roosevelt garage & stop w/ 1 obeservation that was replaced by MS0601
+  filter(!site_id %in% c("MS0000", "MS0398"))
+   
+## act geocovariates
+### ~cov_act_all in A2 code
+cohort <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
+
+mm <- mm0 %>%
+  #convert to log
+  mutate_at(vars(contains(c("ufp", "bc"))), ~log(.)) %>%
+  left_join(cov_mm)  
+
+
+# group ACT locations by location
+monitoring_ids <- cohort$site_id[grepl("monitoring", cohort$site_location)] 
+
+outside_monitoring_in_study_ids <- cohort$site_id[grepl("study", cohort$site_location)] 
+outside_monitoring_in_st_ids <- cohort$site_id[grepl("study|st", cohort$site_location)]
+
+study_ids <- append(monitoring_ids, outside_monitoring_in_study_ids)
+st_ids <- append(monitoring_ids, outside_monitoring_in_st_ids)
+
+
+# ACT cov for primary analysis
+cohort <- cohort %>% filter(site_id %in% study_ids)
+
+
+# grid in study area (from GIS)
+grid_in_study <- read.csv(file.path("..", "GIS", "Shapefiles", "Predictions", "grid", "grid_200602.csv")) %>%
+  filter(study == TRUE) %>%
+  select(location_id = location_i)
+
+grid_in_study <- grid_in_study$location_id
+
+# grid cov
+grid <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda")) %>%
+  # only keep points in study area-land (grid isn't large enough for st area)
+  filter(site_id %in% grid_in_study)
+
+
+# main datasets
+# mm 
+# cohort 
+# grid 
+
+```
+
+```{r}
+# trend adjustment
+## convert ug/m3 (10^-6) to ng/m3 (10^-9)
+conversion_factor <- 1e3 
+trend_adjustment <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "trend_adjustment.rda")) %>%
+  mutate(difference = difference*conversion_factor)
+
+# validation - Hx AQS readings 
+validation_df <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "aqs_avgs_for_validation.rda")) %>%
+  mutate(mean_ng_m3 = mean*conversion_factor) %>%
+  select(-mean)
+
+```
+
+
+```{r}
+site_loc_vars <- cov_mm %>% select(site_id:lambert_y) %>% names()
+
+space_vars <- cov_mm %>%
+  select(-site_loc_vars,
+         -contains(c("pop", "ndvi"#, 
+                    #"ec"
+                    ))) %>%
+  names()
+
+
+# common variables
+
+# modeling parameters from Aim 2
+n_components <- 3
+variog_dist_frac <- 0.10
+  
+  
+```
+
+# Create dimension-reduced versions of time-varying covariates
+
+Transforming space-varying covariates (for M=3 PLS components), population density (M=1), NDVI (M=1) and EC emissions (M=1) into linear combinations (PLS scores).
+
+$Z_m = \sum_{j=1}^p \phi_{j,m}X_j$, where $p$ are our original predictors. 
+ 
+### --> ??? build PLS model using 2019 Ys & most recent covariate predictors values (e.g., 2010 census) and use these to build linear transformation of covariates from different years? 
+
+Run PLS regression to create linear transformations using ??? __TRAP observations form our 2019 mobile monnitoring campaign, 2010 US Census data, 2010 NDVI and 2015 EC emissions__.
+
+
+### --> ? build 1 model or diff models for each given data point? 
+
+from decenial US Census surveys (1990, 2000 and 2010) or linearly inter-/intra-pollated values.
+
+NDVI: from the 1990-1993,2006 or 2010 raster files or linearly inter-/intra-pollated values.
+
+EC emissions are estimated every 5 years from 1990-2015 from MOVES emission factors for King County and WADOT AADT estimates, or linearly inter-/intra-pollated values.
+
+
+```{r}
+# # bc, space covariates
+# y <- "bc"
+# 
+# # space scores
+# #tvc <- "pop10"
+# x <- space_vars #names(mm)[grepl(tvc, names(mm))]
+# 
+# model1 <- paste0(y, " ~ ", paste(x, collapse = " + "))
+# 
+# # --> ??? use most recent time-varying covariate values to fit PLS model ?
+# m1 <- plsr(as.formula(model1),
+#                   data=mm, 
+#                   ncomp = n_components,
+#                   scale=T)
+# 
+# # scores for mm
+# space_scores_mm <- scores(m1)[,c(1:n_components)] %>% 
+#   as.data.frame()
+# 
+# # scores for cohort
+# space_scores_cohort <- predict(object = m1,
+#                        newdata = cohort,
+#                        ncomp = 1:n_components,
+#                        type = "score") %>%
+#   as.data.frame()
+# 
+# # scores for grid
+# space_scores_grid <- predict(object = m1,
+#                        newdata = grid,
+#                        ncomp = 1:n_components,
+#                        type = "score") %>%
+#   as.data.frame()
+# 
+# # take out spaces in names
+# names(space_scores_mm) <- paste0("space", c(1:n_components))
+# names(space_scores_cohort) <- paste0("space", c(1:n_components))
+# names(space_scores_grid) <- paste0("space", c(1:n_components))
+
+```
+
+Fit PLS models.
+
+```{r}
+space_models <- fit_pls(dt = mm, x = space_vars, .ncomp = n_components)
+pop2010_models <- fit_pls(dt = mm, x = "pop10_", .ncomp = 1)
+ndvi2006_models <- fit_pls(dt = mm, x = "ndvi_", .ncomp = 1)
+#ec2015_models <- fit_pls(dt = mm, x = "ec_", .ncomp = 1)
+
+```
+
+Extract scores.
+
+```{r}
+
+```
+
+## Space-varying covariates
+
+Get scores for space vs time-varying covariates.
+
+```{r}
+# get space variable covariates
+bc_space_scores <- get_pls_scores(y = "bc", x = space_vars, 
+                               .ncomp = n_components, 
+                               rename_columns = paste0("space", c(1:n_components)))
+
+
+  
+```
+
+### -->? wrong b/c refitting PLS regression for each time period? 
+
+```{r}
+# #pop
+# pop2010_scores <- get_pls_scores(y = "bc",
+#                                  x = names(mm)[grepl("pop10", names(mm))],
+#                                  .ncomp = 1,
+#                                  rename_columns = "pop2010"
+#                                  )
+#  
+# pop1990_scores <- get_pls_scores(y = "bc",
+#                                  x = names(mm)[grepl("pop90", names(mm))],
+#                                  .ncomp = 1,
+#                                  rename_columns = "pop1990"
+#                                  )
+#  
+# pop2000_scores <- get_pls_scores(y = "bc",
+#                                  x = names(mm)[grepl("pop_", names(mm))],
+#                                  .ncomp = 1,
+#                                  rename_columns = "pop2000"
+#                                  )
+# 
+# #NDVI
+# ndvi2006_scores <- get_pls_scores(y = "bc",
+#                                  # --> check that these names are still correct after get new variables
+#                                   x = names(mm)[grepl("ndvi_", names(mm))],
+#                                  .ncomp = 1,
+#                                  rename_columns = "ndvi2006"
+#                                  )
+# 
+# 
+# 
+# # --> add NDVI, emissions for other years
+
+```
+
+## Population Density
+
+Build a BC PLS model using 2010 Census pop. 
+
+```{r}
+# y <- "bc"
+#   # --> ??? use most recent time-varying covariate values to fit PLS model ?
+# pop_model_vars <- "pop10_"
+# 
+# x <- names(mm)[grepl(pop_model_vars, names(mm))]
+# 
+# model1 <- paste0(y, " ~ ", paste(x, collapse = " + "))
+
+# build BC PLS model using 2010 Census pop  
+ # pop2010_models <- fit_pls(dt = mm, x = "pop10_", .ncomp = 1)
+   
+   # plsr(as.formula(model1),
+   #         data=mm, 
+   #         ncomp = 1,
+   #         scale=T)
+
+  
+
+  
+```
+
+
+```{r}
+# use this later
+#pop_model_vars <- "pop10_"
+
+#########
+
+#model_vars <- "pop10_" # "ndvi_" #"ec_"
+
+
+# y <- c("bc", "ufp")
+# dt = mm
+# x <- "pop10_" # "ndvi_" #"ec_"
+# .ncomp = 1
+
+
+```
+
+
+### --> ? right? 
+
+Use BC PLS model with 2010 population predictors to transform population variables at mobile monitoring, cohort and grid loccations for all times: 1990, 2000, 2010.
+
+-mobile monitoring
+
+```{r}
+# scores for Census 2010 - FROM THE MODEL FIT
+pop2010_scores_mm <- get_scores(dt = mm,
+                                # no need to change var names here
+                                change_var_name = pop_model_vars, .model_vars = pop_model_vars,
+                                pls_model = bc_pop2010_model,
+                                rename_components = "pop2010") 
+
+# scores for Census 2000 
+pop2000_scores_mm <- get_scores(dt = mm, 
+                                change_var_name = "pop_", .model_vars = pop_model_vars, 
+                                pls_model = bc_pop2010_model, 
+                                rename_components = "pop2000") 
+
+# scores for Census 1990 
+pop1990_scores_mm <- get_scores(dt = mm, 
+                                change_var_name = "pop90_", .model_vars = pop_model_vars, 
+                                pls_model = bc_pop2010_model, 
+                                rename_components = "pop1990") 
+
+#combine scores for diff years
+pop_scores_mm <- cbind(pop1990_scores_mm, pop2000_scores_mm, pop2010_scores_mm)
+
+```
+
+-cohort
+
+```{r}
+ # scores for Census 2010 - FROM THE MODEL FIT
+pop2010_scores_cohort <- get_scores(dt = cohort,
+                                # no need to change var names here
+                                change_var_name = pop_model_vars, .model_vars = pop_model_vars,
+                                pls_model = bc_pop2010_model,
+                                rename_components = "pop2010") 
+
+# scores for Census 2000 
+pop2000_scores_cohort <- get_scores(dt = cohort, 
+                                change_var_name = "pop_", .model_vars = pop_model_vars, 
+                                pls_model = bc_pop2010_model, 
+                                rename_components = "pop2000") 
+
+# scores for Census 1990 
+pop1990_scores_cohort <- get_scores(dt = cohort, 
+                                change_var_name = "pop90_", .model_vars = pop_model_vars, 
+                                pls_model = bc_pop2010_model, 
+                                rename_components = "pop1990") 
+#combine scores for diff years
+pop_scores_cohort <- cbind(pop1990_scores_cohort, pop2000_scores_cohort, pop2010_scores_cohort)
+
+```
+
+-grid
+
+```{r}
+ # scores for Census 2010 - FROM THE MODEL FIT
+pop2010_scores_grid <- get_scores(dt = grid,
+                                # no need to change var names here
+                                change_var_name = pop_model_vars, .model_vars = pop_model_vars,
+                                pls_model = bc_pop2010_model,
+                                rename_components = "pop2010") 
+
+# scores for Census 2000 
+pop2000_scores_grid <- get_scores(dt = grid, 
+                                change_var_name = "pop_", .model_vars = pop_model_vars, 
+                                pls_model = bc_pop2010_model, 
+                                rename_components = "pop2000") 
+
+# scores for Census 1990 
+pop1990_scores_grid <- get_scores(dt = grid, 
+                                change_var_name = "pop90_", .model_vars = pop_model_vars, 
+                                pls_model = bc_pop2010_model, 
+                                rename_components = "pop1990") 
+#combine scores for diff years
+pop_scores_grid <- cbind(pop1990_scores_grid, pop2000_scores_grid, pop2010_scores_grid)
+
+```
+
+
+## NDVI
+
+### --> upate later to use 2010 NDVI in fitting the PLS model
+
+Build a BC PLS model using 2006 NDVI.
+
+```{r}
+y <- "bc"
+  # --> ??? use most recent time-varying covariate values to fit PLS model ?
+ndvi_model_vars <- "ndvi_"
+
+x <- names(mm)[grepl(pop_model_vars, names(mm))]
+
+model1 <- paste0(y, " ~ ", paste(x, collapse = " + "))
+
+# build BC PLS model using 2010 Census pop  
+bc_pop2010_model <- plsr(as.formula(model1),
+           data=mm, 
+           ncomp = 1,
+           scale=T)
+
+```
+
+
+## emissions
+
+```{r}
+
+```
+
+
+
+## Combine all PLS scores
+
+Datasets of linear combinations of all covariates.
+
+```{r}
+mm_scores0 <- cbind(mm[c(site_loc_vars)],
+                   bc_space_scores$dt_model,
+                   pop_scores_mm #,
+                   #ndvi_scores_mm
+                   )
+
+cohort_scores0 <- cbind(cohort[c(site_loc_vars)],
+                   bc_space_scores$dt_predict1,
+                   pop_scores_cohort #,
+                   #ndvi_scores_cohort
+                   )
+
+grid_scores0 <- cbind(grid[c(site_loc_vars)],
+                   bc_space_scores$dt_predict2,
+                   pop_scores_grid #,
+                   #ndvi_scores_grid
+                   )
+
+```
+
+Plots of TVCs over time
+
+for cohort 
+
+```{r}
+cohort_scores0 %>%
+  #            --> update when get new emission covariates
+  gather("tvc", "value", starts_with(c("pop", "ndvi", "ec"))) %>%
+  mutate(
+    Year = substr(tvc, nchar(tvc)-3, nchar(tvc)),
+    tvc = substr(tvc, 1, nchar(tvc)-4)  
+  ) %>%
+  #View()
+  
+  ggplot(aes(x=value, fill=Year)) + 
+  geom_density(alpha=0.3) + 
+  facet_wrap(~tvc, scales="free") + 
+  labs(
+    title = "Scores from 1st PLS component for time-varying covariates"
+    #subtitle = ""  
+  )
+
+
+```
+
+
+# Inter- and intra-pollation of covariates over time
+
+
+```{r}
+## note: only want to keep 2019 tvc's for mm_scores
+# interpolated_vars <- append(paste0("pop", c(1991:1999, 2001:2009, 2011:2019)),
+#                             paste0("ndvi", c(1994:2005, 2007:2009, 2011:2019))) %>%
+#   append(paste0("ec", c(1991:1994, 1996:1999, 2001:2004, 2006:2009, 2011:2014, 2016:2019))
+#          )
+
+# cohort_pop_interpolation <- data.frame()
+# names(cohort_pop_interpolation) <- 
+
+# interpolated_df0 <- as.data.frame(matrix(ncol = length(interpolated_vars))) %>%
+#   rename_all(~interpolated_vars)
+
+
+ 
+```
+
+### --> ? 
+
+Use linear inter- and intra-pollation to estimate PLS scores for otherwise unavailable years: 
+
+* US Census: 1991-1999 (using 1990 and 2000 linear fit), 2001-2009 and 2011-2019 (using 2000 and 2010 linear fit). Use the 2000 and 2010 fit to estiate 2011-2019 since there is an expected linear increase in population density over time for the Seattle area. 
+
+### -->? 
+
+* NDVI: use the same NDVI for 1990-1993 (NDVI estimated using images from 1990-1993), 1994-2005 (using 1990-1993 and 2006 linear fit), 2007-2009 (using 2006-2010 linear fit), and __the same NDVI for 2010-2019 (since we are unsure of the temporal trend post 2010)__  
+
+### -->? 
+
+* emissions: use linear interpolation from 5 yr estimates to estimate missing years (e.g., use 1990-1995 fit to estiate 1991-1994). ___Use the same emissions 2015-2019 since the emissions over time curve appears to be flattening?___ 
+ 
+
+EC emissions are estimated every 5 years from 1990-2015 from MOVES emission factors for King County and WADOT AADT estimates, or linearly inter-/intra-pollated values.
+
+## Population density
+
+```{r}
+mm_scores <- interpolate_pop(dt = mm_scores0)
+cohort_scores <- interpolate_pop(dt = cohort_scores0)
+grid_scores <- interpolate_pop(dt = grid_scores0)
+
+
+
+```
+
+## Emissions
+
+```{r}
+# --> make fn for interpolation 
+# paste0("ec", c(1991:1994, 1996:1999, 2001:2004, 2006:2009, 2011:2014, 2016:2019)) 
+
+
+
+```
+
+## NDVI
+
+```{r}
+# --> make fn for interpolation 
+# paste0("ndvi", c(1994:2005, 2007:2009, 2011:2019))
+
+
+```
+
+
+
+
+
+### --> 
+
+# Descriptive Statistics
+
+## Distribution of emissions, population density and NDVI covariates in the ACT cohort over time
+
+```{r}
+
+```
+
+ 
+## Correlation between UFP and BC since we will be using BC emission for UFP model
+
+```{r}
+
 ```
 
  
 
+ 
+# UK 
 
+Cross-validation parameters considered.
 
+```{r, echo = T}
+fast <- FALSE
 
-# Compare BC to AQS sites  
-if have 6 months of data, compare to the 6-mo estimate at AQS sites
-
-```{r}
-# repeat above w/ BC & compare to AQS site readings? is this data on server? 
-
-```
-
-# How correlated are UFP and BC since I will be using BC emission factors for UFP model? 
-
-```{r}
-
-```
-
-# difference between 2019 MM readings & annual readings at AQS sites
-Wang 2013 did a "difference" adjustment of all predictions
-
-```{r}
+if (fast == FALSE) {
+    k <- 10
+    pls_comps. <- c(1:5)  
+    dist_fract. <- c(0.05, seq(0.1, 0.4, by=0.1))
+  } else {
+    k <- 2
+    pls_comps. <- c(1:2)
+    dist_fract. <- c(seq(0.1, 0.2, by=0.1))
+  }
 
 ```
-
-# could put a smoother through EC since it’s very noisy & use the smoother to adjust model predictions. Use it to predict/rescale to BC. Use that BC prediction as a temporal adjustment in UK model.
-? rescale using non-heating month relationship
-
 ```{r}
 
 ```
 
+ 
+###--> 
+
+```{r}
+
+```
+
+
+
+
+## ? Plot of changing LUR model coefficients, intercepts (?) over time
+
+
+
+# Out of sample validation   
+
+e.g., Molter 2010 Table 2: Year, N AQS sites, RMSE, R2
+
+```{r}
+
+```
 

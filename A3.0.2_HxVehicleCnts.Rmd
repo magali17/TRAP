@@ -28,7 +28,7 @@ knitr::opts_chunk$set(echo = F,
                       cache=T, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE, 
-                      fig.height = 8, 
+                      #fig.height = 6, 
                       eval=T
                       )  
 
@@ -42,7 +42,9 @@ if (!is.null(sessionInfo()$otherPkgs)) {
 
 pacman::p_load(dplyr, tidyverse, ggpubr, knitr)  #ggpubr::ggarrange()
 
-source(file.path("Code", "A3.0.0_Var&Fns.R"))
+source("0.Global_Fns.R")
+source("A3.0.0_Var&Fns.R")
+source("A2.0.1_Var&Fns.R") #map_base()
 
 set.seed(1)
 
@@ -81,19 +83,20 @@ traffic.wide <- traffic %>%
 
 ```
 
-compare ramp vs highway counts.
+compare ramp vs highway counts. The distribution of AADT counts on ramps is different than that of AADT on main highway lanes. Ramps also come on/off lanes & complicates estimating AADT. Thus, exclude ramps.
 
 ```{r}
 #on GIS: exported new file of hx traffic counts in our study region
 
-traffic.in.region0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Hx Traffic Counts/hx.traffic.counts.in.study.region.csv")
+traffic.in.region0 <- read.csv(file.path("..", "GIS", "Shapefiles", "Hx Traffic Counts", "hx.traffic.counts.in.study.region.csv"))
+   
 
 traffic.in.region <- traffic.in.region0 %>%
   select(
     point_id,
     X1990:Ramp
   ) %>%
-  gather(Year=X1990:X2015, "Year", "AADT") %>%
+  gather("Year", "AADT", X1990:X2015) %>%
   mutate(
     Year = as.numeric(substr(Year, 2,5))
   )
@@ -104,24 +107,20 @@ traffic.in.region %>%
   geom_histogram(position = "dodge") + 
   facet_wrap(~Year)
 
-# ggsave(filename="AADT_ramp_vs_hwy.png",
-#       units = "in",
-#       width = 10
-#        )
-
 ```
 
 
-# Estimating road segment counts prior to 2005
+# AADT 
+
+## Estimate road segment counts prior to 2005
 
 On GIS: Linked 2 nearest points to each road section.
-
  
 Calculate weighted avg of vehicle counts on road segments based on distance of each highway traffic counter (2 traffic counters used per segment).
 
 ```{r}
 
-myjoin0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/joins/JoinedNearest2PtsToEachSection.csv")
+myjoin0 <- read.csv(file.path("..", "GIS", "Shapefiles", "Other features", "Roads", "Traffic Sections", "JoinedToNearest2Points", "JoinedNearest2PtsToEachSection.csv"))
 
 #calculate weighted avg based on each point's distance from a road link
 myjoin <- myjoin0 %>%
@@ -152,13 +151,13 @@ myjoin <- myjoin0 %>%
 
 ```
 
-On GIS: linked these weighted averages to road sections (instead of counts from  nearest 2 points).
+On GIS: linked these weighted averages to road sections.
 
-AADT estiamtes in our study region (from points).Uses 2005 WADOT road segments as the reference shapefile. 
+AADT estimates in our study region (from points). Uses 2005 WADOT road segments as the reference shapefile. 
 
 ```{r, eval=T}
-HxWtAADT0 <- read.csv("../Write Up/1. Proposal/Aim 3. Hx UFP/GIS/Traffic Sections/HxWtAvgAADTInStudyArea.csv")
-
+HxWtAADT0 <- read.csv(file.path("..", "GIS", "Shapefiles", "Other features", "Roads", "Traffic Sections", "HxWtAvgAADTInStudyArea.csv"))
+ 
 HxWtAADT <- HxWtAADT0 %>%
   select(
     OBJECTID,
@@ -172,30 +171,17 @@ HxWtAADT <- HxWtAADT0 %>%
     "AADT_points_2005_09" = X2005,
     "AADT_points_2010_14" = X2010,
     "AADT_points_2015_18" = X2015
-    ) #%>%
-  #gather(Year = "1990":"2015", "Year", "AADT")
-
-# traffic %>%
-#   ggplot(aes(x=AADT, fill=Ramp)) + 
-#   geom_histogram(position = "dodge") + 
-#   facet_wrap(~Yr_grp)
+    ) 
 
 ```
 
-
-## Validation    
-### using nearest 2 points   
 On GIS: created one shapefile with WADOT section counts from 2005-2018.
 
 Calculate 5-year averages & later compare to weighted avgs using my point method. 2005 used as the reference shapefile. 
 
-```{r}
-#knitr::opts_chunk$set(eval=T)
-
-```
 
 ```{r, eval=T}
-sections0 <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "roads", "Traffic Sections", "2005_2018_InStudy.csv"))
+sections0 <- read.csv(file.path("..", "GIS", "Shapefiles", "Other features", "Roads", "Traffic Sections", "2005_2018_InStudy.csv"))
 
 sections <- sections0 %>%
   select(
@@ -214,21 +200,6 @@ sections <- sections0 %>%
     AADT_sections_2016 = X2016_AADT,
     AADT_sections_2017 = X2017_AADT,
     AADT_sections_2018 = X2018_AADT,
-    
-    #distnace beween 2005 road segment and nearest road segment joined for each year
-    # dist_ft_06 = distance06,
-    # dist_ft_07 = distance07,
-    # dist_ft_08 = distance08,
-    # dist_ft_09 = distance09,
-    # dist_ft_10 = distance10,
-    # dist_ft_11 = distance11,
-    # dist_ft_12 = distance12,
-    # dist_ft_13 = distance13,
-    # dist_ft_14 = distance14,
-    # dist_ft_15 = distance15,
-    # dist_ft_16 = distance16,
-    # dist_ft_17 = distance17,
-    # dist_ft_18 = distance18,
    )  
 
 #calculate 5-year averages AADT estimates from road sections
@@ -271,233 +242,9 @@ compare <- sections %>%
 
 ```
 
-Estimates from lines (not using road network) are not great. 
+## AADT on 100m road segments
 
-Notes:    
-* “performance statistics” (R2, RMSE, smooth line estimates) across time are similar - they don't get progressively worse. This is good because we won’t be introducing an artifact b/c of the data.    
-* We won't be able to completely replicate DOT's complex modeling ("gold standard") using incomplete, hx data
-
-
-```{r, eval=T}
-## 2005-2009
-p2005 <- compare.fn(mydata = compare, 
-                    x= "AADT_sections_2005_09", x.label = "DOT AADT Estimates", 
-           y = "AADT_points_2005_09", y.label = "AADT Based on 2 Nearest Hwy Points",
-           plot.title = ""
-           )
-
-## 2010 - 2014
-p2010 <- compare.fn(mydata = compare,
-                    x= "AADT_sections_2010_14", x.label = "DOT AADT Estimates", 
-                    y = "AADT_points_2010_14", y.label = "AADT Based on 2 Nearest Hwy Points"
-                    )
-
-## 2015 - 2018
-p2015 <- compare.fn(mydata = compare,
-                    x= "AADT_sections_2015_18",
-                    y = "AADT_points_2015_18", 
-                    x.label = "DOT AADT Estimates", 
-                    y.label = "AADT Based on 2 Nearest Hwy Points"
-                    
-                    )
-
-
-(myplots <- ggarrange(p2005, p2010, p2015, 
-          labels = c("2005-2009", "2010-2014", "2015-2018"), 
-          label.x = F,
-          nrow = 1
-          
-          )
-)
-
-# ggsave(plot=myplots, filename="road_count_comparisons.png",
-#       units = "in",
-#       width = 10
-#        )
-
-```
-
-
-### Using Buffers   
-
-```{r}
-buffer.folder <- file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "GIS", "Traffic Sections", "Buffers_Using2005Sections", "joined to points within")
-
-b100.0 <- read.csv(file.path(buffer.folder, "100mBufferWithPointCounts.csv"))
-b800.0 <- read.csv(file.path(buffer.folder, "800mBufferWithPointCounts.csv"))
-b1000.0 <- read.csv(file.path(buffer.folder, "1000mBufferWithPointCounts.csv"))
-b1600.0 <- read.csv(file.path(buffer.folder, "1600mBufferWithPointCounts.csv"))
-b2500.0 <- read.csv(file.path(buffer.folder, "2500mBufferWithPointCounts.csv"))
-b3500.0 <- read.csv(file.path(buffer.folder, "3500mBufferWithPointCounts.csv"))
-b4000.0 <- read.csv(file.path(buffer.folder, "4000mBufferWithPointCounts.csv"))
-
-buffers.list <- list(b100.0, b800.0, b1000.0, b1600.0, b2500.0, b3500.0, b4000.0 ) 
-mybuffers <- c(100, 800, 1000, 1600, 2500, 3500, 4000)
-
-buffers <- as.data.frame(matrix(ncol=13))
-names(buffers) <-  c("OBJECTID", "SRID", "Location", "Shape_Leng", "AADT1990", "AADT1995", "AADT2000", "AADT2005", "AADT2010", "AADT2015", "pts_used", "point_kind", "buffer_m")    
-
-for (i in seq_along(mybuffers)) {
-  df <- aadt_from_points_within_buffer(mydata = as.data.frame(buffers.list[i]), 
-                                       mybuffer = mybuffers[i])  
-  
-  buffers <- rbind(buffers, df )
-}   
- 
-buffers$point_kind <- as.factor(buffers$point_kind)
-
-buffers.l<- buffers %>%
-  gather("Year", "AADT",AADT1990:AADT2015) %>%
-  mutate(
-    Year = as.numeric(substr(Year, 5, 8))
-  )
-
- 
-```
-
- 
-```{r}
-buffers.l %>%
-  filter( #buffer_m == 2500
-         Year == 1990
-         ) %>%
-  ggplot(aes(x=AADT, fill= point_kind)) + 
-  geom_density(alpha=0.3) + 
-  facet_wrap(~Year + buffer_m)
-
-
-
-```
-
- 
-ramps on their own look very bad. hwy alone looks best but sample size is smaller?
-
-```{r}
-buffers_renamed <- buffers %>%
-      rename_at(., vars(AADT2005:AADT2015), funs(paste0(substr(.,1,4), "_buffer_", substr(.,5,8), "_"))) %>%
-  select(
-    OBJECTID, SRID, Location, Shape_Leng, 
-    AADT_buffer_2005_09 = AADT_buffer_2005_,
-    AADT_buffer_2010_14 = AADT_buffer_2010_,
-    AADT_buffer_2015_18 = AADT_buffer_2015_,
-    pts_used:buffer_m
-  )
-
-
-
-compare_to_buffers <- sections %>%
-  select(
-    OBJECTID,
-    AADT_sections_2005_09:AADT_sections_2015_18
-  ) %>%
-  left_join(buffers_renamed) 
-
-
-# --> filter by: 1) buffer (100-4000), 2) point kind ("Hwy" "hwy or ramp" "Ramp")
-# change: year, mycol (pts_used, SRID, Shape_Leng)
- 
-
-```
-
- 
-```{r}
-
-dot_vs_buffers <- buffers %>%
-  group_by(point_kind,
-           buffer_m) %>%
-  dplyr::summarize(
-    road_sections_with_point_counts = n()
-  ) %>% 
-  ungroup() %>%
-  drop_na(point_kind) %>%
-  mutate(
-    R2 = NA,
-    RMSE = NA
-  )
-
-sections.l <- sections %>%
-  select(
-    #dont include annual AADT estimates for now
-    OBJECTID:AADT_sections_2015_18
-  ) %>%
-  gather("Year", "AADT_DOT", -OBJECTID) %>%
-  mutate(
-    Year = as.numeric(substr(Year, 15,18))
-  )   #recode()
-
-buffers.l.205_18 <- buffers.l %>%
-  filter(Year >= 2005) %>%
-  rename(AADT_buffers = AADT)
-
-dot_and_buffers_df <- sections.l %>%
-  left_join(buffers.l.205_18)
-
-for (i in 1:nrow(dot_vs_buffers)) {
-  #look at a specific point kind & buffer size  
-  df.temp <- dot_and_buffers_df %>% 
-    filter(
-      point_kind == dot_vs_buffers$point_kind[i],
-      buffer_m == dot_vs_buffers$buffer_m[i]
-      )  
-    
-    lm1 <- lm(AADT_buffers~AADT_DOT, 
-              data = df.temp)
-    
-    dot_vs_buffers$R2[i] <-  summary(lm1)$r.squared %>% round(2)
-    dot_vs_buffers$RMSE[i] <- round(sqrt(mean((predict(lm1) - df.temp$AADT_buffers)^2)))
-    
-    }
-
-dot_vs_buffers %>% 
-  gather("variable", "value", road_sections_with_point_counts:RMSE) %>%
-  ggplot(aes(x=buffer_m, y= value, colour= point_kind)) + 
-  geom_point() + 
-  geom_line() + 
-  facet_wrap(~variable, scales = "free") + 
-  labs(
-    title = "Road Section AADT Estimates for 2005-2018: DOT vs Points Within Buffers"
-  )
- 
-# ggsave(filename="AADT_buffer_comparisons.png",
-#       units = "in",
-#       width = 10
-#        )
-
-
-```
-
- 
-```{r}
-dot_vs_buffers %>%
-  mutate(
-    buffer_m = as.factor(buffer_m),
-    point_kind = factor(point_kind,levels = c("ramp", "hwy", "hwy or ramp") )
-    ) %>%
-  ggplot(aes(x=point_kind, y=road_sections_with_point_counts/733*100, group=buffer_m, col = buffer_m)) + 
-  geom_point() + 
-  geom_line() + 
-  labs(
-    y= "% Road sections w/ point counts"
-    
-  )
-
-dot_and_buffers_df %>%
-  filter(buffer_m == 800, #100, 800, 1000, 1600, 2500, 3500, 4000
-         point_kind == "hwy"  #hwy  #why or ramp
-  ) %>%
-  compare.fn(.,
-             x = "AADT_DOT",    
-             y= "AADT_buffers", 
-             #mycol = "pts_used", #pts_used, SRID, Shape_Leng
-             x.label = "DOT AADT Estimate",
-             y.label = "Points Within Buffers AADT Estimate",
-             plot.title = "800 m buffer, hwy points")
-
-```
-
-# AADT every ~ 100m on hwys from nearest 2 counters, based on a road network (primary & secondary)
-
-Using DOT road shapefiles
+Based on a DOT road network & nearest 2 counters.
 
 ```{r}
 #notes
@@ -525,10 +272,12 @@ routes <- read.csv(file.path(fp, "Hx Traffic Counts", "routes_row_no", "routes_r
 hx_cts <- read.csv(file.path(fp, "Hx Traffic Counts", "hwy_InStudy.csv")) %>%
   select(counter_row_no = row_number, X1990:X2015) #hwy_pt_id
 
-#  [don't need now?] hwy as pts every 100 m
+#  hwy as pts every 100 m
 hwy_100m <- read.csv(file.path(fp, "Other features", "Roads", "Traffic Sections", "2005_TPTTrafficSections", "Hwy_Pts_InStudy_100m.csv")) %>%
-  #cat is same as OBJECTID, 
-  select(hwy_row_no = row_number, fid, OBJECTID, segment_length_m = length) #SRID, segment_location = Location, Shape_Leng, 
+  #cat is same as OBJECTID,
+  select(hwy_row_no = row_number, fid, OBJECTID, segment_length_m = length) %>%
+  # drop very small segments that result in 0 emissions later
+  filter(segment_length_m != 0)  
 
 #separate "name": this corresponds to "row_number"
 route_names <- str_split(routes$Name, "-", simplify = T) %>%
@@ -543,18 +292,45 @@ rm(route_names)
 
 routes <- routes %>% left_join(hx_cts)
 
+
+
+```
+
+
+
+```{r}
+# #Check that if some point location counters are being used more than others. Counter #3 is in the south western part of our study...is this right??
+# 
+# routes %>%
+#   ggplot(aes(x=counter_row_no)) + 
+#   geom_bar() + 
+#   labs(title = "Number of times each highway counter is used to estimate AADT on 100 m road links")
+
+
+```
+
+```{r}
 #asgn distance-weighted AADT estimate to every hwy_row_no
 routes <- routes %>%
+  # 3 links have missing distances. Drop these so that estimates will only include 1 counter. Otherwise entire link is dropped.
+  drop_na(distnace_m) %>%
   group_by(hwy_row_no) %>%
   mutate(
+    # one site has a distance of "0". Convert to 1 m for weighted averaging. Otherwise, only 1 counter will be weighted? 
+    distnace_m = ifelse(distnace_m==0, 1, distnace_m),
     tot_dist_m = sum(distnace_m),
     dist_wt = 1 - distnace_m/tot_dist_m,
+    #some locations only have 1 counter linked (~411 segments). Counters may have been beyond a certain threshold (~ 500k km)? This means that dist_wt will be 0 (1-x/x). Convert this to 1. e.g. hwy_row_no 494
+    dist_wt = ifelse(dist_wt==0, 1, dist_wt),
+    
     wt_1990 = X1990*dist_wt,
     wt_1995 = X1995*dist_wt,
     wt_2000 = X2000*dist_wt,
     wt_2005 = X2005*dist_wt,
     wt_2010 = X2010*dist_wt,
-    wt_2015 = X2015*dist_wt) %>%
+    wt_2015 = X2015*dist_wt
+    
+    ) %>%
   group_by(hwy_row_no) %>%
   summarize(
     AADT_1990_94 = round(sum(wt_1990)),
@@ -565,8 +341,6 @@ routes <- routes %>%
     AADT_2015_18 = round(sum(wt_2015))) %>%
   left_join(hwy_100m)
     
- # ?? calc vehicle_meters? - multiply AADT_[yr] by hwy_100m$segment_length_m  
-
 #export AADT estimates on 100 m centroids in order to link these to 100 m road segments
 # routes %>%
 #   select(-OBJECTID) %>%
@@ -574,9 +348,44 @@ routes <- routes %>%
 
 ```
 
-Comparison of AADT estimates based on 100 m road sections and two nearest counting locations and DOT AADT Estimates on road links (varying lengths).
+
+
+AADT over time. See increasing traffic over time.
 
 ```{r}
+routes %>%
+  gather("Year", "AADT",starts_with("AADT")) %>%
+  mutate(Year = substr(Year, 6,9)) %>%
+  ggplot(aes(x=Year, y = AADT)) + 
+           geom_boxplot() + 
+  labs(y = "AADT",
+       title = "AADT on 100 m highway & interstate road segments within the study area")
+
+```
+
+Spaghetti plot of a subsample of road segments to show trends. Points are slightly jittered in the x-direction. AADT is generally increasing over time, though there are some fluctuations.
+
+```{r}
+routes %>%
+  # select a few roads to plot (too many otherwise)
+  slice(sample(nrow(.), size = 100, replace = F)) %>%
+  gather("Year", "AADT",starts_with("AADT")) %>%
+  mutate(Year = substr(Year, 6,9)) %>%
+  ggplot(aes(x=Year, y = AADT)) +
+  geom_point(position = position_jitter(w = 0.05, h = 0),  alpha=0.3) +
+  geom_line(aes(group=fid),  alpha=0.3) +
+  labs(y = "AADT",
+       title = "AADT on 100 m highway & interstate road segments within the study area")
+
+
+```
+
+
+## Validation    
+
+Comparison of AADT estimates based on 100 m road sections and two nearest counting locations and DOT AADT Estimates on road links (varying lengths).
+
+```{r, fig.height=10}
 # compare to DOT road section estimates    
 #fewer road sections dropped in "sections" b/c they weren't present in all yrs and so dropped
 #merge by object ID (original 2005 DOT road section IDs used to merge all line files 2005+ and used to break up lines into 100 m segments)
@@ -596,12 +405,12 @@ p2015 <- compare.fn(mydata = compare, x= "AADT_sections_2015_18",  y = "AADT_201
 myplots <- ggarrange(p2005, p2010, p2015, 
           labels = c("2005-2009", "2010-2014", "2015-2018"), 
           label.x = F,
-          nrow = 1) %>%
+          nrow = 3) %>%
   annotate_figure(#top = "AADT Estimates 2005+", 
                   left = "Distance-weighted avg for 100 m road links",
                   bottom = "WADOT road segment estimates")
 
-#myplots
+myplots
 
 # ggsave(plot = myplots, filename = file.path("A3_Images", "AADT_comparison.png"),
 #          units = "in", width = 10, height = 4)
@@ -610,4 +419,603 @@ myplots <- ggarrange(p2005, p2010, p2015,
 ```
 
 
+# MOVES 
+
+Emssion are for:
+
+* restricted roads (highways; i.e., excludes non-restricted roads)    
+* from gasoline and diesel fuels since these (Tim Larson):    
+  + compromise the majority of fuels    
+  + data on different/more recent fuels may not be as accurate/consistent over time    
+* EC (primary analysis, similar to BC) and NOx (it is the most reliable measure of vehicle emissions; mostly compromised of NO)
+
+```{r}
+# drop 2020
+last_moves_yr <- 2019
+
+# details on summary report
+#decode <- read.delim(file.path("Data", "Aim 3", "MOVES", "SummaryReportDecode.txt") )
+
+# total emissions by fuel & road type
+moves0 <- read.delim(file.path("Data", "Aim 3", "MOVES", "EFs 1990-2020 by road.txt")) %>% 
+  select(-c(State, County)) %>%
+  #drop emissions not on roads
+  filter(Road != 1,
+         Year <= last_moves_yr
+         ) %>%
+  mutate(#Fuel = ifelse(Fuel ==1, "Gasoline", "Diesel"),
+         Road = recode_factor(factor(Road), 
+                              "2" = "Rural Restricted Access", 
+                              "4" = "Urban Restricted Access")
+         )  
+  
+
+# calculate total emissions &  miles driven by year
+moves_total <- moves0 %>%
+  select(-c(#Fuel, 
+    Road)) %>%
+  group_by(Year) %>%
+  # calculate total emissions & distance traveled on restricted roads for each year
+  dplyr::summarize_all(sum)
+
+# calculate emission factors: g/km --> g/m     #(g/km)(km/1000 m)
+ef <- moves_total  %>%
+  mutate_at(vars(ElementC_PM25:NOx), ~./Distance/1000) %>% 
+  select(-Distance) 
+ 
+pollutant_names <- names(ef)[!names(ef) %in% c("Year", "Distance")]
+
+```
+
+```{r}
+# # fuel, road, pollutant 
+# moves0 %>%
+#   select(-c(Road)) %>%
+#   group_by(Year, Fuel) %>%
+#   # calculate total emissions & distance traveled on restricted roads for each year
+#   dplyr::summarize_all(sum) %>%
+#   gather("pollutant", "value", ElementC_PM25:Distance) %>%
+#   ggplot(aes(x=Year, y = value, fill = Fuel)) +  
+#   geom_area(position = 'stack') +
+#   #geom_point(size=1) + 
+#   facet_wrap(~pollutant, scales = "free") + 
+#   labs(title = "Total distance (meters) driven and emissions (g) on restricted roads over time by fuel type") + 
+#   theme(legend.position = "bottom")
+
+```
+
+Total emissions. Same plot as above but does not distinguish by fuel type (what we will be estimating emission factors from).
+
+```{r}
+
+moves_total %>%
+  rename(EC_g = ElementC_PM25,
+         NOX_g = NOx,
+         Distance_m = Distance
+         ) %>%
+  gather("variable", "value", -Year) %>%
+  ggplot(aes(x=Year, y = value)) + 
+  geom_point() + 
+  geom_line() + 
+  facet_wrap(~variable, scales = "free") +
+  labs(#y = "Total Emissions (g)",
+      title = "Total miles driven and emissions on restricted roads over time")  
+  
+```
+
+
+# Emission Factors
+
+Plot of MOVES emission factors over time for King County. Only using King county because most of our study area is in King County and county lines may be artificial borders that are not necessarily relevant to air pollution? 
+
+MOVES does not have EFs from 1991-1998. 
+
+```{r}
+ef %>% 
+  gather(Pollutant, g_per_m, -Year) %>%
+  ggplot(aes(x=Year, y = g_per_m, col=Pollutant)) + 
+  geom_point() +
+  geom_line() + 
+  facet_wrap(~Pollutant, scales = "free") +
+  labs(y = "Emission Factor (g/m)",
+      title = "Emission factors over time for restricted roads"
+       )+ 
+  theme(legend.position = "none")
+
+```
+
+## Interpolate EFs from 1991-1998 for each pollutant
+
+Using a linear fit & an interaction term for each county to allow each county to have its own slope:
+
+EF ~ Year*County
+
+```{r}
+interpolation <- ef %>%
+  #only keep two bordering years
+  filter(Year %in% c(1990, 1999))
+
+years_to_interpolate <- 1991:1998
+
+# df to save interpolatin predictions
+other_yrs <- matrix(ncol = length(pollutant_names)+1, nrow = length(years_to_interpolate)) %>% as.data.frame()
+# rename
+names(other_yrs) <- c("Year", pollutant_names)
+# years to interpolate 
+other_yrs$Year <- years_to_interpolate
+
+# models of: pollutant ~ Year
+models <- paste(pollutant_names, "~ Year")
+
+# run each model & save predictions for years in between
+for (i in seq_along(models)) {
+
+  lm1 <- lm(formula(models[i]), data = interpolation)  
+  other_yrs[pollutant_names[i]] <- predict(lm1, newdata = other_yrs)
+
+}
+
+# add interpolated EFs to EFs from other years
+ef <- rbind(ef, other_yrs) %>%
+  arrange(Year)
+
+```
+
+Plot of EFs with interpolated values (1991-1998)
+
+```{r}
+ef %>%
+  mutate(Interpolated = Year %in% years_to_interpolate) %>%
+  gather(Pollutant, g_per_m, pollutant_names) %>%
+  ggplot(aes(x=Year, y = g_per_m, col=Pollutant, shape = Interpolated)) + 
+  geom_point(size=2) +
+  geom_line() + 
+  facet_wrap(~Pollutant, scales = "free") +
+  labs(y = "Emission Factor (g/m)",
+      title = "Emission factors over time for restricted roads"
+       )  
+
+```
+
+## Calculate 5-yr averages
+
+2015 average uses 2015-2018 data. 2019 average is for 2019 alone. 
+
+```{r}
+
+ef <- ef %>%
+  # %% returns the remainder after Year is divided by 5. This is subtracted from actual year to calculate a floored date 
+  mutate(
+    # average every 5 yrs except for near the end since we want an estimate for the last year (2019)
+    Year = ifelse(Year < last_moves_yr, Year - (Year %% 5), Year)) %>%
+  
+  #View()
+  
+  # calculate 5 yr averages 
+  group_by(Year) %>%
+  dplyr::summarize_all(mean)
+
+```
+
+Plot of 5 yr average EFs
+
+```{r}
+ef %>%
+  gather(Pollutant, g_per_m, pollutant_names) %>%
+  ggplot(aes(x=Year, y = g_per_m, col=Pollutant)) + 
+  geom_point() +
+  geom_line() + 
+  facet_wrap(~Pollutant, scales = "free") +
+  labs(y = "Emission Factor (g/m)",
+      title = "5 yr emission factors for restricted roads"
+       ) + 
+  theme(legend.position = "none")
+
+```
+
+# Emissions 
+
+Combine EFs with GIS Shapefile containing AADT & road length to estimate total emissions (g).
+
+```{r}
+
+# GIS Shapefile containing AADT & road length 
+
+# gis_100m <- read.csv(file.path("..", "GIS", "Shapefiles", "Other features", "Roads", "Traffic Sections", "2005_TPTTrafficSections", "100m_AADT_InStudy.csv")) %>%
+#   select(hwy_row_no, length, contains("AADT"))
+
+# estimate emissions: AADT*road_length*emission_factor
+emissions <- routes %>%
+  select(-c(fid, OBJECTID)) %>%
+  # drop end of name
+  rename_at(vars(starts_with("AADT")), ~substr(., 1, 9)) %>%
+  mutate(
+    # EC
+    ec_g_1990 = AADT_1990*segment_length_m* as.numeric(ef[ef$Year==1990, "ElementC_PM25"]),
+    ec_g_1995 = AADT_1995*segment_length_m* as.numeric(ef[ef$Year==1995, "ElementC_PM25"]),
+    ec_g_2000 = AADT_2000*segment_length_m* as.numeric(ef[ef$Year==2000, "ElementC_PM25"]),
+    ec_g_2005 = AADT_2005*segment_length_m* as.numeric(ef[ef$Year==2005, "ElementC_PM25"]),
+    ec_g_2010 = AADT_2010*segment_length_m* as.numeric(ef[ef$Year==2010, "ElementC_PM25"]),
+    ec_g_2015 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==2015, "ElementC_PM25"]),
+    # use latest emissions but & AADT for last year (need for interpollation later)
+    ec_g_2019 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==last_moves_yr, "ElementC_PM25"]),
+    
+    # NOx
+    nox_g_1990 = AADT_1990*segment_length_m* as.numeric(ef[ef$Year==1990, "NOx"]),
+    nox_g_1995 = AADT_1995*segment_length_m* as.numeric(ef[ef$Year==1995, "NOx"]),
+    nox_g_2000 = AADT_2000*segment_length_m* as.numeric(ef[ef$Year==2000, "NOx"]),
+    nox_g_2005 = AADT_2005*segment_length_m* as.numeric(ef[ef$Year==2005, "NOx"]),
+    nox_g_2010 = AADT_2010*segment_length_m* as.numeric(ef[ef$Year==2010, "NOx"]),
+    nox_g_2015 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==2015, "NOx"]),
+    nox_g_2019 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==last_moves_yr, "NOx"]),
+    ) #%>%
+  # round emission estimates #DON'T DO FOR NOW since also summarizing later
+  #mutate_at(vars(contains("_g_")), ~round(.))
+
+```
+
+
+Plot estimated emissions from AADT & EFs over time. See generally decreasing trends.
+
+```{r}
+ec <- emissions %>%
+  select(hwy_row_no, contains("ec_")) %>%
+  gather("Year", "emissions_g", contains("_g_")) %>%
+  mutate(
+    # get rid of text before any digits
+    Year = as.numeric(gsub("\\D", "", Year)),
+    Pollutant = "EC",
+    )
+
+nox <- emissions %>%
+  select(hwy_row_no, contains("nox_")) %>%
+  gather("Year", "emissions_g", contains("_g_")) %>%
+  mutate(
+    Year = as.numeric(gsub("\\D", "", ec$Year)),
+    Pollutant = "NOx",
+    )
+
+```
+
+The smooth curve is not necessarily similar to the trend we see at Beacon Hill. This may be because these highway roads may not be representative of the Beacon Hill area (they are the roads with vehicle counts dating back to 1990).
+
+```{r}
+rbind(ec, nox) %>%
+  #mutate(Year = factor(Year)) %>%
+  ggplot(aes(x=Year, y = emissions_g)) + 
+           geom_boxplot(aes( group=Year)) + 
+  #geom_smooth() +
+  geom_smooth(method = lm, formula = y ~ splines::bs(x, df= 5), se = F) +
+  facet_wrap(~Pollutant, scales = "free") +
+  labs(y = "Emissions (AADT * road length * EFs = g)",
+       title = "Emissions on restricted roads in our study area over time")
+         
+```
+
+Same plot as above but as a spaghetti plot of a subsample of road segments  (for viewing purposes). In general, the overall trend seems to be correct at most locations.
+
+```{r}
+sample_row <- sample(emissions$hwy_row_no, size = 200, replace = F)
+
+rbind(ec, nox) %>%
+  filter(hwy_row_no %in% sample_row) %>%
+  mutate(Year = factor(Year)) %>%
+  ggplot(aes(x=Year, y = emissions_g)) +
+  geom_point(alpha=0.3) + 
+  geom_line(aes(group=hwy_row_no), alpha=0.3) + 
+  facet_wrap(~Pollutant, scales = "free") +
+  labs(y = "Emissions (AADT * road length * EFs = g)",
+       title = "Emissions on restricted roads in our study area over time")
+
+```
+
+Export CSV w/ emission estimates to GIS and merge with 100 m road segment shapefile.
+
+```{r}
+# delete??
+
+# #save dataset
+# emissions %>%
+#   select(segment_length_m, everything()) %>%
+#   write.csv(., file = file.path("Data", "Aim 3", "Emissions", "ec_nox_emissins.csv"), row.names = F)
+
+```
+
+## Maps
+
+
+Import shapefile converted to dataframe with road segments & emission estimates.
+
+```{r}
+emissions_shp <- readRDS(file.path("Data", "GIS", "emissions_df.rda")) %>%
+  # drop old estimates linked to shapefile
+  select(long:OBJECTID, hw_row_no) %>%
+  # add new estimates, which include emissions for 2019
+  left_join(emissions, by = c("hw_row_no" = "hwy_row_no"))
+
+ #length(unique(emissions_shp$hw_row_no)) #10306
+
+```
+
+### Emissions on 100 m segments 
+
+We see some segments with concentrations that are lower/higher than surrounding concentrations. It appears that some segments were not linked to the 2 nearest counters, but to other counters close by. For example: 
+
+```{r}
+#####################
+#pollutant  #UPDATE for other pollutants
+pollutant <- "ec"
+
+#####################
+pollutant_names <- names(emissions_shp)[grepl(paste0(pollutant, "_"), names(emissions_shp))]
+
+# example: just show 1 yr
+pollutant_names <- pollutant_names[1]
+
+# min and max difference of all estimates
+plot_range <- emissions_shp %>%
+  select(pollutant_names) %>%
+  dplyr::summarize(min = min(.),
+                   max = max(.)) %>%
+  round()
+
+# # blank background map
+# map0 <- map_base(dt = emissions_shp, latitude_name = "lat", longitude_name = "long") 
+# saveRDS(map0, file = file.path("Output", "Maps", "StudyBackgroundMap.rds"))
+map0 <- readRDS(file.path("Output", "Maps", "StudyBackgroundMap.rds"))
+
+#list to store maps
+map_list <- list()
+ 
+for(i in seq_along(pollutant_names)) {
+  # i=1
+  # i=6
+  
+        ### --> ERROR: whenever this runs, it overrides map_list()
+  mymap <- map0 +
+  geom_polygon(data = emissions_shp, aes(x = long, y = lat, group = group, 
+                                         col= emissions_shp[,pollutant_names[i]])) + 
+  scale_color_gradient(name = paste0(toupper(pollutant), " (g)"), 
+                       low = "yellow", high = "red",
+                       limits = c(plot_range$min, plot_range$max)) + 
+    # add year to map title
+    labs(title = substr(pollutant_names[i], nchar(pollutant_names[i])-3, nchar(pollutant_names[i]) ))
+
+  print(mymap)
+  #map_list <- c(map_list, list(mymap))
+  #map_list[i] <- list(mymap) 
+  #names(map_list)[i] <- pollutant_names[i]
+  
+  }
+
+```
+
+
+### Emission smoothing 
+
+```{r}
+round_to <- 5
+
+```
+
+Smooth median emissions every `r round_to` segments to address the inconsistent linking of 100 m road segments to counter point locations (in GIS) for some road segments. We will group 100 m road segments into groups of `r round_to` (based on location) & calculating the median.
+
+```{r}
+# save original readings for later comparison
+original_emissions <- emissions_shp %>%
+  select(contains(c("ec_", "nox_", "AADT"))) %>%
+  rename_all(~paste0(., "_original") )
+
+# calculate medians every 5 adjacent segments
+emissions_shp_median <- emissions_shp %>%
+   dplyr::select(long:group, cat, 
+                 segment_length_m, hw_row_no,
+                 contains(c("AADT"))
+                 ) %>%
+  mutate(
+     # round row numbers
+    hw_row_no_rounded = floor(hw_row_no/round_to)*round_to,
+    # group categories & rounded row numbers
+    cat_hwy = paste0(cat, "_", hw_row_no_rounded),
+        ) %>%
+  group_by(cat_hwy) %>%
+  mutate_at(vars(contains(c("AADT"
+    #"_g_"
+    ))), ~median(.)) %>%
+  ungroup() %>%
+  #recalculate emissions using updated AADT estimates
+  mutate(
+    # EC
+    ec_g_1990 = AADT_1990*segment_length_m* as.numeric(ef[ef$Year==1990, "ElementC_PM25"]),
+    ec_g_1995 = AADT_1995*segment_length_m* as.numeric(ef[ef$Year==1995, "ElementC_PM25"]),
+    ec_g_2000 = AADT_2000*segment_length_m* as.numeric(ef[ef$Year==2000, "ElementC_PM25"]),
+    ec_g_2005 = AADT_2005*segment_length_m* as.numeric(ef[ef$Year==2005, "ElementC_PM25"]),
+    ec_g_2010 = AADT_2010*segment_length_m* as.numeric(ef[ef$Year==2010, "ElementC_PM25"]),
+    ec_g_2015 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==2015, "ElementC_PM25"]),
+    ec_g_2019 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==last_moves_yr, "ElementC_PM25"]),
+    
+    # NOx
+    nox_g_1990 = AADT_1990*segment_length_m* as.numeric(ef[ef$Year==1990, "NOx"]),
+    nox_g_1995 = AADT_1995*segment_length_m* as.numeric(ef[ef$Year==1995, "NOx"]),
+    nox_g_2000 = AADT_2000*segment_length_m* as.numeric(ef[ef$Year==2000, "NOx"]),
+    nox_g_2005 = AADT_2005*segment_length_m* as.numeric(ef[ef$Year==2005, "NOx"]),
+    nox_g_2010 = AADT_2010*segment_length_m* as.numeric(ef[ef$Year==2010, "NOx"]),
+    nox_g_2015 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==2015, "NOx"]),
+    nox_g_2019 = AADT_2015*segment_length_m* as.numeric(ef[ef$Year==last_moves_yr, "NOx"])
+  )
+  
+# add original emissions for comparison
+emissions_shp_median <- cbind(emissions_shp_median, original_emissions)
+
+```
+
+Plots comparing emissions on original 100 m segments and the median emissions every `r round_to` road segments. Estimates are similar for AADT and emissions, though there are some segment that deviate a potentially meaningful amount from the 1-1 line. 
+
+AADT 
+
+```{r}
+years_to_plot <- c(seq(1995, 2015, by=5))
+
+plot_list <- list()
+ 
+for(i in seq_along(years_to_plot)) {
+  #i=5
+  year <- years_to_plot[i]
+  
+  myplot <- emissions_shp_median %>% 
+    colo.plot(x.variable = paste0("AADT_", year, "_original"), x.label = " ",
+              y.variable = paste0("AADT_", year), y.label = " ",
+              alpha_value = 0.03, 
+              mytitle =  year
+                )
+  
+plot_list[i] <- list(myplot)
+  
+}
+
+ggarrange(plotlist = plot_list, 
+          ncol = 3, nrow = 2,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = paste0("AADT on 100 m road segments before and after smoothing (n = ", round_to, " nearby segments)"), 
+                  bottom = "Before smoothing: single segment AADT", 
+                  left = paste0("After smoothing: ", round_to, " segment median AADT")
+                    )
+  
+```
+
+Resulting emissions with updated AADT. 
+
+Emissions for 2019 use AADT estimates from 2015. Since vehicle traffic has been steadily increasing over time, these estimates likely underestimate emissions.
+
+```{r}
+plot_list <- list()
+ 
+years_to_plot <- append(years_to_plot, last_moves_yr)
+  
+for(i in seq_along(years_to_plot)) {
+  #i=1
+  year <- years_to_plot[i]
+   
+  myplot <- emissions_shp_median %>% 
+    colo.plot(x.variable = paste0("ec_g_", year, "_original"), x.label = " ",  
+              y.variable = paste0("ec_g_", year), y.label = " ",  
+              alpha_value = 0.03, 
+              mytitle =  year
+                )
+  
+plot_list[i] <- list(myplot)
+  
+}
+
+ggarrange(plotlist = plot_list, 
+          ncol = 3, nrow = 2,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = paste0("Emissions (g) on 100 m road segments before and after smoothing (n = ", round_to, " nearby segments)"), 
+                  bottom = "Before smoothing: single segment emissions", 
+                  left = "After smoothing: 5 segment median emissions"
+                    )
+```
+
+```{r}
+year <- 1990
+
+```
+
+Let's plot the emission estimate residuals (smooth minus single segment estimate) to see what segments have been most affected by the smoothing. The `r year` residuals are plotted as an example.
+
+No clear pattern emerges other than seeing a high residual near downtown Seattle on I-5?
+
+```{r}
+
+# fn <- quo(paste0("ec_g_", year) - paste0("ec_g_", year, "_original"))
+quant <- 0.995
+
+emissions_shp_median_diff <- emissions_shp_median %>% 
+   mutate(
+     #diff = :=!! fn
+     diff = ec_g_1990 - ec_g_1990_original,
+     #diff = cut(diff, 4, labels = F)
+   ) %>%
+  #only include large residuals since plot looks all white otherwise 
+  filter(diff > quantile(diff, quant) | diff < quantile(diff, 1-quant))
+
+  map0 + 
+    geom_polygon(data = emissions_shp_median_diff, aes(x = long, y = lat, group = group, 
+                                         col=  diff, 
+                                         size=0.5
+                                         )) + 
+    scale_color_gradient2(low = "blue", high = "red")+
+    labs(title = "Difference between smooth and original (smooth - original) segment emissions",
+         subtitle =  paste0(year, ". values < ", 1-quant, " or values > ", quant, " quantile")
+    )
+
+```
+
+
+Map of smoothened segments. Maps look almost identical to the original, unsmoothened segments. We will use the smoothened segments because we believe these may be more accurate and may compensate for line segments being linked to vehicle counters that were not the two nearest counters as a result of the road network used in GIS.
+
+```{r}
+pollutant_names <- names(emissions_shp_median)[grepl("ec_", names(emissions_shp_median))] %>%
+  # alphabetize 
+  sort()
+
+map_title <- ifelse(grepl("original", pollutant_names), 
+                      paste0(substr(pollutant_names, 6, 9), " original"),
+                      paste0(substr(pollutant_names, 6, 9), " smooth")
+                      )
+
+for(i in seq_along(pollutant_names)) {
+ #i=2
+ 
+  mymap <- map0 +
+  geom_polygon(data = emissions_shp_median, aes(x = long, y = lat, group = group, 
+                                         col= emissions_shp_median[,pollutant_names[i]]
+                                         )
+               ) + 
+  scale_color_gradient(name = paste0(toupper(pollutant), " (g)"), 
+                       low = "yellow", high = "red", 
+                       limits = c(plot_range$min, plot_range$max)
+                       ) + 
+    # add year to map title
+    labs(title =  map_title[i])
+
+  print(mymap)
+  
+  }     
+    
+
+```
+
+Export median segment estimates to merge with GIS shapefile.
+
+```{r}
+# export median estimates
+emissions_shp_median %>%
+  select(hw_row_no,
+         contains(c("ec_", "nox_")),
+         -contains(c("original"))
+         ) %>%
+  # delete relicate rows needed in R for plotting
+  unique() %>%
+  #View()
+  write.csv(file = file.path("Data", "Aim 3", "Emissions", "Emissions_estimates.csv"), row.names = F)
+
+```
+
+
+
+
+
+# Sensitivity Analyses
+
+### -->   
+## DOT line files
+
+### Maps
+
+```{r}
+
+
+
+```
 

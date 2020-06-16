@@ -91,7 +91,7 @@ source("0.Global_Fns.R")
 source("A2.0.1_Var&Fns.R")
 
 #load data
-stops0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-03-08.rda")) 
+stops0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-03-17.rda")) 
 
 site_locations <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda")) %>% 
   select(site_id, latitude, longitude)
@@ -137,6 +137,11 @@ stops <- stops0 %>%
                                      ifelse(bc_median_all_data < quantile(bc_median_all_data, 0.05, na.rm=T), quantile(bc_median_all_data, 0.05, na.rm = T), bc_median_all_data))
     ) %>%
   ungroup() %>%
+  
+  ### --> JUST ADDED THIS 4/3/20
+  #add temporal variables
+  add.temporal.variables(data = ., date.var = "arrival_time") %>%
+
   mutate(
     site_id = factor(site_id),  
     # add other temporal variables & geocovariates
@@ -157,6 +162,95 @@ n.months.sampled <- length(unique(stops$month))
 n.seasons.sampled <- length(unique(stops$season))
 
 ```
+
+# Sample Size - All stops
+
+Number of median stop concentration estimates (median_all_data).
+
+```{r}
+stops_l0 <- stops %>%
+  select(date, site_id, contains("median_all_data"), hour:tod2) %>%
+  gather(Pollutant, value, contains("all_data")) %>%
+  #select(-value) %>%
+  mutate(Pollutant = ifelse(grepl("bc", Pollutant), "BC", "UFP")) %>%
+  drop_na()
+
+#first_hr <- min(stops_l0$hour[stops_l0$hour != min(stops_l0$hour)])
+#last_hr <- min(stops_l0$hour)
+
+n_tot <- stops_l0 %>%
+  #filter(grepl("UFP", Pollutant)) %>%
+  group_by(Pollutant, site_id) %>%
+  dplyr::summarize(N = n()) %>%
+  distribution.table(var.string = "N") %>%
+  mutate(Time = "Overall") %>%
+  select(Time, everything()) %>%
+  ungroup()
+
+n_season <- stops_l0 %>%
+  #filter(grepl("UFP", Pollutant)) %>%
+  group_by(Pollutant, site_id, season) %>%
+  dplyr::summarize(N = n()) %>%
+  group_by(Pollutant, Time=season) %>%
+  distribution.table(var.string = "N") %>%
+  ungroup()
+
+n_tow <- stops_l0 %>%
+  #filter(grepl("UFP", Pollutant)) %>%
+  group_by(Pollutant, site_id, time_of_week) %>%
+  dplyr::summarize(N = n()) %>%
+  group_by(Pollutant, Time=time_of_week) %>%
+  distribution.table(var.string = "N") %>%
+  ungroup()
+
+n_tod5 <- stops_l0 %>%
+  #filter(grepl("UFP", Pollutant)) %>%
+  group_by(Pollutant, site_id, tod5) %>%
+  dplyr::summarize(N = n()) %>%
+  group_by(Pollutant, Time=tod5) %>%
+  distribution.table(var.string = "N") %>%
+  ungroup() %>%
+  mutate(
+   Time = recode_factor(Time,
+                        "3_8" = "4-8 AM",
+                        "9_11" = "9-11 AM",
+                        "12_15" = "12-3 PM",
+                        "16_20" = "4-8 PM",
+                        "21_2" = "9 PM - 12 AM"
+                        ) 
+  )
+
+n <- rbind(n_tot, n_season, n_tow, n_tod5)
+
+```
+
+```{r}
+n %>%
+  filter(Pollutant == "UFP") %>%
+  select(-Pollutant) %>%
+   add_row(Time = "Season", .before = 2) %>%
+  add_row(Time = "Time of Week", .before = 7) %>%
+  add_row(Time = "Hour", .before = 10) %>%
+    kable(caption = "Number of UFP samples per site overall, by season and by hour of the day. N = unique number of sites visited") %>%
+  add_indent(c(3:6, 8:9, 11:15)) %>%
+  kable_styling() 
+
+```
+
+```{r}
+n %>%
+  filter(Pollutant == "BC") %>%
+  select(-Pollutant) %>%
+   add_row(Time = "Season", .before = 2) %>%
+  add_row(Time = "Time of Week", .before = 7) %>%
+  add_row(Time = "Hour", .before = 10) %>%
+    kable(caption = "Number of BC samples per site overall, by season and by hour of the day. N = unique number of sites visited") %>%
+  add_indent(c(3:6, 8:9, 11:15)) %>%
+  kable_styling()
+
+```
+
+
 
 # Distribution of Stop Concentrations
 
@@ -187,26 +281,42 @@ stops_l_all_analyses <- left_join(stops_l_all_analyses, data_crosswalk)
 
 ```
 
-### --> create table just for primary analyses before & after trimming 
-
 ```{r}
 stops_l_all_analyses %>%
   group_by(Pollutant, Estimate, Description) %>% 
   distribution.table(var.string = "value") %>%
-  kable(caption = "Distribution of stop concentrations for all the data (median_all_data), the primary analysis (median_trim5) and sensitivity analyses") %>%
+  kable(caption = "Distribution of stop concentrations for all the data, the primary analysis and sensitivity analyses") %>%
   kable_styling()
+
 
 ```
 
-### --> ? create plot of just the primary analyses before & after trimming 
 
 ```{r}
+# all data & primary
+stops_l_all_analyses %>% 
+  filter(Estimate %in% c("median_all_data", "median_trim5")) %>%
+  mutate(Estimate = recode_factor(factor(Estimate),
+                       "median_all_data" = "All Data",
+                       "median_trim5" = "5% Trim"
+                       )) %>%
+    ggplot(aes(x=Estimate, y=value, fill=Estimate)) + 
+  geom_boxplot() + 
+  facet_wrap(~Pollutant, scales="free", ncol=1) + 
+  labs(title = "Distribution of stop concentrations for all the data, the primary analysis and sensitivity analyses",
+       y = "Stop Concentration",
+       x = "Data Used"
+       )  + 
+  theme(legend.position = "none") +
+  coord_flip()
+
+# all analyses
 stops_l_all_analyses %>% 
     ggplot(aes(x=Estimate, y=value, fill=Estimate)) + 
   geom_boxplot() + 
   facet_wrap(~Pollutant, scales="free", ncol=1) + 
-  labs(title = "Distribution of stop concentrations for all the data (median_all_data), the primary analysis (median_trim5) and sensitivity analyses",
-       y = "Stop Concentration Estimate",
+  labs(title = "Distribution of stop concentrations for all the data, the primary analysis and sensitivity analyses",
+       y = "Stop Concentration",
        x = "Data Used"
        )  + 
   theme(legend.position = "none") +
@@ -232,11 +342,32 @@ stops_l <- stops %>%
   
 ```
 
-# Sample size 
+# Sample size - Primary analyses
 
 By temporal variables. 
 
-### --> make these tables into plots for dissertation
+A similar number of stop samples were collected each season and day of the week for each pollutant. Some morning, afternoon & evening hours were sampled more frequently than others.
+
+```{r}
+stops_l %>%
+  gather(hour, day, season, key = "temporal_variable", value = "temporal_value") %>%
+  #filter(Pollutant == "ufp_pt_cm3") %>% #comment this out to plot UFP and BC on sample plot
+  mutate(
+    temporal_variable = factor(temporal_variable, levels = c("season", "day", "hour")),
+    temporal_value = factor(temporal_value, levels = c(levels(factor(stops$hour)), levels(stops$day), levels(stops$season))),
+    Pollutant = factor(Pollutant, levels = c("ufp_pt_cm3", "bc_ng_m3"), labels = c("UFP (pt/cm3)", "BC (ng/m3)"))
+    ) %>%
+  ggplot(aes(x=temporal_value)) + 
+  geom_bar(aes(stat = "count")) + 
+  facet_grid(Pollutant~temporal_variable, scales= "free", switch = "both") +
+  labs(
+    title = "Number of stop samples each season, day of the week and hour",
+    x = ""
+    # y = ""  
+  )
+  
+  
+```
 
 ```{r}
 ## table of stop counts per site overall & stratified
@@ -370,6 +501,7 @@ Distribution of stop concentrations by site (using trimmed data). Distributions 
 
 ```{r}
 stops_l %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
   ggplot(aes(x= site_no, y=Value, group = site_no)) + 
   geom_boxplot() +
   labs(title = paste0("Distribtuion of stop concentrations" ),
@@ -427,7 +559,7 @@ conc_distributions %>%
   add_row(time = "Season", .before = 2) %>%
   add_row(time = "Time of Week", .before = 7) %>%
   add_row(time = "Hour", .before = 10) %>%
-  kable(caption = "Distribution of median UFP stop concentrations over time") %>%
+  kable(caption = "Distribution of median UFP stop concentrations (pt/cm3) over time") %>%
   add_indent(c(3:6, 8:9, 11:31)) %>%
   kable_styling()
   
@@ -444,7 +576,7 @@ conc_distributions %>%
   add_row(time = "Season", .before = 2) %>%
   add_row(time = "Time of Week", .before = 7) %>%
   add_row(time = "Hour", .before = 10) %>%
-  kable(caption = "Distribution of median BC stop concentrations over time") %>%
+  kable(caption = "Distribution of median BC stop concentrations (ng/m3) over time") %>%
   add_indent(c(3:6, 8:9, 11:31)) %>%
   kable_styling()
 
@@ -454,25 +586,22 @@ Plots
 
 UFP and BC concentrations were very variable for any one hour, day of the week and season.
 
-### --> check that temporal_variable is factored correctly
-
 ```{r}
 stops_l %>%
   gather(hour, day, season, key = "temporal_variable", value = "temporal_value") %>%
   #filter(Pollutant == "ufp_pt_cm3") %>% #comment this out to plot UFP and BC on sample plot
   mutate(
     temporal_variable = factor(temporal_variable, levels = c("season", "day", "hour")),
-    temporal_value = factor(temporal_value, levels = c(levels(factor(stops$hour)), levels(stops$day), levels(stops$season))),
-    Pollutant = factor(Pollutant, levels = c("ufp_pt_cm3", "bc_ng_m3"), labels = c("UFP (pt/cm3)", "BC (ng/m3)"))
+    temporal_value = factor(temporal_value, levels = c(levels(factor(stops$hour)), levels(stops$day), levels(stops$season)))
     ) %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
   ggplot(aes(x=temporal_value, y=Value)) + 
   geom_boxplot() + 
   facet_grid(Pollutant~temporal_variable, scales= "free", switch = "both") +
-  #facet_wrap(Pollutant~temporal_variable, scales= "free",switch = "y",) +
   labs(
     title = "Stop concentrations over time",
     x = "",
-    y = ""  #"Concentration"
+    y = ""  
   )
 
 ```
@@ -506,7 +635,7 @@ stop_medians ~ season + day of week + hour + site_id
 
 - UFP
 
-Most (~74%) of the variation in UFP stop concentration occurs __[?]within stops at any particular time__. About 22% of the variation in UFP concentration occurs between stops and only ~ 4% occurs as a result temporal changes.
+Most (~73%) of the variation in UFP stop concentration occurs __[?]within stops at any particular time__. About 22% of the variation in UFP concentration occurs between stops and only ~ 4% occurs as a result temporal changes.
 
 ```{r}
 # using all of the observations to characterize variability 
@@ -1050,7 +1179,7 @@ Annual average estimates are mostly similar for both UFPs and BC using different
 ```{r}
 #histograms
 annual.l %>%
-  #filter(Pollutant == "ufp_pt_cm3") %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
   ggplot(aes(x=value, fill = method_weight)) +   
   geom_density(alpha=0.2) + 
   facet_wrap(~Pollutant, scales = "free"
@@ -1136,7 +1265,7 @@ p4 <- annual %>%
 
 ### Comparison plots of all locations where sampling occurred every season, time of week and time of day (2 categories) combination
 
-### ---> update UFP, BC labels here & below
+### --> ? why is tod2_no_sites = 25 & not 21? (13+18)
 
 ```{r}
 annual_subset_tod2 <- annual %>%
@@ -1157,6 +1286,7 @@ Annual average UFP and BC estimates are similar across averaging methods for sit
 
 ```{r}
 annual_subset_tod2 %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
   ggplot(aes(x=factor(site_no), y=value, col=method, shape=weight)) + 
   geom_point(alpha=0.7) + 
   facet_wrap(~Pollutant, scales="free") +
@@ -1178,6 +1308,7 @@ annual_subset_tod2 %>%
 
 ```{r}
 annual_subset_tow2 <- annual %>%
+      label_pollutant(var = "Pollutant", label = "pollutant") %>%
   select(-c(site_only_s_tow2_tod2,
             regression_s_day_tod5, regression_s_tow2_tod5, regression_s_tow2_tod2)) %>%
   drop_na(site_only_s_tow2) %>%
@@ -1205,9 +1336,6 @@ annual_subset_tow2 %>%
        x = "Site No."
        ) +
   coord_flip() 
-
-#+ scale_x_continuous(breaks = seq(0, tow2_no_sites, by = 20))
-#scale_x_continuous(breaks = scales::pretty_breaks(n = 20)) +
 
 ```
 
@@ -1314,9 +1442,7 @@ b) weighting time-specific results appropriately to estimate annual average
 
 ```{r}
 data.frame(
-  analysis_names = annual_ufp_names) %>%
-  label_analysis(var = "analysis_names") %>%
-  select(Analysis) %>%
+  Analysis =  c("primary", "stop_means", "trim10", "windsorize", "uw")) %>%
   cbind(Description = c("Using stop medians; trimming 5% of each site's highest and lowest stop concentrations; using regression to estimate season-, TOW2- and TOD5-adjusted annual avg concentrations; modeling log-transformed concentrations and proximity covariates",
              "Like Primary analysis, but using stop means (vs medians) to estimate annual averages",
              "Like Primary analysis, but trimming 10% of each site's highest and lowest stop concentrations (vs 5%) before estimating annual averages",
@@ -1328,8 +1454,6 @@ data.frame(
 
 
 ```
-
-
 
 ```{r}
 predictors <- c("site_id", "season", "time_of_week", "tod5")
@@ -1394,8 +1518,6 @@ annual_l <- annual %>% gather("pollutant_analysis", "prediction", contains(c("uf
 ```
 
 Distribution of annual average estimates for primary and sensitivity analyses
-
-### --> table just for primary BC & UFP
 
 ```{r}
 # table 
@@ -1497,7 +1619,7 @@ for(i in seq_along(annual_names)) {
   mymap <- suppressMessages(
      annual_lat_long %>% map_fn(color_by = annual_names[i], outline_points = F,
                                    map_title = annual_names[i]) +
-    scale_color_gradient(name = "pt/cm3", 
+    scale_color_gradient(name = "UFP (pt/cm3)", 
                         low = "yellow", high = "red",
                         #ensure that all plots on same scale
                         limits = c(plot_range$min, plot_range$max))
@@ -1547,7 +1669,7 @@ for(i in seq_along(annual_names)) {
   mymap <- suppressMessages(
      annual_lat_long %>% map_fn(color_by = annual_names[i], outline_points = F,
                                    map_title = annual_names[i]) +
-    scale_color_gradient(name = "pt/cm3", 
+    scale_color_gradient(name = "BC (ng/m3)", 
                         low = "yellow", high = "red",
                         #ensure that all plots on same scale
                         limits = c(plot_range$min, plot_range$max))
@@ -1582,9 +1704,21 @@ ggarrange(plotlist = annual_maps_bc,
 
 
 ```{r}
-# # save datasets. 
-# ## annual estimates from primary and sensitivity analyses 
-# saveRDS(annual, file.path("Data", "Aim 2", "Mobile Monitoring", "annual.rda"))
+# save datasets.
+## annual estimates from primary and sensitivity analyses
+# saveRDS(annual, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda"))
+
+# # short dataset for GIS
+# stops %>%
+#   select(site_id, latitude = site_lat, longitude = site_long, route) %>%
+#   unique() %>%
+#   right_join(annual) %>%
+#   write.csv(., file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17_loc&avg.csv"))
  
 ```
  
+\newpage
+# Code
+
+```{r,ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=60), include=T}
+```

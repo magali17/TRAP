@@ -95,7 +95,8 @@ five_homes_loc <- read.csv(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx
 ### --> ? change weights to what I had originally: upweigh neighbroing months/hours since this is on a finer scale than binning? 
 
 ```{r}
-bh <- read_excel(file.path("..", "Write Up", "1. Proposal", "Aim 3. Hx UFP", "Hx Data", "Tim Larson", "Beacon Hill Data", "Beacon Hill size data.xls") )
+
+bh <- read_excel(file.path("Data", "Aim 3", "Hx UFP at BH", "Beacon Hill size data.xls"))
 
 bh <- bh %>%
   #only keep 2001 data; too little 2000 and 2002 data to calculate annual avg
@@ -152,6 +153,8 @@ bh <- bh %>%
 
 ## Available Data
 
+Data observations were not balanced over season and time of week. 
+
 ```{r}
 bh %>%
   ggplot(aes(x=time_of_day, fill= time_of_week)) +  #fill= hour
@@ -188,12 +191,23 @@ for (i in 1:length(diam)) {
 
 bh.long$diam_um_center <- rowMeans(bh.long[c("diam_um_lower", "diam_um_upper")])
  
+#make copy in case need to modify code
+# bh.long0 <- bh.long
+
  bh.long <- bh.long %>%
    mutate(
      #calculate particle volume per bin      
-     particle_vol_um3_particle = 4/3*pi*(diam_um_upper/2)^3,
+     particle_vol_um3_particle_upper_bin = 4/3*pi*(diam_um_upper/2)^3,
     # calculate number concentration
-    num_conc_particles_cm3 = vol_conc_um3_cm3 / particle_vol_um3_particle
+    num_conc_particles_cm3_upper_bin = vol_conc_um3_cm3 / particle_vol_um3_particle_upper_bin,
+    
+    # repeat for lower & center of bin size to get range
+    particle_vol_um3_particle_lower_bin = 4/3*pi*(diam_um_lower/2)^3,
+    num_conc_particles_cm3_lower_bin = vol_conc_um3_cm3 / particle_vol_um3_particle_lower_bin,
+    
+    particle_vol_um3_particle_center_bin = 4/3*pi*(diam_um_center/2)^3,
+    num_conc_particles_cm3_center_bin = vol_conc_um3_cm3 / particle_vol_um3_particle_center_bin,
+    
     ) 
 
 ### get a total particle conc for a specific size range (# counts are for particles ">" __ um) & date
@@ -205,7 +219,13 @@ bh.long <- bh.long %>%
   group_by(date, hour, hour_night, time_of_day, day, time_of_week, month,  season, season_week_hour.wt) %>%
  dplyr::summarize(
             #total particle count for each day and hour
-            pnc_particles_cm3 = sum(num_conc_particles_cm3, na.rm = T)) %>%
+            pnc_particles_cm3_upper_bin = sum(num_conc_particles_cm3_upper_bin, na.rm = T),
+            
+            # repeat for lower & center of bin
+            pnc_particles_cm3_lower_bin = sum(num_conc_particles_cm3_lower_bin, na.rm = T),
+            pnc_particles_cm3_center_bin = sum(num_conc_particles_cm3_center_bin, na.rm = T),
+            
+            ) %>%
   ungroup()
  
   
@@ -242,7 +262,12 @@ pnc <- bh.long %>%
       # number of observations used to calculate each month-hour combination (all use 1-2 obs)
       unique_hour_samples = n(),
       # use na.rm=T b/c some values are missing when exclude extremely high values
-      avg_pnc_particles_cm3 = mean(pnc_particles_cm3, na.rm = T)
+      avg_pnc_particles_cm3_upper_bin = mean(pnc_particles_cm3_upper_bin, na.rm = T),
+      
+      #repeate for center and lower of bin
+      avg_pnc_particles_cm3_lower_bin = mean(pnc_particles_cm3_lower_bin, na.rm = T),
+      avg_pnc_particles_cm3_center_bin = mean(pnc_particles_cm3_center_bin, na.rm = T),
+
       ) %>%
   #now take avg of larger temporal groups
   group_by(time_of_day, time_of_week, season, season_week_hour.wt) %>%
@@ -250,14 +275,34 @@ pnc <- bh.long %>%
       # number of observations per month-hour combination 
       N = n(),
       # use na.rm=T b/c some values are missing when exclude extremely high values
-      avg_pnc_particles_cm3 = mean(avg_pnc_particles_cm3, na.rm = T)
+      avg_pnc_particles_cm3_upper_bin = mean(avg_pnc_particles_cm3_upper_bin, na.rm = T),
+      
+      #for lower & center of bin
+      avg_pnc_particles_cm3_lower_bin = mean(avg_pnc_particles_cm3_lower_bin, na.rm = T),
+      avg_pnc_particles_cm3_center_bin = mean(avg_pnc_particles_cm3_center_bin, na.rm = T)
+
       )
 
 #check that weights add up to 1. They do
 #sum(pnc$season_week_hour.wt)
   
-# when there is only 1 value for each season-week-hour combination, multiply its respective weight; sum all values to estimate annual avg for total PNC
-(pnc_annual_avg_particles_cm3 <- round(sum(pnc$avg_pnc_particles_cm3 * pnc$season_week_hour.wt))) 
+# when there is only 1 value for each season-week-hour combination, multiply its respective weight; sum all values to estimate annual avg for total PNC.
+# estimates do not trim any values before averaging.
+
+bh_2001_pt_cm3 <- pnc %>%
+  ungroup() %>%
+  dplyr::summarize(
+    pt_cm3_upper_bin = round(sum(avg_pnc_particles_cm3_upper_bin*season_week_hour.wt)),
+    pt_cm3_center_bin = round(sum(avg_pnc_particles_cm3_center_bin *season_week_hour.wt)),
+    pt_cm3_lower_bin = round(sum(avg_pnc_particles_cm3_lower_bin *season_week_hour.wt))
+    )
+
+bh_2001_pt_cm3 %>%
+  kable(caption = "Range of 2001 annual average UFP concentration (pt/cm3) based on 15-min readings at beacon hill troughout the year. Estimates are calculated using an assumed particle size for each bin range (lower, center or upper) when converting from volume to particle concentration.", 
+        col.names = c("Lower", "Center", "Upper")
+        ) %>%
+  kableExtra::kable_styling()
+
 
 #annaul estimates
 ## w/o lower/upper 5% values
@@ -270,7 +315,14 @@ pnc <- bh.long %>%
 ## ~102,534: using center cut bin size with all values included
 ## ~146,514: using lower cut bin size (vol/particle is smaller than using center cut --> vol conc is divided by smaller # --> larger PNC)
 
+# save data for Aim 3 validation (A3.1_UK.Rmd)
+# saveRDS(bh_2001_pt_cm3, file.path("Data", "Aim 3", "Hx UFP at BH", "BH_2001_UFP.rda"))
+
 ```
+
+
+
+
 
 ## Temporal UFP patterns   
 ### Plots    
@@ -316,6 +368,7 @@ bh.long %>%
   geom_boxplot(aes(fill=time_of_day, group=hour_night)) + 
   geom_smooth(aes(x=as.numeric(hour_night)), se=F) + 
   labs(title = paste0("Hours < ", min(early_am), " renumbered to group 'night' hours"))
+
 ```
 
 ### Temporal Models 

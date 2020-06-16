@@ -1,6 +1,19 @@
 ############################################################################################## 
 ############################################ basic fns ############################################ 
 ############################################################################################## 
+# When estimating R2 and RMSE parameters: 
+# a) use estimates calculated from the best-fit line if we are interested in seeing how well our independent variables (X) predicted our outcome (Y)
+# In this case a single X (or a combination of X's) is not necessarily even the same units as Y. 
+# Sometimes we also look at fit around the best-fit line for things we think are more or less the same, 
+# but this tells us something different because it corrects for the systematic difference between the two variables (as characterized by the intercept and slope). 
+#
+# b) use estimates around the 1-1 line if we would like to see how similar two things are (we think they should be more/less the same).
+# We also use this to evaluate cross-validated predictions, which again we think should be more or less the same thing.
+
+
+# These functions calculate RMSE and R2 estimates in my colocation plots based on the 1-1 line. 
+# “obs” and “pred” are the variables being plotted on the x and y axes and not necessarily what was used to fit a line. 
+
 
 #returns MSE
 mse <- function(obs, pred){
@@ -31,11 +44,22 @@ distribution.table <- function(dt,
     dplyr::rename(var = var.string) %>%
     dplyr::summarize(
       N = n(),
-      "Mean (SD)" =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
-      "Median (IQR)" =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
-      Min = round(min(var), round.int),
-      Max = round(max(var), round.int)
-    )  
+      Min = min(var),
+      Q05 = quantile(var, 0.05),
+      #"Mean (SD)" =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
+      Mean = mean(var),
+      SD = sd(var),
+      #"Median (IQR)" =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
+      Median = median(var), 
+      IQR = IQR(var),
+      #IQR = round(IQR(var), round.int),
+      Q95 = quantile(var, 0.95),
+      Max = max(var)
+    ) %>%
+    # round values
+    mutate_if(is.numeric, ~round(., round.int)) %>%
+    # add commas separating thousands 
+    mutate_if(is.numeric, ~prettyNum(., big.mark = ",")) #%>%
   
   return(t)
 }
@@ -78,6 +102,7 @@ colo.plot <- function(data.wide=mm.wide,
                       x.variable, x.label = "",
                       y.variable, y.label = "",
                       col.by = "",
+                      alpha_value = 0.3,
                       mytitle = "", title_width = 60,
                       mysubtitle = NULL,
                       mycaption = NULL,
@@ -127,7 +152,7 @@ colo.plot <- function(data.wide=mm.wide,
   #compare  
   p <- data.wide %>%
     ggplot(aes(x= data.wide[[x.variable]], y= data.wide[[y.variable]])) + 
-    geom_point(alpha=0.3, aes(col = data.wide[[col.by]]
+    geom_point(alpha=alpha_value, aes(col = data.wide[[col.by]]
     )) + 
     coord_fixed() +
     geom_abline(intercept = 0, slope = 1) +
@@ -150,6 +175,47 @@ colo.plot <- function(data.wide=mm.wide,
 
 # issues/notes: 
 # coord_fixed() and theme(aspect.ration =1) don't do anything??
+
+
+############################################################################################## 
+############################################ Add Seasons ############################################ 
+# adds sesason to a given dataset with a date variable. Uses typical equinox/solstice dates
+
+add_season <- function(dt, .date_var) {
+  
+  pacman::p_load(lubridate)
+  
+  # dt <- aqs_daily
+  # .date_var <- "Date.Local"
+  
+  winter <- "-12-21" #usually winter starts on 21st, sometimes on 22nd 
+  spring <- "-03-20"
+  summer <- "-06-21" #usually summer starts on 21st, sometimes on 22nd 
+  fall <- "-09-23" #usually fall starts on 22nd, sometimes on 23nd. Using 23rd for 2019 mobile monitoring campaign 
+  
+  dt <- dt %>%
+    rename(date_var = .date_var) %>%
+    #make sure variable is in date format
+    mutate(date_var = as.Date(date_var),
+           season = factor(ifelse((date_var >= ymd(paste0((year(date_var)-1), winter)) & date_var < ymd(paste0(year(date_var), spring))) |
+                                    date_var >= ymd(paste0(year(date_var), winter)), "winter",
+                                  ifelse(date_var >= ymd(paste0(year(date_var), spring)) &
+                                           date_var < ymd(paste0(year(date_var), summer)), "spring",
+                                         ifelse(date_var >= ymd(paste0(year(date_var), summer)) &
+                                                  date_var < ymd(paste0(year(date_var), fall)), "summer", 
+                                                ifelse( date_var >= ymd(paste0(year(date_var), fall)) &
+                                                          date_var < ymd(paste0(year(date_var), winter)), "fall", 
+                                                        NA)))), 
+                           levels = c("spring", "summer", "fall", "winter"))
+    )
+  
+  #change time variable back to what it was originally
+  names(dt)[names(dt) %in% "date_var"] <- .date_var
+  
+  return(dt)
+  
+}
+
 
 ############################################################################################## 
 ############################################ lasso ############################################ 

@@ -1,3 +1,6 @@
+
+
+
 ####################################################################################################
 # returns PLS model for BC and UFP based on a given set of predictors (x)
 
@@ -37,24 +40,46 @@ fit_pls <- function(dt,
 ####################################################################################################
 
 
-# returns PLS scores for non-training datasets based on a fitted PLS model
+# returns PLS scores for non-training datasets based on a fitted PLS model. 
+# can rename variables (e.g. TVC names) or use the same covariates (space-varying covariates)
+
+# dt = mm
+# rename_vars = FALSE
+# pls_model = space_models$bc
+# rename_components = paste0("space", c(1:n_components))
+
 
 get_scores <- function(dt,
                        #var names to change to match model variables (for estimating/predicting scores)
-                       change_var_name,
-                       #rename vars to match model variables
-                       .model_vars,
+                       rename_vars,
+                       change_var_name = NULL,
                        #pls model fit
                        pls_model,
                        #rename new linear combination
                        rename_components
 ) {
   
+  if (rename_vars ==TRUE) {
+    
+    #prefix for predictors in PLS model
+    .model_vars <- rownames(pls_model$coefficients)
+    #.model_vars <- rownames(pop2010_models$bc$coefficients)
+    #only keep name before "_"
+    .model_vars <- unique(sub("_.*", "_", .model_vars))
+    
+    dt <- dt %>%
+      # rename predictors from other years to allow fitted model to use these to build scores
+      select(starts_with(change_var_name)) %>%
+      rename_all(~gsub(change_var_name, .model_vars, .))
+  
+  }
+  
+  
   dt <- dt %>%
-    # rename predictors from other years to allow fitted model to use these to build scores
-    select(starts_with(change_var_name)) %>%
-    rename_at(vars(starts_with(change_var_name)), ~gsub(change_var_name, .model_vars, .)) %>%
-    #View() 
+    # # rename predictors from other years to allow fitted model to use these to build scores
+    # select(starts_with(change_var_name)) %>%
+    # rename_at(vars(starts_with(change_var_name)), ~gsub(change_var_name, .model_vars, .)) %>%
+    # #View() 
     # use fitted model to estimate scores for other year/location
     predict(object = pls_model, 
             newdata = ., type = "score") %>%
@@ -126,37 +151,7 @@ get_pls_scores <- function(y, x,
 
 ############################################################################################################
 
-# returns pop interpollated values for unavailable years 
 
-interpolate_pop <- function(dt) {
-  
-  dt <- dt %>%
-    mutate(
-      # calculate yearly change
-      pop1990_2000_delta = (pop2000 - pop1990)/10,
-      pop2000_2010_delta = (pop2010 - pop2000)/10
-    ) #%>% cbind(interpolated_df0)
-  
-  for(i in 1:9){
-    #i=1
-    yr <- 1990+i
-    
-    var <- paste0("pop", yr)
-    dt[var] <- dt$pop1990 + dt$pop1990_2000_delta*i
-  }
-  
-  # use 2000-2010 fit to interpollate & extrapolate after 2010
-  for(i in c(1:9, 11:19)){
-    #i=1
-    yr <- 2000+i
-    
-    var <- paste0("pop", yr)
-    dt[var] <- dt$pop2000 + dt$pop2000_2010_delta*i
-  }
-  
-  return(dt)
-  
-}
 
 
 

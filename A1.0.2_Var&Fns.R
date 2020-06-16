@@ -10,7 +10,7 @@ tables_path0 <- file.path("Output", "Aim 1", "Tables")
 min.pct <- 0.95
 
 my.no2.units <- 10  #ppb
-my.pm25.units <- 1 #ug/m3
+my.pm25.units <- 1 #ug/m3 
 
 model.digits <- 2 
 
@@ -129,10 +129,10 @@ t1.fn <- function(data,
 
       age_entry_median = round(median(age_intake), round.var),
       age_entry_iqr = round(IQR(age_intake), round.var),
-      male_n = sum(male),
-      male_pct = round(male_n/N*100, round.var),
-      race_known_n = sum(!is.na(race)),
-      race_white_n = sum(race ==1, na.rm = T),
+      female_n = sum(!male),
+      female_pct = round(female_n/N*100, round.var),
+      race_known_n = sum(!is.na(race_white)),
+      race_white_n = sum(race_white ==1, na.rm = T),
       race_white_pct = round(race_white_n/race_known_n*100, round.var),
       edu_known_n = sum(!is.na(degree)),
       degree_known_n = sum(!is.na(degree)),
@@ -151,8 +151,6 @@ t1.fn <- function(data,
       degree5_pct = round(degree5_n/degree_known_n*100, round.var),
       degree6_n = sum(degree ==6, na.rm = T),
       degree6_pct = round(degree6_n/degree_known_n*100, round.var),
-      income_median = median(tr_med_inc_hshld, na.rm = T),
-      income_iqr = round(IQR(tr_med_inc_hshld, na.rm = T), round.var),
       income_cat_known_n = sum(!is.na(income_cat)),
       income1_n = sum(income_cat==1, na.rm=T),
       income1_pct = round(income1_n/income_cat_known_n*100, round.var),
@@ -175,14 +173,14 @@ t1.fn <- function(data,
       exercise_regular_known_n = sum(!is.na(exercise_reg)),
       exercise_regular_n = sum(exercise_reg==1, na.rm = T),
       exercise_regular_pct = round(exercise_regular_n/exercise_regular_known_n*100, round.var),
-      bmi_known_n = sum(!is.na(bmi4)),
-      bmi_under_n = sum(bmi4==0, na.rm = T),
+      bmi_known_n = sum(!is.na(bmi)),
+      bmi_under_n = sum(bmi==0, na.rm = T),
       bmi_under_pct = round(bmi_under_n/bmi_known_n*100, round.var),
-      bmi_normal_n = sum(bmi4==1, na.rm = T),
+      bmi_normal_n = sum(bmi==1, na.rm = T),
       bmi_normal_pct = round(bmi_normal_n/bmi_known_n*100, round.var),
-      bmi_over_n = sum(bmi4==2, na.rm = T),
+      bmi_over_n = sum(bmi==2, na.rm = T),
       bmi_over_pct = round(bmi_over_n/bmi_known_n*100, round.var),
-      bmi_obese_n = sum(bmi4==3, na.rm = T),
+      bmi_obese_n = sum(bmi==3, na.rm = T),
       bmi_obese_pct = round(bmi_obese_n/bmi_known_n*100, round.var),
       hypertension_known_n = sum(!is.na(Hypertension)),
       hypertension_n = sum(Hypertension == 1, na.rm=T),
@@ -212,20 +210,20 @@ t1.fn <- function(data,
   
   t1 <- t1 %>%
     mutate(
-      "No. Participants" = paste0(N, " (", N_perc, "%)" ),
+      "Participants (n, %)" = paste0(N, " (", N_perc, "%)" ),
       "Entry age, years (median, IQR)" = paste0(age_entry_median, " (", age_entry_iqr, ")"),
       "Follow-up years (mean, SD)" = paste0(follow_up_yrs_mean, " (", follow_up_yrs_sd, ")"),
       
       # Demographics 
       "Birth Cohort (n, %)" = "",
-      "1895" =  paste0(birth_cohort1_n, " (", birth_cohort1_pct, "%)"),
-      "1910" =  paste0(birth_cohort2_n, " (", birth_cohort2_pct, "%)"),
-      "1915" =  paste0(birth_cohort3_n, " (", birth_cohort3_pct, "%)"),
-      "1920" =  paste0(birth_cohort4_n, " (", birth_cohort4_pct, "%)"), 
-      "1925" =  paste0(birth_cohort5_n, " (", birth_cohort5_pct, "%)"), 
-      "1930" =  paste0(birth_cohort6_n, " (", birth_cohort6_pct, "%)"), 
-      "1935" =  paste0(birth_cohort7_n, " (", birth_cohort7_pct, "%)"), 
-      "Male (n, %)" = paste0(male_n, " (", male_pct, "%)"),
+      "1909 or earlier" =  paste0(birth_cohort1_n, " (", birth_cohort1_pct, "%)"),
+      "1910-1914" =  paste0(birth_cohort2_n, " (", birth_cohort2_pct, "%)"),
+      "1915-1919" =  paste0(birth_cohort3_n, " (", birth_cohort3_pct, "%)"),
+      "1920-1924" =  paste0(birth_cohort4_n, " (", birth_cohort4_pct, "%)"), 
+      "1925-1929" =  paste0(birth_cohort5_n, " (", birth_cohort5_pct, "%)"), 
+      "1930-1934" =  paste0(birth_cohort6_n, " (", birth_cohort6_pct, "%)"), 
+      "1935 or later" =  paste0(birth_cohort7_n, " (", birth_cohort7_pct, "%)"), 
+      "Female (n, %)" = paste0(female_n, " (", female_pct, "%)"),
       "White (n, %)" = paste0(race_white_n, " (", race_white_pct, "%)"),
       "Education (n, %)" = "",
       "Less than High School" = paste0(degree0_n, " (", degree0_pct, "%)"),
@@ -259,7 +257,7 @@ t1.fn <- function(data,
       
       # Cognitive fn indicator
       "APOE carrier (n, %)" = paste0(apoe_carrier_n, " (", apoe_carrier_pct, "%)"),
-      "Baseline Cognition (mean, SD)" = paste0(casi_irt_mean, " (", casi_irt_sd, ")"),
+      "Baseline CASI (mean, SD)" = paste0(casi_irt_mean, " (", casi_irt_sd, ")"),
       
       # Study Indicator
       "ACT Cohort (n, %)" = "",
@@ -273,14 +271,21 @@ t1.fn <- function(data,
   
   # transpose
   t1 <- t(t1) %>% 
-    as.data.frame() %>%
-    rownames_to_column()
+    as.data.frame() %>% 
+    # separate N & %
+    #separate(col = V1, into = c("N", "pct"), sep = " ", fill = "right") %>%
+    #rename_all(~paste0(column.name, "_", .)) %>%
+    
+    rownames_to_column(var = "Variable")  
   
-  #rename "V1" column  
-  if(column.name != "") {
-    names(t1) <- column.name
-    }
+  # replace NAs w/ ""
+  #t1[3][is.na(t1[3])] <- ""
   
+  # #rename "V1" column  
+  # if(column.name != "") {
+  #   names(t1) <- column.name
+  #   }
+
   return(t1) 
   }
 
@@ -295,14 +300,14 @@ hr.output.fn <- function(model.s = m1.s, no2.coef = "no2") {
   p <- model.s$coefficients[no2.coef, "Pr(>|z|)"] %>% round(model.digits)  
   
   #person-years used in model
-  person_years <- model.s$n
+  n <- model.s$n
   number_events <- model.s$nevent
   
   result <- data.frame(hr = hr,
                        lower_limit = l95,
                        upper_limit = u95,
                        p = p,
-                       person_years = person_years,
+                       n = n,
                        number_events = number_events)  
 
   return(result)
@@ -337,7 +342,7 @@ models.fn <- function(mydata = dem.w,
   #rename variables for fns
   mydata <- mydata %>%
     #want to rename categorical bmi4 as bmi later
-    select(-bmi) %>%
+    #select(-bmi) %>%
     rename(
       #m1 
       no2 = no2.var,
@@ -345,7 +350,7 @@ models.fn <- function(mydata = dem.w,
       income = income_cat,
       edu = degree,
       #m3
-      bmi = bmi4,
+      #bmi = bmi4,
       #m6
       pm25 = pm25.var
     ) %>%
@@ -576,11 +581,6 @@ hr.plot.m1_m6 <- function(dt,
                           max_hr_upper_lim = NULL
                           ) {
   
-  # dt = dem_all_hrs %>%
-  #   filter(Model != "2" |
-  #            (Model == "2" & Description == "Primary"))
-  # outcome.var <- "dementia"
-  
   #plot all HRs on same axis
   if(is.null(max_hr_upper_lim)) {max_hr_upper_lim <- max(dt$upper_limit)}
   
@@ -591,7 +591,6 @@ hr.plot.m1_m6 <- function(dt,
     #plot
     ggplot(aes(x=model_description, 
                y=hr, ymin=lower_limit, ymax=upper_limit,
-               #col=model_description,
                linetype = (model_description == "2. Primary")
     )) +
     geom_pointrange() + 
@@ -599,19 +598,13 @@ hr.plot.m1_m6 <- function(dt,
     geom_hline(yintercept = 1, linetype=2) + 
     labs(y= "Hazard Ratio (95% CI)",
          x = "Reduced & Extended Models",
-         #col = "Model Description",
          linetype = "Primary Model",
          title = paste0("NO2 (10 ppb) hazard ratios for ", outcome.var, " incidence\nusing reduced, primary and extended models"),
          subtitle = "10 yr exposure"
     )  +
     theme(legend.position = "bottom") +  
     ylim(0, max_hr_upper_lim) +
-    coord_flip()  #+ 
-    #scale_x_discrete( aes(labels=hr),
-     # position="top"
-    #  )
-  
-  #p
+    coord_flip()  
   
   return(p)
   

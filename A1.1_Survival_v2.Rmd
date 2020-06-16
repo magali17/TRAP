@@ -14,18 +14,12 @@ editor_options:
   chunk_output_type: console
 ---
 
+
 ```{r}
 # --> TO DO
 # --> road proximity exposure sensitivity analysis
-# --> use FSS for IPWs? 
 # --> NO2 predictions from ST model
-# --> stratify  by all confounders? See other General Exam
-# --> add sensitivity analyses: 1) Restrict primary analysis to (say) people with 80% of their time from 1990 forward at an exact location in Puget Sound; fill in up to 20% with zip center and/or national model. Include extending the first address backward 10 years
-## 2) Sensitivity analysis 1 (most restricted): The subset of those folks who are never movers living within PS at an exact address
-## 3) Sensitivity 2 (least restrictive): Include anyone with zip or better at any location for any amount of time
-## 4) Sensitivity 3 (using only predictions from ST model): People with 80% exact coverage and up to 20% zip, but only using ST model
-##  5) Maybe sensitivity 4 (address extension): Drop address extension time (problem is that all the events before 1999 will be dropped, may cause immortal time bias, check with Lianne)
-
+ 
 ```
 
 ```{r, echo=F}
@@ -386,9 +380,9 @@ dem.w <- left_join(dem.w, dem_65)
 ```
 
 
-### --> ? Only including people with an exact address at least 80% of their follow-up time? 
 
 ```{r}
+### --> ? Only including people with an exact address at least 80% of their follow-up time? 
 
 ```
 
@@ -768,7 +762,7 @@ dem.w %>%
   
 ```
 
-```{r, ?delete, include=F}
+```{r, ?d, include=F}
 #check that ages make sense ages
 table(round(dem.w$age_intake, 1) <= round(dem.w$age_act, 1))  
 #View(dem.w[which(dem.w$age_intake > dem.w$age_act),]) 
@@ -813,98 +807,6 @@ ad_counts %>%
   with(., table(ad_now_n <= 1))
 
 ```
-
-## CASI by age & case status
-
-
-### --> edit...how to interpret this??
-
-```{r}
-# CASI vs intake age
-## CASI decreases in older enrollees
-fixed.covariates %>%
-    drop_na(m2_vars) %>%
-  mutate(anydementia = factor(anydementia)) %>%
-  ggplot(aes(x=age_intake, y = casi_irt, col = anydementia, group=anydementia)) + 
-  geom_point(alpha=0.5) + 
-  geom_smooth() + 
-  geom_hline(yintercept = c(0.07, 0.46))
-
-# age at entry & dementia outcome
-## non-cases generally enrollat younger ages
-fixed.covariates %>%
-    drop_na(m2_vars) %>%
-  mutate(anydementia = factor(anydementia),
-         age_intake_group = cut(age_intake, 5)
-         ) %>%
-  ggplot(aes(x=age_intake_group, fill = anydementia)) + 
-  geom_bar(position = "dodge", stat = "count")
-
-# age at entry & AP over time
-## AP is higher for older enrollees - earlier in time? 
-dem.w %>%
-  #filter(enrollment_yr==1) %>%
-    drop_na(m2_vars) %>%
-  mutate(anydementia = factor(anydementia)) %>%
-  ggplot(aes(x=age_intake, y = no2_10yr, col = anydementia, group=anydementia)) + 
-  geom_point(alpha=0.2) + 
-  geom_smooth()
-
-# age at entry vs calendar time of entry
-# -->?? interaction for cases vs non-cases?
-dem.w %>%
-  filter(enrollment_yr==1) %>%
-    drop_na(m2_vars) %>%
-  mutate(anydementia = factor(anydementia)) %>%
-  ggplot(aes(x=age_intake, y = exposure_year, col = anydementia, group=anydementia)) + 
-  geom_point(alpha=0.2) + 
-  geom_smooth()
-
-
-# age at intake vs age over time
-dem.w %>%
-  #filter(enrollment_yr==1) %>%
-    drop_na(m2_vars) %>%
-  mutate(anydementia = factor(anydementia)) %>%
-  ggplot(aes(x=age_intake, y = age_start_exposure, col = anydementia, group=anydementia)) + 
-  geom_point(alpha=0.2) + 
-  geom_smooth()
-
-
-```
-
-## Follow-up time & cohort 
-
-Later cohorts have less follow-up time
-
-```{r}
-dem.w %>%
-  filter(enrollment_yr==1) %>%
-  drop_na(m2_vars) %>%
-  mutate(cohort = factor(cohort)) %>%
-  ggplot(aes(x=cohort, y = fu_yrs, col = anydementia)) + 
-  geom_boxplot() + 
-  labs(y = "Follow-up years",
-       title = "Follow-up time by ACT cohort"
-       )
-
-```
-
-### --> dementia cases over time
-
-```{r}
-dem.w %>%
-  filter(dementia_now==1) %>%
-  drop_na(m2_vars) %>%
-  ggplot(aes(x=exposure_year)) + 
-  geom_bar() + 
-  labs( 
-       title = "No. of dementia cases over time"
-       )
-
-
-```
-
 
 
 ## Summary of location & prediction quality variables
@@ -1482,9 +1384,11 @@ Dementia
 
 **note:** HR becomes non-significant if run co-pollutant model 6
 
+```{r, notes on other potential analyses}
 ### --> ? run other analyses w/ this subset of ppl? These models have a different subste of people than other models 
-
 ### --> ? is this the same as restricting to ~ 2000+? Do a time-restricted analysis (model predictions may be more accurate for more recent years - more monitors)?
+
+```
 
 ```{r}
 
@@ -1585,7 +1489,10 @@ Dementia
 
 **note:** HR becomes non-significant if run co-pollutant model 6
 
+```{r, notes on other potential analyses 2}
 ### --> ? run other analyses w/ this subset of ppl? These models have a different subste of people than other models 
+```
+
 
 ```{r}
 
@@ -1716,11 +1623,38 @@ ad_age_entry_hrs <- ad_age_entry$hrs %>%
 
 ```
 
-## Road Proximity exposure
+### Road Proximity exposure
 
-### --> need road covariate 
-###--> define "near road" - < 150 m from A1 or < 50 m A2
-### --> also model log(distance to A1 or A2)
+TEST - avaraging
+
+-both are still "away" from roadways
+```{r}
+mean(c(rep(1500, 8), rep(10, 2)))  # 1202
+
+# log-transform distnace, then exponentiate
+mean(c(rep(log(1500), 8), rep(log(10), 2))) %>% exp()  # 550 
+
+
+```
+
+
+#### "near road" 
+
+Wilker 2015: "proximity is an integrated measure of exposure to traffic, which includes vehicle emissions, noise, ultrafine particles, road dust, and gaseous pollutants such as nitrogen dioxide, carbon monoxide, and volatile organic compounds but does not specifically account for the intensity of traffic or meteorologic conditions"
+
+Chen 2013: "LUR modeling of TRAP (NO2) takes into account roadway proximity, topography, meteorological factors affecting disperison and vehicle mix...LUR models should thus be omre accurate estimates of TRAP exposure than road proximity alone." Though NO2 HRs can't be interpreted as causal since they are used as markers of overall TRAP.
+
+define "near road" as:   
+a) < 150 m from A1 or < 50 m A2 for longest-lived address *OR* use TWA of all addresses after max distance is set to ~500 m
+b) < 400 m from A1 or < 200 m A2... 
+
+using A1 or A2 b/c:
+* have heavier, more consistent traffic patterns
+* these are more likely to have diesel trucks, large TRAP emitters (Auchincloss 2008)
+
+using the longest-lived address may add some exposure misclassification to this analysis because it assumes this a person lived at the same location or a comparable one the entire time.
+
+### --> ? only using longest-lived address?
 
 Dementia
 
@@ -1749,12 +1683,52 @@ AD
 
 ```
 
-### --> DIFFERENT MODELS
-### --> finer birth cohort adjustment (is 1935-51 birth cohort too large? ppl turn 65 starting in 2,000). or use grouped calendar year (5 yrs)?
-###--> ? stratify by time adjustment variable
-### --> ? separate analyses for each ACT cohort
+#### log(distance to A1 or A2)
 
-can use exposure_year for primary model, but extended models don't have enough values 
+natural log of distnace has been linearly related to martality and morbidity outcomes.(Chen 2017  living near; Wilker 2014 & 2015; 24: chen 2012)
+
+### --> truncate max distance to 1500 m before taking average
+
+Dementia
+
+```{r}
+
+```
+
+AD
+
+```{r}
+
+```
+
+
+### Finer Adjustment for Calendar time
+
+Goal is not prediction here. Want to estimate fewer parameters than when we categorize this variable. Shoudd look at whether the NO2 HR estimates change when we adjust for calendar time more/less finely (e.g., different spline parameters).
+
+```{r, code for spline. d?}
+
+# n=400
+# #takes long time to calculate
+# df=as.data.frame(matrix(NA, ncol=n, nrow=length(y)))
+# for (i in 3:n){
+# lm1=lm(y~bs(x,df=i))
+# df[i]=predict(lm1)
+# }
+# df$x=x
+# 
+# par(mfrow=c(1,1))
+# plot(y~x)
+# lines(df[400], col="red", lwd=2) 
+# lines(df[100], col="orange", lwd=2) 
+# lines(sin((1:1000)/100)*4,col="yellow", lwd=3) #true function? w/o error?
+# lines(df[10], col="pink", lwd=2) 
+# lines(df[5], col="brown", lwd=2) 
+# lines(df[3], col="black")
+# #lines(y, col="blue")
+# legend("topright", legend=c("400 DF", "100 DF", "10 DF", "5 DF", "3 DF", "true f(x)"), col=c("red","orange", "pink", "brown", "black", "yellow"), lty = 1, cex=.75)
+
+```
 
 ```{r}
 no2.var = "no2_10yr"
@@ -1782,7 +1756,7 @@ mydata <- dem.w %>%
     #adjust AP units
     no2 = as.double(no2/my.no2.units),
     pm25 = as.double(pm25/my.pm25.units),
-    birth_year = year(birthdt)
+    #birth_year = year(birthdt)
   )  
   
 #create a survival object
@@ -1791,140 +1765,308 @@ s.dem <- Surv(
   time2 = mydata$age_end_exposure, 
   event = mydata$dementia_now)
   
-#s.dem <- dem_10yr$survival_object
+s.ad <- Surv(
+  time = mydata$age_start_exposure, 
+  time2 = mydata$age_end_exposure, 
+  event = mydata$ad_now)
 
-```
-
- 
-
-### Spline Adjustment for calendar time 
-
-o	Goal is not prediction here. Want to use fewer categories 
-
-### --> plot hazard of dementia vs birth year/calendar year. 
-### --> overlay different natural splines. Which fits best? 
-
-```{r}
-s_time <- Surv(
-  time = mydata$exposure_year-1, 
-  time2 = mydata$exposure_year, 
+# need??
+s.dem_calendar <- Surv(
+  time = mydata$exposure_year-1,
+  time2 = mydata$exposure_year,
   event = mydata$dementia_now)
 
-# 537 ch 3 slide 72?
-coxfit <- coxph(s.dem ~birth_cohort, data = mydata)
-
-plot(survfit(coxfit), 
-      xlim=c(65,110),
-     #fun = "cumhaz", 
-     #conf.type = "none",
-
-     )
-
-
-
-
-# n=400
-# #takes long time to calculate
-# df=as.data.frame(matrix(NA, ncol=n, nrow=length(y)))
-# for (i in 3:n){
-# lm1=lm(y~bs(x,df=i))
-# df[i]=predict(lm1)
-# }
-# df$x=x
-# 
-# par(mfrow=c(1,1))
-# plot(y~x)
-# lines(df[400], col="red", lwd=2) 
-# lines(df[100], col="orange", lwd=2) 
-# lines(sin((1:1000)/100)*4,col="yellow", lwd=3) #true function? w/o error?
-# lines(df[10], col="pink", lwd=2) 
-# lines(df[5], col="brown", lwd=2) 
-# lines(df[3], col="black")
-# #lines(y, col="blue")
-# legend("topright", legend=c("400 DF", "100 DF", "10 DF", "5 DF", "3 DF", "true f(x)"), col=c("red","orange", "pink", "brown", "black", "yellow"), lty = 1, cex=.75)
-
 ```
+
+Cumulative hazard functions are hard to compare becuase some curves are not overlapping. Don't apper to be proportional? See the crossing of cumulative hazard functions (violation of proportional hazard assumption - though this does not include confidence intervals). This is an argument for stratifying by cohort? 
+
+```{r} 
+# 537 ch 3 slide 70-72?
+#coxfit <- coxph(s.dem ~birth_cohort, data = mydata)
+
+# 1895 1910 1915 1920 1925 1930 1935
+plot(survfit(s.dem~1, subset = dem.w$birth_cohort==1895, #conf.int=0
+             ), 
+     col="1895",  
+     cumhaz = T, conf.int = F,      #fun = "cumhaz", #conf.type = "none"
+     #log = T,
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Birth Cohort",
+     xlim=c(65,110), 
+     )
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1910), col="1910",   
+      cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1915), col="1915",
+      cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1920), col="1920",
+      cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1925), col="1925",
+      cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1930), col="1930",
+      cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1935), col="1935",
+      cumhaz = T, conf.int = F)
+legend("topleft", 
+       fill = levels(dem.w$birth_cohort), 
+       legend = levels(dem.w$birth_cohort)
+       )
  
-Primary and extended models for PM2.5 HRs are no longer protective when we adjsut for birth cohort more finely.
+```
+
+Same as above, but stratifying by calendar year.    
+?? coding issue?? plot looks strange.
+
+```{r, eval=F}
+plot(survfit(s.dem_calendar~1,
+             subset = dem.w$exposure_year[dem.w$exposure_year %in% c(1994:1999)]
+             ), 
+     col="1994",  
+     cumhaz = T, conf.int = F,     
+     ylab = "Cumulative Hazard",
+     xlab = "Year",
+     main = "Cumulative Hazard of Dementia by Birth Cohort",
+     xlim=c(1994,2020), 
+     )
+lines(survfit(s.dem~1, subset = dem.w$exposure_year[dem.w$exposure_year %in% c(2000:2004)]), 
+              col="2000",   
+      cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$exposure_year[dem.w$exposure_year %in% c(2005:2009)]), col="2005",
+      cumhaz = T, conf.int = F)
+
+# lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1920), col="1920",
+#       cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1925), col="1925",
+#       cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1930), col="1930",
+#       cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$birth_cohort==1935), col="1935",
+#       cumhaz = T, conf.int = F)
+# legend("topleft", 
+#        fill = levels(dem.w$birth_cohort), 
+#        legend = levels(dem.w$birth_cohort)
+#        )
+```
+
+#### Year-specific categories (calendar year) 
+
+to address the AP trends and the fact that the AP changes more coarsely on a calendar year basis
+ 
 
 ```{r}
-
-
 # primary analysis HR is: 1.04 (0.82, 1.33)
-round_year <- 5
+round_year <- 1
 
-mydata %>%
+dem_cal_time_hrs <-
+  mydata %>%
   mutate(
     # adjust for birth cohort  
-    birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year"))))
+    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year"))))
+    year_cohort = factor(round(exposure_year/round_year)*round_year)
   ) %>%
-  coxph(s.dem ~ pm25 + strata(apoe) + male + race_white + income + edu +  
-        strata(birth_cohort) +
-              smoke + exercise_reg #+
+                
+  coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  
+        #birth_cohort #+
+          year_cohort
+              #smoke + exercise_reg #+
               #Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi #+
               #casi_irt +
         #no2
-        
-        
         , 
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
-  summary()
-
-
-
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = "Calendar Year Bin Instead of Birth Cohort") 
 
 ```
 
-plot spline: hazard of dementia vs birth cohort 
+AD
 
 ```{r}
-dem.w %>%
-  ggplot(aes(x=birth_cohort, y = dementia_now)) + 
-  geom_li
-
-
-```
-
-
-```{r}
-# table of person-years in each cohort vs year
-table(dem.w$birth_cohort)
-
-table(round(dem.w$exposure_year/5)*5)
-
-table(round(dem.w$exposure_year/5)*5, dem.w$birth_cohort)
-
-```
-
-
-```{r}
-# age vs birth cohort
-dem.w %>%
-  mutate(birth_cohort = factor(year(round_date(birthdt, unit = "5 year")))
-         ) %>%
-  ggplot(aes(x=birth_cohort, y=age_end_exposure, fill=factor(dementia_now))) + 
-  geom_boxplot()
-
-#age vs calendar year
-dem.w %>%
-  mutate(year_bin = factor(round(exposure_year/round_year)*round_year)
-         ) %>%
-  ggplot(aes(x=year_bin, y=age_end_exposure, fill=factor(dementia_now))) + 
-  geom_boxplot()
+ad_cal_time_hrs <- mydata %>%
+  mutate(
+    # adjust for birth cohort  
+    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year"))))
+    year_cohort = factor(round(exposure_year/round_year)*round_year)
+  ) %>%
+                #pm25
+  coxph(s.ad ~ no2 + strata(apoe) + male + race_white + income + edu +  
+        year_cohort, 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = paste0("Categorical Calendar Yr (", round_year, " yr) Instead of Birth Cohort"))
 
 ```
 
+#### Spline adjustment 
+to account for trends in the outcome, using continuous time (meaning calendar time on the day scale) 
 
+Don’t care about model fit, but how well we can control confounding (How much is the NO2 HR affected?). Can increase/decrease the df's in the ns() function to make the fit more/less flexible. This does not appear to have a large effect on the NO2 HR.
 
-
-
-### --> stratify by all confoundres
+Dementia
 
 ```{r}
 
+dem_spline_cal_time_hrs <- mydata %>%
+  coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  
+        #the default ns() values returns a straight line within the boundary knowits unless the user specifies either the df's or the knots 
+          #The default bs() values will create a cubic B-spline basis with two boundary knots and one interior knot placed at the median of the observed data values
+          splines::ns(exposure_year, df = 3),
+        #splines::bs(exposure_year),
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = "Spline Calendar Year Instead of Birth Cohort") 
+
 ```
+
+AD
+
+```{r}
+ad_spline_cal_time_hrs <- mydata %>%
+  coxph(s.ad ~ no2 + strata(apoe) + male + race_white + income + edu +  
+        splines::ns(exposure_year, df = 3), 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = "Spline Calendar Year Instead of Birth Cohort") 
+
+```
+
+
+### Stratify by all confounders
+
+Plots checking to see if the proportional hazards assumptions appear to be true.
+
+**Note**
+-these do not include CIs
+-these do not adjust for other covariates in our models  
+
+-gender 
+
+```{r}
+plot(survfit(s.dem~1, subset = dem.w$male==0), 
+     col=1,  
+     cumhaz = T, conf.int = F,    
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Gender",
+     xlim=c(65,110))
+lines(survfit(s.dem~1, subset = dem.w$male==1), col=2, cumhaz = T, conf.int = F)
+legend("topleft", 
+       fill = c(1,2), 
+       legend = c("female", "male"))
+
+```
+
+-race
+
+```{r}
+plot(survfit(s.dem~1, subset = dem.w$race_white==0), 
+     col=1,  
+     cumhaz = T, conf.int = F,  
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Race",
+     xlim=c(65,110))
+lines(survfit(s.dem~1, subset = dem.w$race_white==1), col=2, cumhaz = T, conf.int = F)
+legend("topleft", 
+       fill = c(1,2), 
+       legend = c("non-white", "white"))
+
+```
+
+```{r}
+plot(survfit(s.dem~1, subset = dem.w$income_cat ==1), 
+     col=1,  
+     cumhaz = T, conf.int = F,   
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Income category (smaller numbers are lower incomes)",
+     xlim=c(65,110))
+lines(survfit(s.dem~1, subset = dem.w$income_cat ==2), col=2, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$income_cat ==3), col=3, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$income_cat ==4), col=4, cumhaz = T, conf.int = F)
+legend("topleft", 
+       fill = c(1:4), 
+       legend = c(1:4))
+
+```
+
+- education
+
+```{r}
+plot(survfit(s.dem~1, subset = dem.w$degree <=1), 
+     col=1,  
+     cumhaz = T, conf.int = F,   
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Degree (smaller numbers are less edu)",
+     xlim=c(65,110))
+lines(survfit(s.dem~1, subset = dem.w$degree %in% c(3:4)), col=3, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$degree %in% c(5:6)), col=5, cumhaz = T, conf.int = F)
+legend("topleft", 
+       fill = c(0,3,5), 
+       legend = c("0 or 1","3 or 4","5 or 6"))
+
+```
+
+
+Dementia
+
+```{r}
+dem_stratification_hrs <- mydata %>%
+  coxph(s.dem ~ no2 + strata(apoe) + strata(male) + strata(race_white) + strata(income) + strata(edu) + strata(birth_cohort), 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = "Full Confounder Stratification") 
+
+```
+
+AD
+
+```{r}
+ad_stratification_hrs <- mydata %>%
+  coxph(s.ad ~ no2 + strata(apoe) + strata(male) + strata(race_white) + strata(income) + strata(edu) + strata(birth_cohort), 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = "Full Confounder Stratification")
+```
+
+
 
 
 
@@ -1949,9 +2091,14 @@ dem_all_hrs <- rbind(
   # using fixed exposure at age 65
   dem_age_65_hrs,
   # using fixed exposure at entry
-  dem_age_entry_hrs
+  dem_age_entry_hrs,
   # road proximity
   #dem_road
+  # adjusting for birth cohort/calendar time more finely
+  dem_cal_time_hrs,
+  dem_spline_cal_time_hrs,
+  # stratifying by all confounders
+  dem_stratification_hrs
   ) %>%
   mutate(
     model_description = paste0(Model, ". ", Description),
@@ -2011,9 +2158,14 @@ ad_all_hrs <- rbind(
   # using fixed exposure at age 65
   ad_age_65_hrs,
   # using fixed exposure at entry
-  ad_age_entry_hrs
+  ad_age_entry_hrs,
   # road proximity
   #ad_road
+  # adjusting for calendar time more finely
+  ad_cal_time_hrs,
+  ad_spline_cal_time_hrs,
+  # stratifying by all confounders
+  ad_stratification_hrs
 ) %>%
   mutate(
     model_description = paste0(Model, ". ", Description),
@@ -2057,7 +2209,7 @@ Dementia
 -reduced, primary, exntended models; different exposure windows
 
 
-### --> note: adjusting for birth cohort more finely (round_year)
+### --> note: adjusting for birth cohort more finely (round_year = 5)
 
 ```{r}
 round_year <- 5

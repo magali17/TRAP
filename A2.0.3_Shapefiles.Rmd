@@ -85,6 +85,32 @@ routes_df <- fortify(routes)
 
 ```
 
+Hx Emissions (with attributes table)
+
+```{r}
+# tutorial on how to do keep a shapefile's atrribute table in the new df created: https://rpubs.com/huanfaChen/ggplotShapefile 
+# uplaod shapefile
+shp <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Other features", "Roads", "Traffic Sections", "2005_TPTTrafficSections", "Emissions2.shp")) 
+
+#create unique ID for each row in the shapefile
+shp@data <- shp@data %>%
+  mutate(id = row.names(.)) %>%
+  #make factors to characters to numbers. Note, going from a factor to a number produces numerical versions of the factor (WRONG)
+  mutate_at(vars(contains(c("_g_", "AADT")), cat, OBJECTID, hw_row_no), 
+            ~as.numeric(as.character(.)))  
+
+# make shp into a df. note, this does not save all of the attributes.
+shp_df <- fortify(shp) %>%  # could also use: broom::tidy(shp,region = "id")
+  # add attributes back in from the shapefile
+  left_join(shp@data, by = c("id"="id")) 
+
+
+
+```
+
+
+ 
+
  
  
 Save datasets.
@@ -95,6 +121,7 @@ Save datasets.
 # saveRDS(study_area_df, file = file.path("Data", "GIS", "study_area_df.rda"))
 # saveRDS(st_area_df, file = file.path("Data", "GIS", "st_area_df.rda"))
 # saveRDS(routes_df, file = file.path("Data", "GIS", "routes_df.rda"))
+# saveRDS(shp_df, file = file.path("Data", "GIS", "emissions_df.rda"))
 
 ```
 

@@ -18,18 +18,15 @@ knitr::opts_chunk$set(echo = TRUE)
  
 ```
 
- 
 
-test
+```{r, echo=F}
+num <- 5
 
-```{r}
-# # trying to save rmarkdown output to specific folder 
-# rmarkdown::render("code/z.test.Rmd", 
-#                   #output_format =  "html_document", 
-#                   output_file = "Output/z.test.html"
-#                   #output_dir = "Output"
-#                   )
+x <- paste0("73", " (", num, ")") 
+
+  as.data.frame() %>%
+  kable() %>% 
+  kable_styling()
 
 ```
 
- 

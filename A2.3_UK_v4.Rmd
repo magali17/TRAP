@@ -19,10 +19,12 @@ editor_options:
 ```{r}
 # --> TO DO
 
-### -->[EDIT LATER] KEEPING pop_ FOR NOW UNTIL RECEIVE pop10_ from amanda
+### --> use parallel::mcapply() to speed up processes [convert for() loops to lapply() --> then mcapply()]
+  # Nancy's ppt: https://github.com/deohs/coders/blob/master/demos/hpc/parallel_processing/Parallel_Example.md 
+  # on lapply(): https://rpubs.com/drquan/lapply_vs_docall 
 
-# --> ?add new variables from Aim 3 (e.g., emission estimates)? 
-## --> ? see ultra UFPs & size distribution?
+
+### -->use latest pop, NDVI variables
 # ? --> switch from geoR to ___ 
 
 ```
@@ -52,6 +54,8 @@ editor_options:
 
 # Analyses  
 
+### --> update covariates; drop time-varying covariates; 
+
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
                       cache=T, cache.comments = F, 
@@ -74,7 +78,9 @@ pacman::p_load(knitr, kableExtra,
                # modeling
                pls, geoR, #gstat - alternative for UK
                akima, # interp() - interpolate predictions on map
-               ggpubr, tidyverse  
+               ggpubr, tidyverse,
+               
+               parallel  # mclapply() for parallized processing;  detectCores()
                )    
 #Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
@@ -88,15 +94,19 @@ source("A2.0.1_Var&Fns.R")
 cov_act <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
 
 # all annual estimates
-annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda")) %>%
+annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda")) #%>%
   # filter for now since don't have covariates for this site yet
-  filter(site_id != "MS0601")
+  #filter(site_id != "MS0601")
 
 #covariates
-### -->[EDIT LATER] KEEPING pop_ FOR NOW UNTIL RECEIVE pop10_ from amanda
+
+### --> DROP OTHER TIME-VARYING COVARIATES?
+
 cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda")) %>%
-  select(#-contains("pop_"), 
-         -contains("pop90_"))
+  # drop time-varying pop density, NDVI, emissions 
+  select(-contains(c("pop90_", "pop_"))) %>%
+  #drop Roosevelt garage & stop w/ 1 obeservation that was replaced by MS0601
+  filter(!site_id %in% c("MS0000", "MS0398"))
 
 site_loc_vars <- cov_mm %>%select(site_id:lambert_y) %>% names()
 
@@ -161,6 +171,8 @@ validation_idx <- sample(c(TRUE, FALSE), replace = T,
 
 ```
 
+### --> update grid 
+
 ```{r}
 # grid in study area (from GIS) 
 grid_in_study <- read.csv(file.path("..", "GIS", "Shapefiles", "Study area", "grid", "grid_mm.csv")) %>%
@@ -177,8 +189,6 @@ grid_covars <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_g
 ```
 
 Description of analyses 
-
-### --> add ACT locations in study area sensitivity analysis
 
 ```{r}
 as.data.frame(
@@ -201,7 +211,7 @@ as.data.frame(
 Cross-validation parameters considered.
 
 ```{r, echo = T}
-fast <- T
+fast <- FALSE
 
 if (fast == FALSE) {
     k <- 10
@@ -373,8 +383,6 @@ cv_alt %>%
 
 calculate the out-of-sample R2 and RMSE for the UK model using the CV-selected parameters.
 
-### --> need to use the variogram paramters selected through CV (e.g., nugget, partial sill, range) here and in all further analyses?
-
 ```{r, results = "hide"}
 out_of_sample_valid <- data.frame(Analysis = analysis_names,
                                   RMSE = NA,
@@ -454,6 +462,9 @@ cv_results %>%
 #   kable(caption = "Out-of-sample RMSE and R2 using model parameters from CV (calculated on validation set).") %>%
 #   kable_styling() %>%
 #   add_footnote("MSE-based R2") 
+
+## save results to compare in A3.1_UK.Rmd
+#saveRDS(cv_results, file = file.path("Output", "Aim 2", "Tables", "3. UK", "cv_results.rda"))
 
 ```
  
@@ -710,181 +721,173 @@ for (i in seq_along(analysis_names)) {
 
 ```
 
-### --> compare my results form primary analysis (3 PLS, 10% plotting distance) to using likfit()
-
-```{r}
-# PLS
-scores(pls_models$ufp_primary_uk)
-
- 
-```
-
-```{r}
-
-  dt = annual
-  y_name = "ufp_primary"
-  cov_names. = cov_names_log
-  #CV folds
-  k = 3
-  # max PLS components to evaluate
-  use_n_scores. = 3
-   
-  score_n_names <- paste0("Comp", 1:use_n_scores.)
-  
-  dt <- dt %>% rename(y_name = y_name) %>%
-    drop_na() %>%
-    #create folds for test/train set
-    mutate(set = sample(c(1:k), size = nrow(.), replace = T),
-           cv_prediction = NA)
- 
-  for(f in seq_len(k)) {
-    #f=1
-    train_grp <- dt$set != f
-    
-    dt_train <- dt %>% filter(train_grp)  
-    
-    dt_test <- dt %>% filter(!train_grp)   
-    
-    #fit PLS to training data
-    pls_train <- plsr(y_name ~.,
-                      data=dt_train[,c("y_name", cov_names.)], 
-                      ncomp = use_n_scores.,
-                      scale=T)
-    
-    # extract scores for UK
-    scores_train <- scores(pls_train)[,c(1:use_n_scores.)] %>% 
-      as.data.frame()
-    scores_test <- predict(object = pls_train,
-                           newdata = dt_test,
-                           ncomp = 1:use_n_scores.,
-                           type = "score") %>%
-      as.data.frame()
-    
-    # take out spaces in names
-    names(scores_train) <- score_n_names
-    names(scores_test) <- score_n_names
-    
-    # dataset w/ UFP measurements, geocovariates & location info
-    pls_df_train <- cbind(dt_train, scores_train)  
-    
-    pls_df_test <- cbind(dt_test, scores_test)  
-    
-    ################################ UK ################################
-    geo_train <- as.geodata(pls_df_train, 
-                            coords.col = c("lambert_x", "lambert_y"), 
-                            data.col = "y_name", 
-                            covar.col = score_n_names)
-    
-    # --> ? don't need this now?
-    geo_test <- as.geodata(pls_df_test, 
-                           coords.col = c("lambert_x", "lambert_y"), 
-                           data.col = "y_name", 
-                           covar.col = score_n_names)
-    
-    ##trend
-    cov_trend <-  as.formula(paste0("~ ", paste0(score_n_names,  collapse = " + " )))
-    
-    # # issue: still have to tell it a plotting distance 
-    # variog_train <- variog(geo_train,
-    #                         uvec=c(seq(0, 1000, by = 300), seq((1000 + 1000),  by= 1000)))
-    
-    
-    # can run variog() w/o plotting maximum, but range is very large ~ 10k
-    #variog_train <- variofit(variog(geo_train), cov.model = "exp" ) 
-     
-    #plot(variog(geo_train))
-set.seed(1)
-lf1 <- likfit(geodata = geo_train, 
-       trend = cov_trend,
-       #sig squared (partial sill), phi/theta (range). manually estimate these by looking at variogram plots
-       
-       #ini.cov.pars = c(0.025, 4000),  # Dr. Sampson suggested a range of 5000 ##variog_train
-       
-       # ? or use a matrix
-       ini.cov.pars = as.matrix(cbind(seq(0, 1, l=4), seq(1000, 5000, l=4)) ) , 
-        
-       
-       #ini.cov.pars = variog_train,
-
-       # ? helps? is this like using a matrix of values for ini.cov.pars?
-       limits = pars.limits(sigmasq=c(.01, .9), phi=c(300, 10000)),
-       
-       fix.nugget = FALSE,
-       cov.model = "exponential",
-       lik.method = "ML"
-       )
-
-# doesn't work? #use summary.likGRF() to pring summary of fitted model. e.g., see $parameters.summary    
-lf1$parameters.summary
-
-
-### --> ?? how do u make predictions? 
-predict(lf1, newdata = geo_test) 
-    
-     
-    
-  }
-  
-    #save CV predictions
-    dt$cv_prediction[!train_grp] <- kc_cv$predict
-    
-    
-  #   max.dist <- summary(geo_train)$distances.summary[["max"]]
-  #   
-  #   # --> ? select this variogram parameter through CV??
-  #   max.plot.dist <- max.dist*dist_fract. #[dist_fract_index] 
-  #   
-  #   ############################ model residuals ###################################### 
-  #   ##Empirical Variogram
-  #   brk_pt <- 1000
-  #   by1_pt <- 300
-  #   by2_pt <- 1000
-  #   
-  #   variog_train <- variog(geo_train,
-  #                          uvec=c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
-  #                          #UK
-  #                          trend = cov_trend, 
-  #                          messages = F)
-  #   
-  #   #use geoR try to estimate intitial range & sill values. using WLS and an exponential fit
-  #   wls_ests_train <- variofit(variog_train, cov.model = "exp", 
-  #                              messages = F)
-  #   
-  #   # --> ? select this variogram parameter through CV??
-  #   #don't need initial values above since estimates seem to be the same w/ or w/o ini = wls_ests_train (based on small sample)?
-  #   resid_model_train <- variofit(vario = variog_train, 
-  #                                 ini = wls_ests_train, 
-  #                                 cov.model = "exp",
-  #                                 #weights = "equal", #ols
-  #                                 weights = "npairs",#wls
-  #                                 #messages = F
-  #                                 ) 
-  #   
-  #   #trend
-  #   train_trend <- trend.spatial(trend = cov_trend, geo_train)
-  #   test_trend <- trend.spatial(trend = cov_trend, geo_test)
-  #   
-  #   ############################# Predict #############################
-  #   kc_cv <- krige.conv(coords = geo_train$coords,
-  #                       data = geo_train$data,
-  #                       locations = geo_test$coords,
-  #                       krige = krige.control(type = "ok",
-  #                                             obj.model = resid_model_train, 
-  #                                             trend.d = train_trend,
-  #                                             trend.l = test_trend))
-  #   
-  #   #save CV predictions
-  #   dt$cv_prediction[!train_grp] <- kc_cv$predict
-  # 
-  # }
-  # 
-  # 
-  # result <- list(dt = dt,
-  #                max_plot_dist = max.plot.dist,
-  #                max_dist = max.dist)
-  # 
-  # return(result)
-  # #return(dt)
+```{r, likfit example, eval=F}
+# ### --> compare my results form primary analysis (3 PLS, 10% plotting distance) to using likfit()
+#   dt = annual
+#   y_name = "ufp_primary"
+#   cov_names. = cov_names_log
+#   #CV folds
+#   k = 3
+#   # max PLS components to evaluate
+#   use_n_scores. = 3
+#    
+#   score_n_names <- paste0("Comp", 1:use_n_scores.)
+#   
+#   dt <- dt %>% rename(y_name = y_name) %>%
+#     drop_na() %>%
+#     #create folds for test/train set
+#     mutate(set = sample(c(1:k), size = nrow(.), replace = T),
+#            cv_prediction = NA)
+#  
+#   for(f in seq_len(k)) {
+#     #f=1
+#     train_grp <- dt$set != f
+#     
+#     dt_train <- dt %>% filter(train_grp)  
+#     
+#     dt_test <- dt %>% filter(!train_grp)   
+#     
+#     #fit PLS to training data
+#     pls_train <- plsr(y_name ~.,
+#                       data=dt_train[,c("y_name", cov_names.)], 
+#                       ncomp = use_n_scores.,
+#                       scale=T)
+#     
+#     # extract scores for UK
+#     scores_train <- scores(pls_train)[,c(1:use_n_scores.)] %>% 
+#       as.data.frame()
+#     scores_test <- predict(object = pls_train,
+#                            newdata = dt_test,
+#                            ncomp = 1:use_n_scores.,
+#                            type = "score") %>%
+#       as.data.frame()
+#     
+#     # take out spaces in names
+#     names(scores_train) <- score_n_names
+#     names(scores_test) <- score_n_names
+#     
+#     # dataset w/ UFP measurements, geocovariates & location info
+#     pls_df_train <- cbind(dt_train, scores_train)  
+#     
+#     pls_df_test <- cbind(dt_test, scores_test)  
+#     
+#     ################################ UK ################################
+#     geo_train <- as.geodata(pls_df_train, 
+#                             coords.col = c("lambert_x", "lambert_y"), 
+#                             data.col = "y_name", 
+#                             covar.col = score_n_names)
+#     
+#     # --> ? don't need this now?
+#     geo_test <- as.geodata(pls_df_test, 
+#                            coords.col = c("lambert_x", "lambert_y"), 
+#                            data.col = "y_name", 
+#                            covar.col = score_n_names)
+#     
+#     ##trend
+#     cov_trend <-  as.formula(paste0("~ ", paste0(score_n_names,  collapse = " + " )))
+#     
+#     # # issue: still have to tell it a plotting distance 
+#     # variog_train <- variog(geo_train,
+#     #                         uvec=c(seq(0, 1000, by = 300), seq((1000 + 1000),  by= 1000)))
+#     
+#     
+#     # can run variog() w/o plotting maximum, but range is very large ~ 10k
+#     #variog_train <- variofit(variog(geo_train), cov.model = "exp" ) 
+#      
+#     #plot(variog(geo_train))
+# set.seed(1)
+# lf1 <- likfit(geodata = geo_train, 
+#        trend = cov_trend,
+#        #sig squared (partial sill), phi/theta (range). manually estimate these by looking at variogram plots
+#        
+#        #ini.cov.pars = c(0.025, 4000),  # Dr. Sampson suggested a range of 5000 ##variog_train
+#        
+#        # ? or use a matrix
+#        ini.cov.pars = as.matrix(cbind(seq(0, 1, l=4), seq(1000, 5000, l=4)) ) , 
+#         
+#        
+#        #ini.cov.pars = variog_train,
+# 
+#        # ? helps? is this like using a matrix of values for ini.cov.pars?
+#        limits = pars.limits(sigmasq=c(.01, .9), phi=c(300, 10000)),
+#        
+#        fix.nugget = FALSE,
+#        cov.model = "exponential",
+#        lik.method = "ML"
+#        )
+# 
+# # doesn't work? #use summary.likGRF() to pring summary of fitted model. e.g., see $parameters.summary    
+# lf1$parameters.summary
+# 
+# 
+# ### --> ?? how do u make predictions? 
+# predict(lf1, newdata = geo_test) 
+#     
+#      
+#     
+#   }
+#   
+#     #save CV predictions
+#     dt$cv_prediction[!train_grp] <- kc_cv$predict
+#     
+# ########################################################################################################################
+#     
+#   #   max.dist <- summary(geo_train)$distances.summary[["max"]]
+#   #   
+#   #   # --> ? select this variogram parameter through CV??
+#   #   max.plot.dist <- max.dist*dist_fract. #[dist_fract_index] 
+#   #   
+#   #   ############################ model residuals ###################################### 
+#   #   ##Empirical Variogram
+#   #   brk_pt <- 1000
+#   #   by1_pt <- 300
+#   #   by2_pt <- 1000
+#   #   
+#   #   variog_train <- variog(geo_train,
+#   #                          uvec=c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
+#   #                          #UK
+#   #                          trend = cov_trend, 
+#   #                          messages = F)
+#   #   
+#   #   #use geoR try to estimate intitial range & sill values. using WLS and an exponential fit
+#   #   wls_ests_train <- variofit(variog_train, cov.model = "exp", 
+#   #                              messages = F)
+#   #   
+#   #   # --> ? select this variogram parameter through CV??
+#   #   #don't need initial values above since estimates seem to be the same w/ or w/o ini = wls_ests_train (based on small sample)?
+#   #   resid_model_train <- variofit(vario = variog_train, 
+#   #                                 ini = wls_ests_train, 
+#   #                                 cov.model = "exp",
+#   #                                 #weights = "equal", #ols
+#   #                                 weights = "npairs",#wls
+#   #                                 #messages = F
+#   #                                 ) 
+#   #   
+#   #   #trend
+#   #   train_trend <- trend.spatial(trend = cov_trend, geo_train)
+#   #   test_trend <- trend.spatial(trend = cov_trend, geo_test)
+#   #   
+#   #   ############################# Predict #############################
+#   #   kc_cv <- krige.conv(coords = geo_train$coords,
+#   #                       data = geo_train$data,
+#   #                       locations = geo_test$coords,
+#   #                       krige = krige.control(type = "ok",
+#   #                                             obj.model = resid_model_train, 
+#   #                                             trend.d = train_trend,
+#   #                                             trend.l = test_trend))
+#   #   
+#   #   #save CV predictions
+#   #   dt$cv_prediction[!train_grp] <- kc_cv$predict
+#   # 
+#   # }
+#   # 
+#   # 
+#   # result <- list(dt = dt,
+#   #                max_plot_dist = max.plot.dist,
+#   #                max_dist = max.dist)
+#   # 
+#   # return(result)
+#   # #return(dt)
  
 
 ```
@@ -898,7 +901,7 @@ predict(lf1, newdata = geo_test)
 
 The PLS component loadings indicated that the covariates most negatively associated with both UFP and BC concentrations included: NDVI (with smaller buffers having stronger negative associations), distance to port and rail yard. The covariates most positively associated with pollutant concentrations included: highly developed land use, imperviousness, major road length within a buffer, the number of intersections within a buffer, and population density (with smaller buffers generally having stronger positive associations).
 
-```{r, fig.height=12}
+```{r, fig.height=8}
 my.alpha=0.3
 
 pls_loadings <- pls_models[["ufp_primary_uk"]]$loadings[] %>%
@@ -940,7 +943,7 @@ pls_loadings  %>%
 
 - BC 
 
-```{r, fig.height=12}
+```{r, fig.height=8}
 
 pls_loadings <- pls_models[["bc_primary_uk"]]$loadings[] %>%
   as.data.frame() %>%
@@ -988,9 +991,12 @@ Mobile monitoring stops and ACT cohort locations within the study area have simi
 
 ```{r}
 # for all ACT locations within study area
-compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
+pls_in_study_ufp <- compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
                         new_prediction_sites = cov_act, #cov_act_all[cov_act_all$site_id %in% study_ids,],
-                        my_title = "Cohort locations within the study area")$plot
+                        my_title = "Cohort locations within the study area") 
+
+pls_in_study_ufp$plot
+
 ```
 
 The PLS scores of ACT cohort locations within the monitoring area are similar to the mobile monitoring stops PLS scores.
@@ -1018,25 +1024,27 @@ compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
 
 ```
 
+Map of PLS component 1 & 3 scores 
 
-```{r} 
-### --> ? change these to ousdie study are if arguing for not predicting outside study area? 
+Locations with component 1 Scores < 15 are those in the westmost part of the study area. 
 
+```{r}
+pls_locations <- cbind(cov_act[c("site_id", "latitude", "longitude")], pls_in_study_ufp$scores_new_locs)
 
-# ACT cohort locations outside the monitoring area but still within the ST modeling area have a slightly lower PLS scores than mobile monitoring stops.
+pls_locations %>%
+  map_fn(color_by = "Comp1", 
+         map_title = "PLS Component 1 Scores for UFP Model") +
+       scale_color_gradient2(name = "Score", 
+                        low = "black", mid= "white", high = "red",
+                        midpoint = -16) 
 
-# # in ST but outside monitoring area
-# compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
-#                         new_prediction_sites = cov_act_all[cov_act_all$site_id %in% outside_monitoring_in_st_ids,],
-#                         my_title = "Cohort locations outside the monitoring but within the ST model area")$plot
+pls_locations %>%
+  map_fn(color_by = "Comp3", 
+         map_title = "PLS Component 3 Scores for UFP Model") +
+       scale_color_gradient2(name = "Score", 
+                        low = "black", mid= "white", high = "red",
+                        midpoint = -9) 
 
-```
-
-```{r} 
-# # outside monitoring area
-# compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
-#                         new_prediction_sites = cov_act_all[cov_act_all$site_id %in% outside_monitoring_ids,],
-#                         my_title = "Cohort locations outside the monitoring area")$plot
 ```
 
 ```{r}
@@ -1054,9 +1062,12 @@ The same is true for BC.
 
 ```{r}
 # for all ACT locations within study area
-compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
+pls_in_study_bc <- compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
                         new_prediction_sites = cov_act,  
-                        my_title = "Cohort locations within the study area")$plot
+                        my_title = "Cohort locations within the study area")
+
+pls_in_study_bc$plot
+
 ```
 
 ```{r, fig.height=4}
@@ -1081,20 +1092,26 @@ compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
 ```
 
 ```{r}
-# # in ST but outside monitoring area
-# compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
-#                         new_prediction_sites = cov_act_all[cov_act_all$site_id %in% outside_monitoring_in_st_ids,],
-#                         my_title = "Cohort locations outside the monitoring but within the ST model area")$plot
+pls_locations <- cbind(cov_act[c("site_id", "latitude", "longitude")], pls_in_study_bc$scores_new_locs)
+
+pls_locations %>%
+  map_fn(color_by = "Comp1", 
+         map_title = "PLS Component 1 Scores for BC Model") +
+       scale_color_gradient2(name = "Score", 
+                        low = "black", mid= "white", high = "red",
+                        midpoint = -16) 
+
+pls_locations %>%
+  map_fn(color_by = "Comp3", 
+         map_title = "PLS Component 3 Scores for UFP Model") +
+       scale_color_gradient2(name = "Score", 
+                        low = "black", mid= "white", high = "red",
+                        midpoint = -6) 
+
 
 ```
 
-```{r}
-# # outside monitoring area
-# compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
-#                         new_prediction_sites = cov_act_all[cov_act_all$site_id %in% outside_monitoring_ids,],
-#                         my_title = "Cohort locations outside the monitoring area")$plot
-
-```
+ 
 
 ```{r}
 # for later?
@@ -1173,8 +1190,6 @@ The plots below are colored to indicate the increasing distance of ACT cohort lo
 Locations further away from the monitoring area tend to be close to the one-to-one line, indicating that little kriging is being done to the LUR prediction because of their distance from the monitoring sites.
 
 In the study area, the LUR piece of UK explains about __ 64% __ of the variation in the overall UK predictions.
-
-### --> plot primary UFP & BC plot together 
 
 ```{r, fig.height=8}
 my_analysis <- "ufp_primary_uk"
@@ -1263,8 +1278,6 @@ Map of the degree of kriging occurring at ACT locations within the study area.
 
 Locations near the Port of Seattle and northeast of the airport are krigged the most.   
 - Higher kriging near the Port of Seattle and the airport indicate that these are locations where the LUR piece of UK is  characterizing concentrations less well (based on geocovariates alone).
-
-### --> make bubbles bigger or jitter lat/long of ACT locations. Or map to grid locations within the study area   
 
 ```{r}
 uk_decompose %>%
@@ -1368,14 +1381,6 @@ ggarrange(p_monitoring, p_study, p_st, p_all) %>%
 
 ```
 
-Compare UFP vs BC 
-
-```{r}
-ggarrange(p_study_ufp, p_study_bc) %>%
-  annotate_figure(top = "UK vs regression UFP (pt/cm3) & BC predictions (ng/m3) from the primary analysis for ACT locations")
-
-```
-
 Map of the degree of kriging occurring at ACT locations within the study area.  
 
 Locations near the Port of Seattle and northeast of the airport are krigged the most.   
@@ -1390,22 +1395,43 @@ uk_decompose %>%
 
 ```
 
-## Predictions for ACT locations in the study area
+Compare UFP vs BC predictions in study area.
+
+```{r}
+ggarrange(p_study_ufp, p_study_bc, 
+          labels = c("UFP", "BC"), 
+          common.legend = T, legend = "bottom") %>%
+  annotate_figure(top = "UK vs regression UFP (pt/cm3) & BC predictions (ng/m3) from the primary analysis for ACT locations")
+
+```
+
+## Predictions for ACT locations  
 
 ```{r}
 # combine all results 
 uk_predictions_df <- cov_act_all %>%
   filter(site_id %in% study_ids) %>%
-  select(site_id, latitude, longitude, uk_names)
+  select(site_id, latitude, longitude, uk_names) %>% 
+  gather("Analysis", "prediction", contains("uk")) %>%
+  mutate(Analysis = str_replace(Analysis, "_uk", ""))
 
-uk_predictions_df_l <- uk_predictions_df %>% gather("Analysis", "prediction", contains("uk")) %>%
-  mutate(Analysis = str_replace(Analysis, "_uk", ""),
-         #Analysis = factor(Analysis, levels = c("primary", "stop_means", "trim10", "windsorize", "uw", "native_scale"))
-         )
+# sensitivity for ACT locations in monitoring area
+uk_predictions_df_monitoring <- cov_act_all %>%
+  filter(site_id %in% monitoring_ids) %>%
+  select(site_id, latitude, longitude, contains("primary_uk")) %>% 
+  gather("Analysis", "prediction", contains("uk")) %>%
+  mutate(Analysis = str_replace(Analysis, "primary_uk", "monitoring_area"))
+
+uk_predictions_df_l <- rbind(uk_predictions_df,
+                             uk_predictions_df_monitoring
+                             )
+  
+  
+  # uk_predictions_df %>% 
+  # gather("Analysis", "prediction", contains("uk")) %>%
+  # mutate(Analysis = str_replace(Analysis, "_uk", ""))
 
 ```
-
-### --> add ACT locations in study area sensitivity analysis
 
 Predictions are overall similar for primary and sensitivity analyses of both annual average BC and UFP concentrations. 
 
@@ -1417,7 +1443,7 @@ uk_predictions_df_l %>%
   label_analysis(var = "Analysis") %>%
   group_by(Pollutant, Analysis) %>%
   distribution.table(var.string = "prediction") %>%
-  kable(caption = "Distribution of UK predictions for ACT locations in the study area from primary and sensitivity analyses") %>%
+  kable(caption = "Distribution of UK predictions for ACT locations from primary and sensitivity analyses") %>%
   kable_styling()
 
 ```
@@ -1429,7 +1455,7 @@ uk_predictions_df_l %>%
   ggplot(aes(x=prediction, fill = Analysis)) + 
   geom_density(alpha = 0.2) + 
   facet_wrap(~Pollutant, scales= "free") +
-  labs(title = "Distribution of UK predictions for ACT locations in the study area \nfrom primary and sensitivity analyses",
+  labs(title = "Distribution of UK predictions for ACT locations from primary and sensitivity analyses",
        x = "UK Prediction") + 
   theme(legend.position = "bottom")
    
@@ -1445,16 +1471,11 @@ max_ufp_plot <- max(uk_predictions_df_l$prediction[grepl(my_pollutant, uk_predic
 min_ufp_plot <- min(uk_predictions_df_l$prediction[grepl(my_pollutant, uk_predictions_df_l$Analysis)])
   
 uk_predictions_df %>%
-  gather("Analysis", "prediction", contains(my_pollutant), -contains("primary")) %>%
-  mutate(Analysis = str_replace(Analysis, "_uk", ""),
-         # Pollutant = ifelse(grepl("ufp", Analysis), "UFP (pt/cm3)", "BC (ng/m3)" ),
-         # Analysis = ifelse(grepl("ufp", Analysis), substr(Analysis, 5, nchar(Analysis)), substr(Analysis, 4, nchar(Analysis))),
-         
-         ) %>%
+  spread(., Analysis, prediction) %>%
+  gather("Analysis", "prediction", contains("ufp"), -contains("primary")) %>%
     label_analysis(var = "Analysis") %>%
-  
                 # update var for other pollutants here
-  ggplot(aes(x = ufp_primary_uk, y = prediction, col = Analysis)) + 
+  ggplot(aes(x = ufp_primary, y = prediction, col = Analysis)) + 
   geom_abline(intercept = 0, slope = 1) + 
   geom_point(alpha = 0.1) + 
   geom_smooth() +
@@ -1476,15 +1497,11 @@ max_ufp_plot <- max(uk_predictions_df_l$prediction[grepl(my_pollutant, uk_predic
 min_ufp_plot <- min(uk_predictions_df_l$prediction[grepl(my_pollutant, uk_predictions_df_l$Analysis)])
   
 uk_predictions_df %>%
-  gather("Analysis", "prediction", contains(my_pollutant), -contains("primary")) %>%
-  mutate(Analysis = str_replace(Analysis, "_uk", ""),
-         # Pollutant = ifelse(grepl("ufp", Analysis), "UFP (pt/cm3)", "BC (ng/m3)" ),
-         # Analysis = ifelse(grepl("ufp", Analysis), substr(Analysis, 5, nchar(Analysis)), substr(Analysis, 4, nchar(Analysis))),
-         
-         ) %>%
+   spread(., Analysis, prediction) %>%
+  gather("Analysis", "prediction", contains("ufp"), -contains("primary")) %>%
     label_analysis(var = "Analysis") %>%
                 # update var for other pollutants here
-  ggplot(aes(x = bc_primary_uk, y = prediction, col = Analysis)) + 
+  ggplot(aes(x = bc_primary, y = prediction, col = Analysis)) + 
   geom_abline(intercept = 0, slope = 1) + 
   geom_point(alpha = 0.1) + 
   geom_smooth() +
@@ -1549,13 +1566,18 @@ We see higher predicted UFP concentrations between downtown and the airport as w
 
 * Elevated concentrations between downtoan and northwest of the airport may also be due to predominant winds from the south and southwest as well as airport landing pattern (MOV-UP report Fig 11).
 
-### --> map primary UFP & BC together 
-### --> ? add north arrow & scale? 
-
 ```{r,fig.height=10}
 # dot map
 my_pollutant <- "ufp"
 pollutant_uk_names <- uk_names[grepl(my_pollutant, uk_names)]
+# map titles
+map_titles <- factor(substr(pollutant_uk_names, nchar(my_pollutant)+2, nchar(pollutant_uk_names)-nchar("_uk")))
+map_titles <- recode_factor(map_titles,
+                            "stop_means" = "Stop means",
+                            "trim10" = "10% trimmed mean",
+                            "windsorize" = "Windsorized mean",
+                            "uw" = "Unweighted mean",
+                            "native_scale" = "Native scale modeling")
 
 dot_maps <-list()# min and max difference of all estimates
 
@@ -1570,7 +1592,7 @@ for(i in seq_along(pollutant_uk_names)) {
   #i=1    #used to be: uk_predictions
    mymap <- suppressMessages(
      grid_covars %>% map_fn(color_by = pollutant_uk_names[i], outline_points = F,
-                                   map_title = pollutant_uk_names[i]) +
+                                   map_title = map_titles[i]) +
     scale_color_gradient(name = "UFP (pt/cm3)", 
                         low = "yellow", high = "red",
                         #ensure that all plots on same scale
@@ -1596,6 +1618,14 @@ We see elevated predicted BC concentrations between the Port of Seattle and the 
 # dot map
 my_pollutant <- "bc"
 pollutant_uk_names <- uk_names[grepl(my_pollutant, uk_names)]
+# map titles
+map_titles <- factor(substr(pollutant_uk_names, nchar(my_pollutant)+2, nchar(pollutant_uk_names)-nchar("_uk")))
+map_titles <- recode_factor(map_titles,
+                            "stop_means" = "Stop means",
+                            "trim10" = "10% trimmed mean",
+                            "windsorize" = "Windsorized mean",
+                            "uw" = "Unweighted mean",
+                            "native_scale" = "Native scale modeling")
 
 dot_maps <-list()# min and max difference of all estimates
 
@@ -1610,7 +1640,7 @@ for(i in seq_along(pollutant_uk_names)) {
   #i=1    #used to be: uk_predictions
    mymap <- suppressMessages(
      grid_covars %>% map_fn(color_by = pollutant_uk_names[i], outline_points = F,
-                                   map_title = pollutant_uk_names[i]) +
+                                   map_title = map_titles[i]) +
     scale_color_gradient(name = "BC (ng/m3)", 
                         low = "yellow", high = "red",
                         #ensure that all plots on same scale
@@ -1637,8 +1667,10 @@ ggarrange(plotlist = dot_maps,
 ```{r}
 # calculate difference between sensitivity & primary estimates
 pred_differences <- uk_predictions_df %>%
-  mutate_at(vars(contains("ufp"), -contains("primary")), ~.-ufp_primary_uk) %>%
-  mutate_at(vars(contains("bc"), -contains("primary")), ~.-bc_primary_uk) %>% 
+  spread(., Analysis, prediction) %>%
+  #gather("Analysis", "prediction", contains("ufp"), -contains("primary")) %>%
+  mutate_at(vars(contains("ufp"), -contains("primary")), ~.-ufp_primary) %>%
+  mutate_at(vars(contains("bc"), -contains("primary")), ~.-bc_primary) %>% 
   select(-contains("primary"))
 
 ```
@@ -1650,8 +1682,8 @@ Compared to predictions from the primary analysis, predictions from the windsori
 ```{r}
 #density plot
 pred_differences %>% 
-  gather("Analysis", "prediction_diff", contains("uk")) %>%
-  label_analysis(var = "Analysis", end_character = 3) %>%
+  gather("Analysis", "prediction_diff", contains(c("bc", "ufp"))) %>%
+  label_analysis(var = "Analysis") %>%
   ggplot(aes(x = prediction_diff, fill = Analysis)) +
   geom_density(alpha = 0.3) +
   geom_vline(xintercept = 0, linetype = "dashed") +
@@ -1665,8 +1697,9 @@ pred_differences %>%
 
 ```{r}
 # distribution table
-pred_differences %>% gather("Analysis", "prediction_diff", contains("uk")) %>%
-    label_analysis(var = "Analysis", end_character = 3) %>%
+pred_differences %>% 
+  gather("Analysis", "prediction_diff", contains(c("bc", "ufp"))) %>%
+    label_analysis(var = "Analysis") %>%
   group_by(Pollutant, Analysis) %>%
   distribution.table(var.string = "prediction_diff") %>%
   kable(caption = "Difference in annual average pollutant predictions relative to primary UK model") %>%
@@ -1698,8 +1731,6 @@ Unweighted average stop predictions are ___________
 
 Native scale predictions are generally higher along major highways and lower on the east side of the study area where concentration predictions from the primary analysis were already low.
 
-### --> relabel maps, e.g., "10% trimmed mean" 
-
 ```{r, fig.height=8}
 # maps 
 my_pollutant <- "ufp"
@@ -1712,14 +1743,22 @@ diff_range <- pred_differences_grid %>%
   round()
 
 uk_names_diff <- names(pred_differences_grid)[grepl(my_pollutant, names(pred_differences_grid))]
+# map titles
+map_titles <- factor(substr(uk_names_diff, nchar(my_pollutant)+2, nchar(uk_names_diff)-nchar("_uk")))
+map_titles <- recode_factor(map_titles,
+                            "stop_means" = "Stop means",
+                            "trim10" = "10% trimmed mean",
+                            "windsorize" = "Windsorized mean",
+                            "uw" = "Unweighted mean",
+                            "native_scale" = "Native scale modeling")
 
 difference_maps <-list()
 
 for(i in seq_along(uk_names_diff)) {
-  #i=2
+  #i=1
   mymap <- suppressMessages(
      pred_differences_grid %>% map_fn(color_by = uk_names_diff[i], outline_points = F,
-                                   map_title = uk_names_diff[i]) +
+                                   map_title = map_titles[i]) +
        scale_color_gradient2(name = "UFP (pt/cm3)", 
                         low = "black", mid= "white", high = "red",
                         midpoint = 0, 
@@ -1728,8 +1767,12 @@ for(i in seq_along(uk_names_diff)) {
   )
   
   difference_maps[i] <- list(mymap)
+  
   names(difference_maps)[i] <- uk_names_diff[i]
+  
 }
+
+
 
 ggarrange(plotlist = difference_maps,
           ncol = 3, nrow = 2,
@@ -1762,19 +1805,28 @@ diff_range <- pred_differences_grid %>%
   round()
 
 uk_names_diff <- names(pred_differences_grid)[grepl(my_pollutant, names(pred_differences_grid))]
+# map titles
+map_titles <- factor(substr(uk_names_diff, nchar(my_pollutant)+2, nchar(uk_names_diff)-nchar("_uk")))
+map_titles <- recode_factor(map_titles,
+                            "stop_means" = "Stop means",
+                            "trim10" = "10% trimmed mean",
+                            "windsorize" = "Windsorized mean",
+                            "uw" = "Unweighted mean",
+                            "native_scale" = "Native scale modeling")
 
 difference_maps <-list()
 
 for(i in seq_along(uk_names_diff)) {
   #i=2
   mymap <- suppressMessages(
-     pred_differences_grid %>% map_fn(color_by = uk_names_diff[i], outline_points = F,
-                                   map_title = uk_names_diff[i]) +
+     pred_differences_grid %>% 
+       map_fn(color_by = uk_names_diff[i], outline_points = F,
+                                   map_title = map_titles[i]) +
        scale_color_gradient2(name = "BC (ng/m3)", 
                         low = "black", mid= "white", high = "red",
                         midpoint = 0, 
-                        limits = c(diff_range$min, diff_range$max))  
-     
+                        limits = c(diff_range$min, diff_range$max)
+                        )  
   )
   
   difference_maps[i] <- list(mymap)
@@ -1787,11 +1839,6 @@ ggarrange(plotlist = difference_maps,
   annotate_figure(top = "Difference in annual average BC predictions relative to primary UK model" ) 
  
 ```
-
-
-
-
-
 
 
 
@@ -1864,7 +1911,17 @@ annual %>%
 # ## on a grid
 # saveRDS(grid_covars[, c("site_id", "latitude", "longitude", uk_names)], file.path("Data", "Aim 2", "Predictions", "grid_uk_predictions.rda"))
 # saveRDS(pred_differences_grid, file.path("Data", "Aim 2", "Predictions", "grid_uk_prediction_diffs.rda"))
+#
+# ### as CSV
+# write.csv(grid_covars[, c("site_id", "latitude", "longitude", uk_names)],
+#           file.path("Data", "Aim 2", "Predictions", "grid_uk_predictions.csv"))
 
 ```
 
+
+\newpage
+# Code
+
+```{r,ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=60), include=T}
+```
  

@@ -1,0 +1,56 @@
+---
+title: "CA AQS Sites"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r, echo=F}
+# notes
+
+
+
+```
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(tidyverse,
+               knitr)
+  
+setwd(file.path("Data", "CA AQS"))
+
+```
+
+```{r, eval=F}
+# # upload data
+# files <- list.files()
+# files <- files[grepl(".zip", files)]
+# files <- gsub(".zip", "", files)
+# 
+# ca <- data.frame()
+# 
+# for(i in 1:length(files)){
+# 
+#   one_file <- read.csv(unz(paste0(files[i], ".zip"), paste0(files[i], ".csv")))
+#   ca <- rbind(ca, one_file)
+# 
+#   }
+# 
+# ca %>%
+#   saveRDS(., file.path("ca_aqs_hourly.rda"))
+
+```
+
+```{r}
+ca0 <- readRDS("ca_aqs_hourly.rda") %>%
+  filter(State.Name == "California",
+         grepl("NO2|PM2.5 - Local", Parameter.Name, ignore.case = T))
+
+gis <- read.csv("ca_gis.csv")[-1]
+
+no2 <- ca0 %>%
+  filter(grepl("NO2", Parameter.Name)) 
+
+```
+

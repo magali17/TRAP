@@ -74,41 +74,41 @@ night <- c(seq(21,23), seq(0,4)) #? 0-4 in "night"?
 
 #takes a dataset for BC in wide format and returns ONA corrected estimates for each MA200 wavelength.
 
-makenum = function(x) {as.numeric(as.character(x))}
-
-ONA <- function(MAdata, 
-                       deltaATN=data.table(UV=0.05, 
-                                           Blue = 0.05, 
-                                           Green = 0.05, 
-                                           Red = 0.05, 
-                                           IR = 0.05)) {
-  pacman::p_load("data.table", "zoo", "plyr")
-  
-  MAdata <- MAdata %>% as.data.table()
-  
-  MAdata[ , UVthresh := round_any((`ma200_uv_atn1`)-max(`ma200_uv_atn1`)-deltaATN$UV, (deltaATN$UV+0.01), ceiling) + max(`ma200_uv_atn1`), by = c("ma200_tape_posit", "runname")]
-  MAdata[ , ona_uv := mean(makenum(`ma200_uv_bc1`)), by = c("ma200_tape_posit", "UVthresh", "runname")] 
-  
-  MAdata[ , Bluethresh := round_any((`ma200_blue_atn1`)-max(`ma200_blue_atn1`)-deltaATN$Blue, (deltaATN$Blue+0.01), ceiling) + max(`ma200_blue_atn1`), by = c("ma200_tape_posit", "runname")]    
-  MAdata[ , ona_blue := mean(makenum(`ma200_blue_bc1`)), by = c("ma200_tape_posit", "Bluethresh", "runname")] 
-  
-  MAdata[ , Greenthresh := round_any((`ma200_green_atn1`)-max(`ma200_green_atn1`)-deltaATN$Green, (deltaATN$Green+0.01), ceiling) + max(`ma200_green_atn1`), by = c("ma200_tape_posit", "runname")]    
-  MAdata[ , ona_green := mean(makenum(`ma200_green_bc1`)), by = c("ma200_tape_posit", "Greenthresh", "runname")] 
-  
-  MAdata[ , Redthresh := round_any((`ma200_red_atn1`)-max(`ma200_red_atn1`)-deltaATN$Red, (deltaATN$Red+0.01), ceiling) + max(`ma200_red_atn1`), by = c("ma200_tape_posit", "runname")]    
-  MAdata[ , ona_red := mean(makenum(`ma200_red_bc1`)), by = c("ma200_tape_posit", "Redthresh", "runname")] 
-  
-  MAdata[ , IRthresh := round_any((`ma200_ir_atn1`)-max(`ma200_ir_atn1`)-deltaATN$IR, (deltaATN$IR+0.01), ceiling) + max(`ma200_ir_atn1`), by = c("ma200_tape_posit", "runname")]    
-  MAdata[ , ona_ir := mean(makenum(`ma200_ir_bc1`)), by = c("ma200_tape_posit", "IRthresh", "runname")] 
-  
-  MAdata <- MAdata %>% as.data.frame()
-  
-  #creates issues later if you leave loaded
-  #pacman::p_unload("data.table")
-  
-  return(MAdata)
-  
-  }
+# makenum = function(x) {as.numeric(as.character(x))}
+# 
+# ONA <- function(MAdata, 
+#                        deltaATN=data.table(UV=0.05, 
+#                                            Blue = 0.05, 
+#                                            Green = 0.05, 
+#                                            Red = 0.05, 
+#                                            IR = 0.05)) {
+#   pacman::p_load("data.table", "zoo", "plyr")
+#   
+#   MAdata <- MAdata %>% as.data.table()
+#   
+#   MAdata[ , UVthresh := round_any((`ma200_uv_atn1`)-max(`ma200_uv_atn1`)-deltaATN$UV, (deltaATN$UV+0.01), ceiling) + max(`ma200_uv_atn1`), by = c("ma200_tape_posit", "runname")]
+#   MAdata[ , ona_uv := mean(makenum(`ma200_uv_bc1`)), by = c("ma200_tape_posit", "UVthresh", "runname")] 
+#   
+#   MAdata[ , Bluethresh := round_any((`ma200_blue_atn1`)-max(`ma200_blue_atn1`)-deltaATN$Blue, (deltaATN$Blue+0.01), ceiling) + max(`ma200_blue_atn1`), by = c("ma200_tape_posit", "runname")]    
+#   MAdata[ , ona_blue := mean(makenum(`ma200_blue_bc1`)), by = c("ma200_tape_posit", "Bluethresh", "runname")] 
+#   
+#   MAdata[ , Greenthresh := round_any((`ma200_green_atn1`)-max(`ma200_green_atn1`)-deltaATN$Green, (deltaATN$Green+0.01), ceiling) + max(`ma200_green_atn1`), by = c("ma200_tape_posit", "runname")]    
+#   MAdata[ , ona_green := mean(makenum(`ma200_green_bc1`)), by = c("ma200_tape_posit", "Greenthresh", "runname")] 
+#   
+#   MAdata[ , Redthresh := round_any((`ma200_red_atn1`)-max(`ma200_red_atn1`)-deltaATN$Red, (deltaATN$Red+0.01), ceiling) + max(`ma200_red_atn1`), by = c("ma200_tape_posit", "runname")]    
+#   MAdata[ , ona_red := mean(makenum(`ma200_red_bc1`)), by = c("ma200_tape_posit", "Redthresh", "runname")] 
+#   
+#   MAdata[ , IRthresh := round_any((`ma200_ir_atn1`)-max(`ma200_ir_atn1`)-deltaATN$IR, (deltaATN$IR+0.01), ceiling) + max(`ma200_ir_atn1`), by = c("ma200_tape_posit", "runname")]    
+#   MAdata[ , ona_ir := mean(makenum(`ma200_ir_bc1`)), by = c("ma200_tape_posit", "IRthresh", "runname")] 
+#   
+#   MAdata <- MAdata %>% as.data.frame()
+#   
+#   #creates issues later if you leave loaded
+#   #pacman::p_unload("data.table")
+#   
+#   return(MAdata)
+#   
+#   }
 
 
 ############################## separate buffers from covariate names ################################
@@ -502,7 +502,7 @@ map_base <- function(dt,
                    map_title = NULL,
                    include_monitoring_area = FALSE, monitoring_area_alpha = 0.3,
                    include_study_area = FALSE, study_area_alpha = 0.4,
-                   include_st_area = F, st_area_alpha = 0.4,
+                   include_st_area = FALSE, st_area_alpha = 0.4,
                    maptype. = "terrain", #, "toner", "toner-background", "watercolor"
                    zoom_lvl = 11
 ) {
@@ -807,7 +807,10 @@ label_pollutant <- function(dt,
                           "ptrak_pt_cm3" = "P-TRAK UFP (20-1,000 nm)",
                           "scan_20_420_pt_cm3" = "NanoScan UFP (20-420 nm)",
                           "ona_bc" = "ONA-corrected BC",
-                          "ma200_bc" = "BC")) 
+                          "ma200_bc" = "MA 200 BC",
+                          "ma200_ir_bc1" = "MA 200 BC",
+                          "bc_ng_m3" = "MA 200 BC"
+                          )) 
   }
   
   if(label == "pollutant") {
@@ -847,16 +850,18 @@ label_analysis <- function(dt,
     rename(var = var) %>%
     mutate(
       Pollutant = ifelse(grepl("ufp", var), "UFP (pt/cm3)", "BC (ng/m3)" ),
+      Pollutant = factor(Pollutant, levels = c("UFP (pt/cm3)", "BC (ng/m3)")),
       var = as.character(var),
       var = ifelse(grepl("ufp", var), substr(var, 5, nchar(var)-end_character), substr(var, 4, nchar(var)-end_character)),
-      var = factor(var, levels = c("primary", "stop_means", "trim10", "windsorize", "uw", "native_scale")),
+      var = factor(var, levels = c("primary", "stop_means", "trim10", "windsorize", "uw", "native_scale", "monitoring_area")),
       var = recode_factor(var, 
                           "primary" = "Primary",
                           "stop_means" = "Stop means",
                           "trim10" = "10% trimmed mean",
                           "windsorize" = "Windsorized mean",
                           "uw" = "Unweighted mean",
-                          "native_scale" = "Native scale modeling"
+                          "native_scale" = "Native scale modeling",
+                          "monitoring_area" = "Predict within monitoring area"
                           )
       ) %>%
     select(Pollutant, Analysis = var, everything())
@@ -870,10 +875,13 @@ label_analysis <- function(dt,
 
 #1. loops over pls_uk_cv_predictions() fn below to return CV RMSE and R2 for a series of PLS components and maximum variogram plotting distances. 
 pls_uk_cv_eval <- function(dt2 = annual_train_test,
+                           # no. of PLS components to loop over
                            pls_comps = c(1:6),
+                           # for UK model variogram - fraction
                            dist_fract = c(0.05, seq(0.1, 0.5, by=0.1)),
                            # to be passed to pls_uk_cv_predictions()
                            y_name.. = "log_ufp",
+                           # predictors
                            cov_names.. = cov_names,
                            #CV folds
                            k. = 10,
@@ -882,12 +890,13 @@ pls_uk_cv_eval <- function(dt2 = annual_train_test,
                            #site_locations.. = site_locations
                            ) {
   
-  #df to save CV model eval
+  #df to save CV model evaluation
   cv_eval <- data.frame(
     expand.grid(pls_comp = pls_comps,
                 dist_fract = dist_fract),
     RMSE = NA,
     R2 = NA,
+    #for UK variogram
     max_plot_dist = NA,
     max_dist = NA
     )
@@ -990,6 +999,7 @@ pls_uk_cv_predictions <- function(
     drop_na() %>%
     #create folds for test/train set
     mutate(set = sample(c(1:k), size = nrow(.), replace = T),
+           # to save predictions
            cv_prediction = NA)
  
   for(f in seq_len(k)) {
@@ -1006,7 +1016,7 @@ pls_uk_cv_predictions <- function(
                       ncomp = use_n_scores.,
                       scale=T)
     
-    # extract scores for UK
+    # extract scores ("new covariate") for UK
     scores_train <- scores(pls_train)[,c(1:use_n_scores.)] %>% 
       as.data.frame()
     scores_test <- predict(object = pls_train,
@@ -1049,6 +1059,7 @@ pls_uk_cv_predictions <- function(
     by2_pt <- 1000
     
     variog_train <- variog(geo_train,
+                           #plotting breakpoints 
                            uvec=c(seq(0, brk_pt, by = by1_pt), seq((brk_pt + by2_pt), max.plot.dist, by= by2_pt)),
                            #UK
                            trend = cov_trend, 
@@ -1073,10 +1084,11 @@ pls_uk_cv_predictions <- function(
     test_trend <- trend.spatial(trend = cov_trend, geo_test)
     
     ############################# Predict #############################
-    kc_cv <- krige.conv(geo_train, #coords = geo_train$coords,
-                        #data = geo_train$data,
+    kc_cv <- krige.conv(geo_train,
+                        # where you want to predict
                         locations = geo_test$coords,
                         krige = krige.control(type = "ok",
+                                                          # range, nugget, partial sill
                                               obj.model = resid_model_train, 
                                               trend.d = train_trend,
                                               trend.l = test_trend))

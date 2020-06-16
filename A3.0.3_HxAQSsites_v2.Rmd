@@ -1,0 +1,975 @@
+---
+title: "Aim 3: AQS sites - temporal trend and validation sites"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output: 
+  html_document:
+    toc: yes
+    toc_depth: '3'
+editor_options: 
+  chunk_output_type: console
+---
+
+# Purpose and approach
+
+The purpose of this script is to characterize historical black carbon (BC) levels at AQS sites in order to:   
+
+a) estimate a temporal BC trend and adjustment our 2019 BC (and UFP) mobile monitoring exposure surface back in time    
+
+* rationale: our model's time-varying covariate predictors may not fully capture the significantly decreasing trends in AP over time.       
+* approach: use EC, which is highly correlated with BC, to estimate a trend. EC has been continuously measured using the same method since 2003 at Beacon Hill.
+
+b) validate historical (hx) model predictions   
+  
+* rationale: model validation   
+* approach: compare model predictions to historical BC observations at AQS sites within and near the study area. 
+  
+
+We will use daily EC and BC data rather than annual estimates to ensure that each year that is included had sufficient observations throughout the year for them to adequately represent the annual average. 
+
+
+# About the available data 
+
+**EPA daily averages**
+
+* The EPA has daily EC measurements as part of its Chemical Speciation Network. There is a network site at Beacon Hill. It does not include BC since it is not a criteria pollutant (?).    
+
+**PSCAA daily averages & hourly readings**   
+
+* Data are only available for BC. does not contain EC data since these are processed by the EPA.    
+* online tool rounds to nearest tenth, and thus reports 0s when daily average readings may have actually been slightly higher (e.g. 0.04).
+* online tool does not include exact method used, though it does differentiate by the earlier vs later methods which are known to be different. There is a known adjustment factor of 32%.  
+* readings may have been affected over time as a result of changing detection limits, particularly for older data (Erik Saganic, PSCAA; & Beth Fridman, DOE)       
+* In 2005 an alternate thermal protocol (IMPROVE_A) was identified and used to analyze IMPROVE samples collected after January 1, 2005, although the EC_TOR is insensitive to the change in temperature protocols  (https://www.tandfonline.com/doi/pdf/10.3155/1047-3289.57.9.1014) (Beth Friedman, DOE)     
+
+**EPA annual averages**       
+
+* not using these data since it is unclear of whether years were balanced. Their "completeness" indicator is not necessarily relevant to our scientific question (e.g., can be "complete" if an extreme value surpasses the 24hr limit even if data were limited; unclear if samples were collected from every season).     
+* the PSCAA has more site-years available and at the day level     
+* The EPA  does not have BC readings for Kent or Duwamish after 2010. These data are available trough the PSCAA. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(readxl, 
+               tidyverse, knitr, 
+               kable, kableExtra,
+               lubridate,
+               splines,
+               ) 
+
+source("0.Global_Fns.R") # add_season()
+source("A2.0.1_Var&Fns.R")
+
+set.seed(1)
+
+```
+
+```{r}
+#common variables
+folder_path <- file.path("Data", "Aim 3", "Hx BC at AQS Sites")
+
+#sites in or near study w/ BC data from PSCAA   #no Bellevue BC data from PSCAA
+sites_near_study <- "Seattle|Forest Park|Tukwila|Kent|Tacoma|Puyallup|Marysville" 
+
+# # scale options
+# RColorBrewer::display.brewer.all()
+
+plot_palette <- "Set3" #Set1, Paired
+
+```
+
+# Map of AQS sites used for trend adjustment and/or validation
+
+**Site Notes**
+
+* Tacoma, Puyallup and Marysville AQS sites are near but not within the study area     
+* Lake Forest Park, Tacoma South L, Puyallup and Marysville were traditionally wood smoke impacted areas (though BC 880 is not affected by wood smoke as much, so elevated BC levels are presumably from truck and ship traffic)   
+* Tacoma Tideflats (Alexander Ave) is by the Port of Tacoma    
+* Tacoma tideflats & Duwamish have a lot of truck traffic
+
+* Duwamish, 10th & Weller & tideflats may have seen a bigger change in TRAP over time as a result of stricter emission standards
+
+
+```{r}
+aqs_monitors0 <- read.csv(file.path(folder_path, "EPA", "aqs_monitors.csv")) %>%
+  filter(State.Name == "Washington",
+         County.Name %in% c("King", "Snohomish", "Pierce")
+         )
+
+#sites that PSCAA has data for
+aqs_monitor_names <- c("Kent - James & Central" , "Lake Forest Park", "Marysville", "Puyallup - 128", "10th & Weller", "Beacon Hill", "Duwamish", "Tacoma - L Street", "Tacoma - Alexander", "Tukwila Allentown") %>% 
+  paste0(collapse="|")
+
+
+aqs_monitors <- aqs_monitors0 %>%
+  # only look at BC since we already know BH has EC 
+  filter(
+    #grepl("EC |Black carbon", Parameter.Name, ignore.case = T),
+    grepl(aqs_monitor_names, Local.Site.Name, ignore.case = T),
+         ) %>%
+  mutate(
+    Local.Site.Name = str_to_title(Local.Site.Name)
+  ) %>%
+  select(Local.Site.Name, Address, Latitude, Longitude) %>%
+  mutate(
+    #Name = factor(Local.Site.Name),
+    Local.Site.Name = recode_factor(factor(Local.Site.Name),
+                         "Lake Forest Park Towne Center" = "Lake Forest Park",
+                         "Kent - James & Central" = "Kent",
+                         "Tacoma - L Street" = "Tacoma South L",
+                         "Tacoma - Alexander Ave" = "Tacoma Tideflats",
+                         "Puyallup - 128th St" = "Puyallup",
+                         "Marysville - 7th Ave (Marysville Junior High)" = "Marysville"
+                         )
+  ) %>%
+  unique()
+
+ 
+# write.csv(aqs_monitors, file.path(folder_path, "EPA", "aqs_monitors_nearby_bc.csv"), row.names = F)
+
+```
+
+Map includes all sites for which the PSCAA has historical BC data for.
+
+```{r}
+study_area <- readRDS(file.path("Data", "GIS", "study_area_df.rda"))
+monitoring_area <- readRDS(file.path("Data", "GIS", "monitoring_area_df.rda")) 
+#background map slightly larger than the study area  
+map0 <- map_base(dt=study_area, latitude_name = "lat", longitude_name = "long")
+## this map is much wider
+#map0 <- read_rds(file.path("Output", "Maps", "StudyBackgroundMap.rds"))
+
+map0 +
+  geom_polygon(data = study_area, 
+                aes(x = long, y = lat, group = group, 
+                    fill = "Study"),
+                alpha = 0.3,
+                size = 0.5) +
+  geom_polygon(data = monitoring_area, 
+                aes(x = long, y = lat, group = group, 
+                    fill = "Monitoring"),
+                alpha = 0.3,
+                size = 0.5) +
+      geom_point(data = aqs_monitors,
+                 aes(x = Longitude, y = Latitude, 
+                     col = "AQS Site"), col= "black",
+                 ) + 
+  ggrepel::geom_text_repel(data = aqs_monitors, aes(x = Longitude, y = Latitude, label = Local.Site.Name), 
+            # nudge_x = c(0.13),
+            # nudge_y = c(0.009)
+            )  +
+  labs(
+    title = "AQS sites with historical BC measurements \nin and near the study area",
+    fill = "",
+    col = ""
+    ) 
+
+
+```
+
+## Trend Adjustment using the EPA daily EC
+
+The only long-term data available starting in 1996 is for EC. BC starts being collected in 2003, intermittently, at some sites.
+
+Isha: "Elemental Carbon is sampled through filter-based sampling by URG samplers and analyzed by EPA labs as a part of the speciation studies ongoing at Duwamish, Beacon hill, 10th & Weller in Seattle. The data from Speciation study gets uploaded to EPA’s website directly from the lab and we don’t upload it on our website as it is not a real-time instrument and it takes some months for that data to be made available."
+
+```{r, eval=T}
+# # Daily BC & EC data
+# #daily concentrations
+# file_prename_daily <- file.path("daily", "daily_SPEC_")
+# aqs_daily <- data.frame()
+# #years <- c(2003)
+# 
+# #append Hx annual avg for sites of interest
+# for (i in seq_along(years)) { #
+#   #i=1
+#   one_yr <- read.csv(file.path(folder_path, paste0(file_prename_daily, years[i], ".csv"))) %>%
+#     filter(
+#       #only keep AQS sites in our study area
+#       State.Name == "Washington",
+#       County.Name %in% c("King", "Snohomish"),
+#       #drop Darringotn & Marysville locations outside study area
+#       !Site.Num %in% c(20, 1007),
+#       #grepl(x = Parameter.Name, pattern = "Black Carbon|EC PM2.5 LC TOR", ignore.case = T)  #EC PM2.5
+#       #Black Carbon PM2.5 at 880 nm, Black Carbon PM10 LC, EC PM2.5 LC TOR, EC PM2.5 LC TOT
+#     ) %>%
+#     #select columns of interest
+#     select(
+#       Date.Local, Local.Site.Name, Parameter.Name, Parameter.Code, County.Name,
+#       Arithmetic.Mean,
+#       Sample.Duration, Method.Name, Units.of.Measure,
+#       Observation.Count, Observation.Percent
+#       )
+# 
+#   aqs_daily <- rbind(aqs_daily, one_yr)
+# 
+# }
+# 
+# #rename sites
+# aqs_daily$Local.Site.Name <- stringi::stri_trans_totitle(aqs_daily$Local.Site.Name)
+# 
+# # only keep one method for Beacon Hill
+# aqs_daily <- aqs_daily %>%
+#   filter(!(grepl("Beacon Hill", Local.Site.Name) &
+#          grepl("EC", Parameter.Name) &
+#          grepl("URG", Method.Name))
+#          )
+# 
+# # add month
+# aqs_daily <- aqs_daily %>%
+#   mutate(month = month(x = Date.Local, label = F))
+#  
+# #save for quicker access later
+# write_rds(aqs_daily, file.path("Data", "Aim 3", "Hx BC at AQS Sites", "daily", "aqs_daily.rda")) 
+
+# heating months, accroding to the PSCAA
+non_heating_mo <- c(4:9) 
+  
+epa_daily0 <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "EPA", "daily", "aqs_daily.rda")) %>%
+  #only BH has sufficient hx data to establish a trend
+  filter(grepl("Beacon Hill", Local.Site.Name)) %>%
+  select(-Local.Site.Name) %>%
+  mutate(
+    Year = year(Date.Local),
+    # delete everything after dash; match "IMPROVE" w/ aqs_annual
+    #Method.Name = gsub(" -.*", "", Method.Name),
+    month_type = ifelse(month %in% non_heating_mo, "non-heating", "heating" )
+  ) %>%
+  group_by(Year) %>%
+  mutate(samples_per_year = n()) %>%
+  ungroup()
+
+```
+
+**Data Completeness Criteria**   
+
+```{r}
+min_day_criteria <- 82
+max_gap_criteria <- 45
+
+```
+
+This approach is similar to that detailed in the MESA DOOP for estimating annual averages from data collected every 3 days. Sites will only be included if they: 
+
+* have data for at least `r min_day_criteria`/122 sampling days    
+* the max number of days between measurements is `r max_gap_criteria`     
+
+
+```{r}
+# calculate means only if data meet criteria 
+
+unique_yr_site <- unique(epa_daily0$Year)  
+
+results <- data.frame()
+
+# calculate number of samples & gap length for each year and site
+for (i in seq_along(unique_yr_site)) {
+  
+  #i=1
+  df <- epa_daily0 %>%
+    filter(Year == unique_yr_site[i])
+  
+  # calc number of days since last sample.
+  df$day_diff <- NA
+  
+  for (day_no in 1:nrow(df)) {
+    #day_no=2
+    
+    if(day_no > 1) {
+      df$day_diff[day_no] <- df$Date.Local[day_no] - df$Date.Local[day_no-1]
+      }
+    
+    }
+  
+  results <- rbind(results, df)
+}
+
+results_summary <- results %>%
+  group_by(Year) %>%
+  dplyr::summarize(
+    samples_per_year = unique(samples_per_year),
+    max_gap = max(day_diff, na.rm = T)
+    ) %>%
+  mutate(
+    meets_criteria = samples_per_year >= min_day_criteria & max_gap <= max_gap_criteria
+  )
+  # # only keep site-years that meet criteria
+  # filter(samples_per_year >= min_day_criteria,
+  #        max_gap <= max_gap_criteria
+  #        )
+
+epa_daily <- left_join(results_summary, epa_daily0) #%>%
+  # group_by(Year) %>%
+  # dplyr::summarize(
+  #     mean = mean(Value)
+  # ) %>%
+  # ungroup()
+
+
+```
+
+Monthly trend. We generally see higher EC levels during heating months. The difference in BC during heating and non-heating months is greater for earlier times.
+
+```{r}
+yr_bin <- 10
+
+epa_daily %>%
+  mutate(month = month(month, label = T),
+         year_bin = factor(floor(Year/yr_bin)*yr_bin)
+         ) %>%
+  
+  ggplot(aes(x=month, y=Arithmetic.Mean, 
+             #shape=year_bin, 
+             linetype=year_bin
+             )) + 
+  geom_point(alpha=0.4, aes(col=month_type, )) + 
+  geom_smooth(aes(x=as.numeric(month)), se=F) +
+  labs(
+    title = "Time series of Beacon Hill EC trend",
+    subtitle = "Source: EPA Daily files"
+       )  
+  
+```
+
+For annual EC, the years that remain have roughly an equal number of samples from heating vs non-heating months. 
+
+Note that this method includes EC from the 1st temperature fraction
+
+```{r}
+epa_daily %>%
+  ggplot(aes(x=Year, fill=month_type)) + 
+  geom_bar(aes(alpha=meets_criteria)) + 
+  scale_alpha_discrete( range = c(0.4, 1)) + 
+  labs(
+    title = "Number of EC samples collected",
+    subtitle = paste0("Source: EPA daily files for method ", unique(epa_daily$Method.Name)),
+    alpha = "Meets Criteria" 
+  ) 
+  
+  
+```
+
+calculate annual averages for heating, non-heating and all months using data that meets criteria.
+
+```{r}
+# only keep site-years that meet criteria
+epa_daily <- epa_daily %>%
+  filter(meets_criteria == TRUE)
+
+# all months
+epa_daily_all_mo <- epa_daily %>%
+  group_by(Year) %>%
+  dplyr::summarize(mean_all_months = mean(Arithmetic.Mean))
+
+# only keep non-heating (nh) month data (non winter wood-heating): April - Sept (PSCAA 2017 Annual Report)
+epa_daily_nh <- epa_daily %>%
+  filter(month_type ==  "non-heating") %>%
+  group_by(Year) %>%
+  dplyr::summarize(mean_nh = mean(Arithmetic.Mean))
+
+# only keep heating (nh) month data (non winter wood-heating): April - Sept (PSCAA 2017 Annual Report)
+epa_daily_h <- epa_daily %>%
+filter(month_type ==  "heating") %>%  
+  group_by(Year) %>%
+  dplyr::summarize(mean_h = mean(Arithmetic.Mean))
+
+epa_daily_join <- left_join(epa_daily_all_mo, epa_daily_nh) %>%
+  left_join(epa_daily_h) %>%
+  gather("method", "value", contains("mean")) %>%
+  drop_na(value) %>%
+  mutate(
+    method = ifelse(grepl("_nh", method), "non-heating (Apr-Sep)", ifelse(grepl("_h", method), "heating (Oct-Mar)", "all months")),
+    # years that will be used for trend
+    #in_trend = Year %in% trend_years
+    
+    ) %>%
+  as.data.frame()
+
+
+#select dataset for trend fitting
+epa_yearly_mean <- epa_daily_all_mo %>%
+  rename(mean = mean_all_months)
+  
+```
+
+The EC trend at BH is very similar when all of the data are used vs when only the non-heating months are used.  
+
+```{r}
+formula1 <- "y~splines::ns(x, df=3)"
+
+epa_daily_join %>%
+  ggplot(aes(x=Year, y=value, linetype=method, col=method)) + 
+  geom_point() + 
+  #geom_line() + 
+  geom_smooth(method=lm, formula = as.formula(formula1), se = F) +
+  labs(y = "EC Conc (ug/m3)",
+       title = "Annual Avg EC at Beacon Hill estimated from \nheating, non-heating and all months", 
+       subtitle = paste0("Source: EPA Daily files. ", formula1)
+       )
+```
+
+
+
+```{r}
+# # Trend looks strange? 
+# # 
+# # All data 
+# 
+# epa_daily %>%
+#   ggplot(aes(x=Date.Local, y=Arithmetic.Mean)) + 
+#   geom_point(alpha=0.4) + 
+#   geom_smooth() +
+#   labs(
+#     title = "Time series of Beacon Hill EC trend",
+#     subtitle = "Source: EPA Daily files"
+#        )
+
+```
+
+## Fit a trend line to Beacon Hill EC readings 
+
+Fit a trend using all of the months. 
+
+```{r}
+
+aqs_trend <- data.frame(Year =c(1995:2018)) %>%
+  left_join(epa_yearly_mean)
+
+#don't use bad years in prediction
+
+spline_fit <- "mean ~ splines::ns(Year, df = 3)"
+
+m1 <- aqs_trend %>%
+  lm(as.formula(spline_fit), data = .)
+  
+aqs_trend$yhat <- predict(m1, newdata = aqs_trend)
+
+#calculate the relative difference between EC for any given year, relative to 2018 (latest year), on an additive and multiplicative scale
+ref_2018 <- aqs_trend$yhat[aqs_trend$Year==2018]
+
+aqs_trend <- aqs_trend %>%
+  mutate(
+    difference = yhat - ref_2018,
+    ratio = yhat/ref_2018
+  )
+  
+```
+
+```{r}
+aqs_trend %>%  
+  ggplot(aes(x=Year, y = mean, col = "Observed")) + 
+  geom_point() + 
+  geom_line() +
+  geom_point(aes(x=Year, y = yhat, col = "Predicted")) +
+  geom_line(aes(x=Year, y = yhat, col = "Predicted")) + 
+  labs(col = "Estimate", 
+       y = "Annual Average EC (ug/m3)",
+       title = "Annual average EC at Beacon Hill - observed and predicted",
+       subtitle = paste0("model: ", spline_fit)
+         )  
+
+```
+
+2019 Model prediction adjustment factors based on EC trend at Beacon Hill, using 2018 as the reference year. 
+
+```{r}
+
+aqs_trend %>%
+  gather("method", "value", difference:ratio) %>%
+  ggplot(aes(x=Year, y = value, col=method)) + 
+  geom_point() + 
+  labs(
+    title = "2019 Model prediction adjustment factors based on EC (ug/m3) trend at Beacon Hill"
+    )
+
+```
+ 
+ 
+
+
+
+# Validation dataset from PSCAA average daily readings of BC
+
+Isha: "...BC is monitored real-time and the PSCAA has the complete data available on their website. The method name is reflected for Black Carbon in terms of Black Carbon and Black Carbon_633 to differentiate between the two different kinds of instruments they have had at the sites."
+
+Magee Aethalometer Model AE33 reports Black Carbon measured at 880 nm. See AE33_UsersManual_Rev154 (1).pdf
+
+
+### --> download 2019 data as well? 
+
+
+```{r}
+# sites in study
+
+vars_to_get <- paste0("Time|", sites_near_study)
+
+pscaa_bc0 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC_daily.csv"),
+                           #skip lines until see this text & make it column headers
+                           skip = "Observation Time", 
+                           #keeps reading after blank row
+                           fill=T, sep = ",") %>%
+  #only keep relevant sites
+  select_if(grepl(vars_to_get, names(.), ignore.case = T)) %>%
+  rename_all(~sub(" -.*", "", .))  %>%
+  gather("Site", "Value", -`Observation Time`) %>%
+  drop_na(Value) 
+
+pscaa_bc6330 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC633_daily.csv"),
+                           skip = "Observation Time", 
+                           fill=T, sep = ",") %>%
+  #only keep relevant sites
+  select_if(grepl(vars_to_get, names(.), ignore.case = T)) %>%
+  rename_all(~sub(" -.*", "", .))  %>%
+  gather("Site", "Value", -`Observation Time`) %>%
+  drop_na(Value) 
+
+
+```
+
+**Aethalometer correction factors**
+
+The PSCAA noted that we may see differences in BC levels over time because of:   
+
+* Isha Khanna at PSCAA: newer aethalometers. The earlier Black Carbon data reported was 32% lower than new data being reported as BC_633 (Magee Scientific TAPI M633). You will have to apply this correction factor to the data while compiling a long-term trend. Should apply the adjustment to all M633 sites for consistency. The instruments were upgraded at the following Seattle/Tacoma sites: 
+
+  - Seattle 10th & Weller: 2/3/2016    
+  - Tacoma Alexander/Tideflats: 3/22/2017   
+  - Seattle Duwamish: 1/1/2018   
+  - Kent: 1/1/2018     
+
+Since we belive that the aethalometers we used in the MM campaign were more similar to the more recent instruments used by the PSCAA, we increased readings from older instruments by 32% to make them comparable to more recent methods.
+
+```{r}
+adj_factor <- 1.32
+
+pscaa_bc <- pscaa_bc0 %>%
+  mutate(Value = Value*adj_factor)
+ 
+
+#combine datasets for different BC methods
+pscaa <- rbind(pscaa_bc, pscaa_bc6330) %>%
+  rename(Date = `Observation Time`) %>%
+  mutate(
+    Date = mdy_hms(Date),
+    Year=year(Date)
+  ) %>%
+  select(Year, everything()) %>%
+  group_by(Year, Site) %>%
+  mutate(
+    samples_per_year = n(),
+    no_zero_readings =  sum(Value==0)
+  ) %>%
+  ungroup() %>%
+  mutate(
+    location = ifelse(grepl("Seattle|Kent|Lake Forest Park|Tukwila Allentown", Site), "in study area", "near study area" )
+  )
+ 
+  
+```
+
+
+Distribution of daily average BC readings by site.
+
+```{r}
+pscaa %>%
+  ggplot(aes(x=Date, y=Value, col=Site)) +
+  geom_point(alpha=0.01) +
+  geom_smooth(se=F) +
+
+  labs(
+
+  ) +
+  facet_wrap(~Site, scales = "free")
+  
+```
+
+Focus on 10th & Weller since it has unusually low BC levels for 2015. 
+
+```{r}
+pscaa %>%
+  filter(grepl("Weller", Site)) %>%
+  ggplot(aes(x=Date, y=Value, col=Site)) +
+  geom_point(alpha=0.3) +
+  geom_smooth(se=F) +
+
+  labs(
+
+  ) +
+  facet_wrap(~Site, scales = "free")
+```
+
+
+**Comparison of seasonal patterns across sites.**   
+
+Sites outside the study area generally have similar BC concentrations compared to sites within the study area? 
+
+Note, BC at 880 nm is not affected by wood smoke much (vs 370 nm). Elevated BC levels are thus likely a result of higher truck and/or ship traffic.
+
+```{r}
+
+pscaa %>%
+  mutate(
+    month = month(Date),
+    month_type = ifelse(month %in% non_heating_mo, "non-heating", "heating" )
+  ) %>%
+  
+  ggplot(aes(x=Site, y=Value, fill=month_type, linetype=location)) + 
+  geom_boxplot() + 
+  labs(
+    title = "BC by site and season",
+    y = "BC (ug/m3)"
+  )  + 
+  coord_flip()
+   
+
+
+```
+
+
+**Zero readings**
+
+
+```{r}
+# # TEST
+
+## still see a lot of 0s in hourly files 
+
+# bc_hourly <- data.table::fread(file.path(folder_path, "PSCAA", "z. archive", "BC_hourly.csv"),
+#                            #skip lines until see this text & make it column headers
+#                            skip = "Observation Time", 
+#                            #keeps reading after blank row
+#                            fill=T, sep = ",") %>%
+#   #only keep relevant sites
+#   select_if(grepl(vars_to_get, names(.), ignore.case = T)) %>%
+#   rename_all(~sub(" -.*", "", .))  %>%
+#   gather("Site", "Value", -`Observation Time`) %>%
+#   drop_na(Value) 
+
+
+```
+
+
+
+There is an increasing tren dover time in the number of sites with zero readings. Is this a result of lower concentrations over time?  
+
+
+Some sites have a lot of "zero" BC concentration readings on certain years, such as:
+
+* 10th & W: 2015    
+* Tacoma tideflats: 2016   
+
+This correlates with some of the sudden changes in annual averages we see in later plots for some sites.
+
+
+```{r}
+pscaa %>%
+  ggplot(aes(x=Year, col=Site, y = no_zero_readings,
+             shape=Site
+             )) +
+  geom_point() +
+  geom_line() +
+  labs(
+    title = "Number of zero (0 ug/m3) daily readings",
+    y = "Number of zero concentration readings"
+  ) + 
+scale_shape_manual(values = 1:length(unique(pscaa$Site))) 
+
+
+```
+
+
+**Data Completeness Criteria**   
+
+```{r}
+min_day_criteria <- 244
+max_gap_criteria <- 45
+
+```
+
+This approach is similar to that detailed in the MESA DOOP for estimating annual averages from data collected on a daily level. Sites will only be included if they:   
+
+* have data for at least `r min_day_criteria`/365 days    
+* the max number of days between measurements is `r max_gap_criteria`     
+
+Readings per site-year. 
+
+```{r}
+
+pscaa %>%
+    #filter(Value!=0) %>%
+  ggplot(aes(x=Year, col=Site, shape=Site
+             )) +
+  geom_point(stat = "count") +
+  geom_line(stat = "count") +
+  geom_hline(yintercept = min_day_criteria, linetype = "dashed") +
+
+  labs(
+    title = "Number of daily avearge site-year readings"
+  ) +
+scale_shape_manual(values = 1:length(unique(pscaa$Site))) +
+  scale_y_continuous(breaks= c(seq(0, 400, 100), min_day_criteria, 365))
+
+```
+
+
+```{r}
+# calculate means only if data meet criteria 
+
+unique_yr_site <- pscaa %>%
+  select(Year, Site) %>%
+  unique()
+
+results <- data.frame()
+
+# calculate number of samples & gap length for each year and site
+for (i in 1:nrow(unique_yr_site)) {
+  
+  #i=10
+  df <- pscaa %>%
+    filter(Year == unique_yr_site$Year[i],
+           Site == unique_yr_site$Site[i],
+           )
+  
+  # calc number of days since last sample.
+  df$day_diff <- NA
+  
+  for (day_no in 1:nrow(df)) {
+    #day_no=2
+    
+    if(day_no > 1) {
+      df$day_diff[day_no] <- df$Date[day_no] - df$Date[day_no-1]
+      }
+    
+    }
+  
+  results <- rbind(results, df)
+}
+
+results_summary <- results %>%
+  group_by(Year, Site) %>%
+  dplyr::summarize(
+    samples_per_year = unique(samples_per_year),
+    no_zero_readings = unique(no_zero_readings),
+    max_gap = max(day_diff, na.rm = T)
+    ) %>%
+  # only keep site-years that meet criteria
+  filter(samples_per_year >= min_day_criteria,
+         max_gap <= max_gap_criteria
+         )
+
+pscaa_yearly <- left_join(results_summary, pscaa) %>%
+  group_by(Year, Site, location, no_zero_readings) %>%
+  dplyr::summarize(mean = mean(Value)) %>%
+  ungroup()
+  
+```
+
+```{r}
+pscaa_yearly  %>%
+  ggplot(aes(x=Year, y=mean, col=Site, shape=Site)) + 
+  geom_point() + 
+  geom_line(aes(linetype=location)) +
+  scale_shape_manual(values = 1:length(unique((pscaa_yearly$Site)))) + 
+  labs(y = "BC (ug/m3)",
+       title = "Annual averages calculated for sites that meet data criteria",
+       subtitle = "source: pscaa_yearly Daily files"
+       )  + 
+  #scale_color_brewer(palette = plot_palette) + 
+  scale_shape_manual(values = 1:length(unique(pscaa_yearly$Site))) 
+
+```
+ 
+Validation set with trend overlay showing that trend adjutment may capture changes in BC over time. This is most cleraly seen for Beacon Hill, which has more data than any other site.
+
+The trend in BC at Duwamish, 10th & Weller & Tacoma tideflats sites may be “different” than the other sites since these are near heavy car/truck/ship traffic, and may reflect the steep decline in vehicle emissions over time.
+
+```{r}
+aqs_trend %>%
+  gather("method", "value", difference:ratio) %>%
+  ggplot(aes(x=Year, y = value)) + 
+  geom_point(alpha=0.4) + 
+  geom_line(aes(group=method, linetype=method), alpha=0.4) +
+  
+  geom_point(data=pscaa_yearly, aes(y=mean, col = Site, shape=Site)) + 
+  geom_line(data=pscaa_yearly, aes(y=mean, col = Site)) +
+  scale_shape_manual(values =  seq_along(unique(pscaa_yearly$Site)) ) + 
+
+  labs(
+    title = "BC readings (ug/m3) to be used for validation \nand temporal trend adjustment factors"
+    ) #+ 
+  #scale_colour_brewer(palette = plot_palette) 
+
+ 
+```
+
+```{r}
+#max_0_threshold <- 20 #days 
+  
+```
+
+```{r}
+# **Only keeping annual average readings with less than `r max_0_threshold` zero concentration daily readings.**
+
+
+# aqs_trend %>%
+#   gather("method", "value", difference:ratio) %>%
+#   ggplot(aes(x=Year, y = value)) + 
+#   geom_point(alpha=0.4) + 
+#   geom_line(aes(group=method, linetype=method), alpha=0.4) +
+#   
+#   geom_point(data=pscaa_yearly[pscaa_yearly$no_zero_readings<=max_0_threshold,], aes(y=mean, col = Site, shape=Site)) + 
+#   geom_line(data=pscaa_yearly[pscaa_yearly$no_zero_readings<=max_0_threshold,], aes(y=mean, col = Site)) +
+#   scale_shape_manual(values =  seq_along(unique(pscaa_yearly$Site)) ) + 
+# 
+#   labs(
+#     title = "BC readings (ug/m3) and temporal trend adjustment factors",
+#     subtitle = paste0("Only showing annual averages with less than ", max_0_threshold, " zero readings")
+#     )
+
+```
+
+ 
+## Comparison of low BC and PM2.5
+
+* EPA annual files do not contain BC before 2016. Drop 2015 annual average which seems off?
+
+```{r}
+epa_annual <- readRDS(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "EPA", "annual", "aqs_annual.rda"))
+
+# epa_annual %>% 
+#   filter(grepl("Weller", Local.Site.Name),
+#                grepl("black carbon", Parameter.Name, ignore.case = T)
+#          ) %>%
+#   select(Year, Arithmetic.Mean) %>%
+#   kable(digits = 2) %>%
+#   kable_styling()
+
+
+```
+
+
+
+```{r}
+#### --> ?? file issue? no daily BC data is avaialble for BC at 10t & Weller from PSSCAA???
+
+# --> need to upload pm25_annual 
+
+# pscaa_yearly  %>%
+#   ggplot(aes(x=Year, y=mean, col=Site, shape=Site)) + 
+#   geom_point() + 
+#   geom_line(aes(linetype="BC")) +
+#   
+#   geom_point(data=pm25_annual) +
+#   geom_line(data=pm25_annual, aes(linetype="PM 2.5")) +
+#   
+#   facet_wrap(~Site) +
+#   
+#   scale_shape_manual(values = 1:length(unique((pscaa_yearly$Site)))) + 
+#   labs(y = "BC (ug/m3)",
+#        title = "BC and PM2.5 Annual averages. BC is only calculated for sites that meet data criteria",
+#        subtitle = "source: pscaa_yearly and pm25_annual - from Daily files"
+#        )  + 
+#   scale_shape_manual(values = 1:length(unique(pscaa_yearly$Site)))  
+
+
+
+```
+
+
+```{r, eval=F}
+### --> no 2015 data here either? 
+
+weller <-  data.table::fread(file.path(folder_path, "PSCAA", "10W_daily_bc_pm25.csv"),
+                           skip = "Observation Time",
+                           fill=T, sep = ",") %>%
+  #only keep relevant sites
+  #select_if(grepl(vars_to_get, names(.), ignore.case = T)) %>%
+  #rename_all(~sub("-.*", "", .))  %>%
+  gather("Pollutant", "Value", -`Observation Time`) %>%
+  drop_na(Value) %>%
+  rename(Date = `Observation Time`) %>%
+  mutate(
+    Date = mdy_hms(Date),
+    Date = as.Date(Date),
+    Year=year(Date),
+    # match any character 0+ times (if it exists before the, e.g., "r - ") before/after a character; or any char if it exists after " -u"
+    Pollutant = gsub(".*r - | - u.*", "", Pollutant)
+  ) %>%
+  select(Year, everything())
+
+
+weller %>%
+  group_by(Year,Pollutant) %>%
+  dplyr::summarize(
+    mean = mean(Value)
+  ) %>%
+  #filter(grepl("bc", Pollutant)) %>%
+
+  ggplot(aes(x=Year, y=mean, col=Pollutant)) +
+  geom_point() +
+  geom_smooth()
+  
+```
+ 
+Drop 2015 annual average at 10th & Weller, which seems different than other years because it:
+
+* contains a lot more 0 readings than other years 
+* is not included in the EPA's yearly avearge files - is this an indication of erroneous readings?
+
+```{r}
+pscaa_yearly <- pscaa_yearly %>%
+  filter(!(grepl("Weller", Site) & Year==2015))
+
+
+```
+
+Final dataset to be used for validation.
+
+```{r}
+aqs_trend %>%
+  gather("method", "value", difference:ratio) %>%
+  ggplot(aes(x=Year, y = value)) + 
+  geom_point(alpha=0.4) + 
+  geom_line(aes(group=method, linetype=method), alpha=0.4) +
+  
+  geom_point(data=pscaa_yearly, aes(y=mean, col = Site, shape=Site)) + 
+  geom_line(data=pscaa_yearly, aes(y=mean, col = Site)) +
+  scale_shape_manual(values =  seq_along(unique(pscaa_yearly$Site)) ) + 
+
+  labs(
+    title = "BC readings (ug/m3) to be used for validation \nand temporal trend adjustment factors"
+    ) #+ 
+  #scale_colour_brewer(palette = plot_palette) 
+
+
+```
+
+ 
+ 
+
+Save datasets.
+
+```{r}
+# datasets to be used in prediction models for trend adjustment & validation
+
+# # trend adjustment values
+# aqs_trend %>%
+#   write_rds(., file.path("Data", "Aim 3", "Hx BC at AQS Sites", "trend_adjustment.rda"))
+# 
+# # annual avgs for validation
+# pscaa %>%
+#   write_rds(., file.path("Data", "Aim 3", "Hx BC at AQS Sites", "aqs_avgs_for_validation.rda"))
+
+
+```
+

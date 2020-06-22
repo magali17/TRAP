@@ -52,13 +52,13 @@ We will use daily EC and BC data rather than annual estimates to ensure that eac
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
 
-# Clear workspace of all objects and unload all extra (non-base) packages
-rm(list = ls(all = TRUE))
-if (!is.null(sessionInfo()$otherPkgs)) {
-  res <- suppressWarnings(
-    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
-      detach, character.only=TRUE, unload=TRUE, force=TRUE))
-}
+# # Clear workspace of all objects and unload all extra (non-base) packages
+# rm(list = ls(all = TRUE))
+# if (!is.null(sessionInfo()$otherPkgs)) {
+#   res <- suppressWarnings(
+#     lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+#       detach, character.only=TRUE, unload=TRUE, force=TRUE))
+# }
 
 pacman::p_load(readxl, 
                tidyverse, knitr, 
@@ -441,8 +441,8 @@ epa_daily_join %>%
 Fit a trend using all of the months. 
 
 ```{r}
-
-aqs_trend <- data.frame(Year =c(1995:2018)) %>%
+last_prediction_yr <- 2019
+aqs_trend <- data.frame(Year =c(1995:last_prediction_yr)) %>%
   left_join(epa_yearly_mean)
 
 #don't use bad years in prediction
@@ -486,17 +486,18 @@ aqs_trend %>%
 
 aqs_trend %>%
   gather("method", "value", difference:ratio) %>%
-  ggplot(aes(x=Year, y = value, col=method)) + 
+  mutate(year_type = ifelse(Year ==2018, "reference", 
+                            ifelse(Year %in% seq(min(epa_yearly_mean$Year), max(epa_yearly_mean$Year)), "within range", "extrapolation"))) %>%
+  ggplot(aes(x=Year, y = value, col=method, shape = year_type)) + 
   geom_point() + 
   labs(
-    title = "2019 Model prediction adjustment factors based on EC (ug/m3) trend at Beacon Hill"
+    title = "2019 Model prediction adjustment factors based on EC (ug/m3) trend at Beacon Hill",
+    subtitle = paste0("EC data available between ", paste0(range(epa_yearly_mean$Year), collapse = "-")), 
+    shape = "Year Type"
     )
 
 ```
  
- 
-
-
 
 # Validation dataset from PSCAA average daily readings of BC
 
@@ -504,16 +505,12 @@ Isha: "...BC is monitored real-time and the PSCAA has the complete data availabl
 
 Magee Aethalometer Model AE33 reports Black Carbon measured at 880 nm. See AE33_UsersManual_Rev154 (1).pdf
 
-
-### --> download 2019 data as well? 
-
-
 ```{r}
 # sites in study
 
 vars_to_get <- paste0("Time|", sites_near_study)
 
-pscaa_bc0 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC_daily.csv"),
+pscaa_bc0 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC_daily_2003_2018.csv"),
                            #skip lines until see this text & make it column headers
                            skip = "Observation Time", 
                            #keeps reading after blank row
@@ -524,7 +521,7 @@ pscaa_bc0 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC_daily.csv"),
   gather("Site", "Value", -`Observation Time`) %>%
   drop_na(Value) 
 
-pscaa_bc6330 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC633_daily.csv"),
+pscaa_bc6330 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC633_daily_2003_2018.csv"),
                            skip = "Observation Time", 
                            fill=T, sep = ",") %>%
   #only keep relevant sites
@@ -533,6 +530,17 @@ pscaa_bc6330 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC633_daily.
   gather("Site", "Value", -`Observation Time`) %>%
   drop_na(Value) 
 
+pscaa_bc6330_2019 <-  data.table::fread(file.path(folder_path, "PSCAA", "BC633_daily_2019.csv"),
+                           skip = "Observation Time", 
+                           fill=T, sep = ",") %>%
+  #only keep relevant sites
+  select_if(grepl(vars_to_get, names(.), ignore.case = T)) %>%
+  rename_all(~sub(" -.*", "", .))  %>%
+  gather("Site", "Value", -`Observation Time`) %>%
+  drop_na(Value) 
+
+#combine all of BC633 methods
+pscaa_bc6330 <- rbind(pscaa_bc6330, pscaa_bc6330_2019)
 
 ```
 
@@ -967,7 +975,7 @@ Save datasets.
 #   write_rds(., file.path("Data", "Aim 3", "Hx BC at AQS Sites", "trend_adjustment.rda"))
 # 
 # # annual avgs for validation
-# pscaa %>%
+# pscaa_yearly %>%
 #   write_rds(., file.path("Data", "Aim 3", "Hx BC at AQS Sites", "aqs_avgs_for_validation.rda"))
 
 

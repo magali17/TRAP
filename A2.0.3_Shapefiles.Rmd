@@ -104,14 +104,103 @@ shp_df <- fortify(shp) %>%  # could also use: broom::tidy(shp,region = "id")
   # add attributes back in from the shapefile
   left_join(shp@data, by = c("id"="id")) 
 
+```
+
+
+Aviation zoning - Sea-Tac International Airport
+
+```{r}
+ 
+shp <- readOGR(file.path("..",  "GIS", "Shapefiles", "Other features","Airports", "Zoning", "Zoning.shp"))  #aviation
+
+# change the CRS. for some reason it's in meters?
+shp <- spTransform(shp, CRSobj = CRS("+proj=longlat +datum=WGS84 +no_defs +ellps=WGS84 +towgs84=0,0,0 "))
+
+#create unique ID for each row in the shapefile
+shp@data <- shp@data %>% 
+  mutate(id = row.names(.)) %>%
+  #only keep aviation zones
+  filter(str_detect(ZoningDesc, "Aviation"))
+
+# make shp into a df. note, this does not save all of the attributes.
+zoning_df <- fortify(shp) %>%  # could also use: broom::tidy(shp,region = "id")
+  # add attributes back in from the shapefile. only keep stuff w/ attributes
+  right_join(shp@data, by = c("id"="id"))  
+
+```
+
+King County Airports (3) - areas.
+
+```{r}
+shp <- readOGR(file.path("..",  "GIS", "Shapefiles", "Other features","Airports", "Airports_in_King_County", "Airports_in_King_County___airports_area.shp"))  #aviation
+
+#create unique ID for each row in the shapefile
+shp@data <- shp@data %>% mutate(id = row.names(.))
+
+# make shp into a df. note, this does not save all of the attributes.
+airports_df <- fortify(shp) %>%  # could also use: broom::tidy(shp,region = "id")
+  # add attributes back in from the shapefile. only keep stuff w/ attributes
+  right_join(shp@data, by = c("id"="id"))  
+
+```
+
+Airports in WA - point files
+
+### --> error won't save??
+### Error: `data` must be a data frame, or other object coercible by `fortify()`, not an S4 object with class SpatialPointsDataFrame
+
+```{r}
+shp <- rgdal::readOGR(file.path("..",  "GIS", "Shapefiles", "Other features", "Airports", "WSDOT Airports", "Airport points.shp"))  
+
+#create unique ID for each row in the shapefile
+shp@data <- shp@data %>% mutate(id = row.names(.)) 
+ 
+
+### --> error won't save??
+
+# make shp into a df 
+airports_points_df <- fortify(shp) %>%  # could also use: broom::tidy(shp,region = "id")
+  # add attributes back in from the shapefile 
+  left_join(shp@data, by = c("id"="id"))  
+
+# map0 +
+#   geom_polygon(data = airports_points_df,
+#                 aes(x = long, y = lat, group = group,
+#                     fill = NAME
+#                     ),
+#                )
+
+
 
 
 ```
 
+Railroad trakcs
+
+### --> Error: how to upload geodatabase?
+
+```{r}
+# shp <- readOGR(file.path("..",  "GIS", "Shapefiles", "Other features","Roads", "Freight and Goods Transportation System", "FGTSWA.gdb"))  
+# 
+# #create unique ID for each row in the shapefile
+# shp@data <- shp@data %>% mutate(id = row.names(.))
+# 
+# # make shp into a df. note, this does not save all of the attributes.
+# airports_df <- fortify(shp) %>%  # could also use: broom::tidy(shp,region = "id")
+#   # add attributes back in from the shapefile. only keep stuff w/ attributes
+#   right_join(shp@data, by = c("id"="id"))  
+
+
+# fgdb <- file.path("..",  "GIS", "Shapefiles", "Other features","Roads", "Freight and Goods Transportation System", "FGTSWA.gdb")
+# 
+#  
+# fc <- sf::st_read(fgdb, layer = "FGTSWA")
 
  
-
  
+
+```
+
  
 Save datasets.
 
@@ -122,6 +211,8 @@ Save datasets.
 # saveRDS(st_area_df, file = file.path("Data", "GIS", "st_area_df.rda"))
 # saveRDS(routes_df, file = file.path("Data", "GIS", "routes_df.rda"))
 # saveRDS(shp_df, file = file.path("Data", "GIS", "emissions_df.rda"))
+# saveRDS(zoning_df, file = file.path("Data", "GIS", "zoning_df.rda"))
+# saveRDS(airports_df, file = file.path("Data", "GIS", "airports_df.rda"))
 
 ```
 

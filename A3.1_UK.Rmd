@@ -3,12 +3,9 @@ title: 'Aim 3: UK PLS models and validation'
 author: "Magali Blanco"
 date: ' `r Sys.Date()` '
 output:
-  word_document:
+  html_document: 
+    number_sections: yes
     toc: yes
-    toc_depth: '3'
-  html_document:
-    toc: yes
-    toc_depth: '3'
 editor_options:
   chunk_output_type: console
 ---
@@ -37,8 +34,10 @@ pacman::p_load(knitr, kableExtra,
                pls, geoR, #gstat - alternative for UK
                akima, # interp() - interpolate predictions on map
                ggpubr, tidyverse,
+               # 3D mapping
+               rayshader,
                
-               parallel  # mclapply() for parallized processing;  detectCores()
+               #parallel  # mclapply() for parallized processing;  detectCores()
                )    
 #Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
@@ -78,35 +77,87 @@ source("A3.0.0_Var&Fns.R")
 
 This script builds off of the Universal Kriging work completed for Aim 2 (in A2.3_UK_v4.Rmd) by incorporating time-varying covariates and using a temporal trend adjustment factor to predict historical BC and UFP levels back in time. Our primary prediction models are: 
 
-### --> general notation? the use of $\epsilon$ vs $\hat{Y}$?
+### --> update notation
 
-$$ Ln(Y_{i}^{s,t}) = \hat{\theta}_0 + \sum_{f=1}^{3}\hat{\theta}^{f} Z_{i}^{f,s} + \hat{\theta}^{Pop} Z_{i}^{Pop,s,t} + \hat{\theta}^{NDVI} Z_{i}^{NDVI,s,t} + \hat{\theta}^{EC} Z_{i}^{EC,s,t} + \epsilon_{i} $$
+We believe that we can predict TRAP concentrations at a particular location and time from that location's geocovariates (which may vary over time), with some error due to some unknowns. Our assumed underlying model is: 
 
-Predictions from this model are temporally adjusted to estimate TRAP at a given location and time, such that:
-
-$$\hat{TRAP}_{i}^{s,t} = exp(Ln(Y_{i}^{s,t})) + \alpha^{Trend,t}$$
-
+$$ \tag{1} 
+Ln(Conc_{s,t}^{}) = \theta_0 + \sum_{f=1}^{3}\theta^{f} Z_{s}^{f} + \theta^{pop} Z_{s,t}^{pop} + \theta^{NDVI} Z_{s,t}^{NDVI} + \theta^{EC} Z_{s,t}^{EC} + \epsilon_{s} $$
 
 Where:
 
-$i=1,...,n$ observations
+* $Ln(Conc_{s,t}^{})$ denotes the log-tranformed annual-average BC (ng/m3) or UFP (pt/cm3) concentration for a particular location $s$ __within our study area__ and year $t$, __where $t=1995-2019$.__
 
-$Ln(Y_{i}^{s,t})$ denotes the predicted log-tranformed annual-average BC (ng/m3) or UFP (pt/cm3) for a particular location and time before applying a trend adjustment. 
+* $Z$ are dimension-reduced, linear combinations of geocovariate predictors for location $s$ that are fixed over time ($Z_s$), or for a specific time $t$ ($Z_{s,t}$). These are derived from PLS regression, such that: $Z_{s,m} = \sum_{j=1}^p \phi_{j,m}X_{s,j}$, where $p$ are our original geocovariate predictors and $m$ is the PLS component number. Specifically, 
 
-$\hat{TRAP}_{i}^{s,t}$ is the predicted TRAP concentration (BC or UFP) at a particular location ($s$) and time ($t$).
+  - $f$ denotes multiple geocovariates that are largely fixed ($f$) in time      
+  - $pop$ denotes population density geocovariates    
+  - $NDVI$ denotes Normalized Difference Vegetation Index (NDVI) geocovariates
+  - $EC$ denotes elemental carbon (EC) emissions geocovariates
 
+* $\theta$ are the model coefficients.
 
-
-**notation/wording?**  $\hat{\theta}$ are the model coefficients from fitting a 2019 UK model used to estimate the $\theta$ parameters.
-
-$\alpha^{trend,t}$ is the temporal trend adjustment based on historical observations of EC at Beacon Hill. It is fixed over space.
-
-$\epsilon_{i}$ is the residual term with mean zero and a geostatistical structure modeled as an exponential function with range $\phi$, partial sill $\sigma$ and nugget $\Theta_{i}$.
-
-$Z_{i}$ are dimension-reduced, linear combinations of geocovariate predictors that are space-varying but fixed ($f$) in time ($\sum_{f=1}^{3}Z_{i}^{f,s}$), space-time population density ($Z_{i}^{Pop,s,t}$), space-time NDVI ($Z_{i}^{NDVI,s,t}$) and space-time EC emission ($Z_{i}^{EC,s,t}$) geocovariates from PLS regression, such that: $Z_{i,m} = \sum_{j=1}^p \phi_{j,m}X_{i,j}$, where $p$ are our original predictors and $m$ are the different PLS components. PLS loadings are calibrated using observations from the 2019 mobile monitoring campaign and the most recent time-varying covariates (e.g., Census 2010).
+* $\epsilon_{s}$ is the residual term with mean zero and a geostatistical structure assumed to be an exponential function with range $\phi$, partial sill $\sigma$ and nugget $\Theta_{s}$.
 
 
-The model separates space and space-time geocovarites in order to:
+Given our data, we estimate the modeling parameters for a UK model with PLS:
+
+$$ \tag{2} 
+\hat{Ln(Conc_{s^*,t^*})} = \hat{\theta}_0 + \sum_{f=1}^{3}\hat{\theta}^{f} Z_{s^*}^{f} + \hat{\theta}^{pop} Z_{s^*,t^*}^{pop} + \hat{\theta}^{NDVI} Z_{s^*,t^*}^{NDVI} + \hat{\theta}^{EC} Z_{s^*,t^*}^{EC} $$
+
+where:
+
+* ($\hat{Ln(Conc_{s,t}^{})}$) is the log-tranformed annual-average BC (ng/m3) or UFP (pt/cm3) concentration 
+
+* [ __???__  __do the Zs need a hat?__] The PLS regression loadings ($\sum_{j=1}^p \phi_{j,m}$) are calibrated using TRAP concentrations and geocovariates from our mobile monitoring campaign stops ($s^*$, where $s^*=1,...,309$) for the 2019 year ($t*=2019$): $Z_{s^*,t^*,m} = \sum_{j=1}^p \hat{\phi}_{j,m}X_{s^*,t^*,j}$   
+
+* The model coefficients are estimated ($\hat{\theta}$) using TRAP concentrations and geocovariates from our 2019 mobile monitoring campaign.  
+
+
+Next, wee estimate TRAP concentrations from 1995-2019 at cohort locations within our study  area using a two-step approach:
+
+A. First, the fitted model is used to estimate TRAP concentrations for specific locations and times. Estimates for particular locations vary over time based on changing geocovariate values ($pop, NDVI, EC$). 
+
+$$ \tag{3} 
+\hat{Ln(Conc_{s,t})} = \hat{\theta}_0 + \sum_{f=1}^{3}\hat{\theta}^{f} Z_{s}^{f} + \hat{\theta}^{pop} Z_{s,t}^{pop} + \hat{\theta}^{NDVI} Z_{s,t}^{NDVI} + \hat{\theta}^{EC} Z_{s,t}^{EC} $$
+
+B. Next, we exponentiate and apply a temporal trend to these estimates to account for the fact that TRAP concentrations have been steadily decreasing since the early 1990s:
+ 
+$$\tag{4} 
+\hat{Conc}_{s,t} = exp(Ln(Conc_{s,t})) + \alpha_t^{trend} $$
+
+Where: 
+
+* $\alpha_t^{trend}$ is the temporal trend adjustment based on historical observations of EC at the Beacon Hill AQS site.
+
+To calculate $\alpha_t^{trend}$, we first fit the following model:
+
+$$\tag{5}
+\hat{EC_{t}} = \hat{\beta}_0 + \sum_{l=1}^{3}\hat{\beta}_{l}b_{l}{t}$$  
+
+Where:
+
+* $\hat{EC_{t}}$ is the predicted, smoothened annual average EC concentration for Beacon Hill for a particular year   
+
+* $\hat{\beta}$ are the estimated model parameters 
+* $t$ is the observation year, fit as a cubic spline using $b$ basis functions
+
+
+$\alpha_t^{trend}$ is calculated as the difference between the predicted EC concentration for any given year $t$ and the predicted EC concentration for 2018 (the reference year), such that:
+
+$$\tag{6a}
+\alpha_t^{trend} = \hat{EC_{t}} - \hat{EC}_{2018}   $$
+
+### --> or multiplicative trend:
+
+$$\tag{6b}
+\alpha_t^{trend} = \hat{EC_{t}} / \hat{EC}_{2018}   $$
+
+
+
+
+
+The models separate space and space-time geocovarites in order to:
 
 a) inter-/intra-polate a single linear combinations composed of related geocovariates (e.g., different buffers for the same covariate) rather than many individual covariate buffers each year, and    
 b) estimate model coeffiecients for time-varying covariate
@@ -139,12 +190,7 @@ cbind(
                "NOx Emissions (vs EC)",
                "Ratio temporal trend adjustment (vs additive)",
                "No temporal trend adjustment"
-               ) #,
-  # Description = c("EC emissions, additive temporal trend adjustment, ",
-  #                 "Use NOx emission covariates  (vs EC emissions)",
-  #                 "Multiplicative temporal trend adjust (vs additive)", 
-  #                 "No temporal trend adjustment" 
-  #                 )
+               )
   ) %>%
   kable(., caption = "Description of primary and sensitivity analyses") %>%
   kable_styling()
@@ -174,6 +220,13 @@ mm <- mm0 %>%
   mutate_at(vars(contains(c("ufp", "bc"))), ~log(.)) %>%
   left_join(cov_mm)  
 
+#AQS observations for validation? Or use year-round estimates from PSCAA?
+mm_aqs_2019 <- mm %>%
+  filter(str_detect(site_id, "MC"))
+
+#only keep non-AQS site stops
+mm <- mm %>%
+  filter(str_detect(site_id, "MS"))
 
 # group ACT locations by location
 monitoring_ids <- cohort$site_id[grepl("monitoring", cohort$site_location)] 
@@ -201,14 +254,15 @@ grid <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_pre
   # only keep points in study area-land (grid isn't large enough for st area)
   filter(site_id %in% grid_in_study)
 
+#save grid for testing
+#saveRDS(grid, file = file.path("Output", "Aim 3", "grid.rda"))
+
 # main datasets
 # mm 
 # cohort 
 # grid 
 
 ```
-
-### --> clean up & add 
 
 ```{r}
 # CV results from A2
@@ -220,22 +274,68 @@ label_analysis(var = "Analysis") %>%
  
 ```
 
+### --> need to add geocovariates for AQS sites not in MM campaign 
+
 ```{r}
 # trend adjustment
 ## convert ug/m3 (10^-6) to ng/m3 (10^-9)
 conversion_factor <- 1e3 
 trend_adjustment <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "trend_adjustment.rda")) %>%
-  mutate(difference = difference*conversion_factor)
+  #mutate(difference = difference*conversion_factor) %>%
+  select(Year, ratio_adjustment = ratio)
 
-# BC validation - Hx AQS readings 
-validation_df <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "aqs_avgs_for_validation.rda")) %>%
-  mutate(mean_ng_m3 = mean*conversion_factor) %>%
-  select(-mean)
+# Hx BC validation - Hx AQS readings 
+bc_validation <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "aqs_avgs_for_validation.rda")) %>%
+  mutate(mean_ng_m3 = mean*conversion_factor,
+         site_id = NA,
+         Pollutant = "bc"
+         ) %>%
+  select(-c(mean, no_zero_readings))  
+ 
+## add site_id #s for merging later since these sites have slightly different site names
+bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Weller")] <- "MC0120"
+bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Beacon")] <- "MC0003"
+bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Duwamish")] <- "MC0126"
+bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Kent")] <- "MC0406"
+bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Allentown")] <- "MC0002"
+
+### --> add site_ids for other sites  when get new datasaet? or merge them in 
+
 
 # UFP validation - BH 2001
-validation_bh_2001 <- readRDS(file.path("Data", "Aim 3", "Hx UFP at BH", "BH_2001_UFP.rda"))
+ufp_validation <- readRDS(file.path("Data", "Aim 3", "Hx UFP at BH", "BH_2001_UFP.rda")) %>%
+  mutate(site_id = "MC0003",
+         Pollutant = "ufp",
+         Year = 2001
+         )
 
 ```
+
+Add geocovariates to validation AQS sites so we can make predictions here later
+
+### --> need geocovariates for AQS sites not in MM campaign 
+
+```{r}
+#add geocovariates to validation AQS sites so we can make predictions here later 
+aqs <- bc_validation %>%
+  select(Site) %>%
+  unique() 
+
+aqs$site_id <- NA
+aqs$site_id[str_detect(string = aqs$Site, pattern = "Weller")] <- "MC0120"
+aqs$site_id[str_detect(string = aqs$Site, pattern = "Beacon")] <- "MC0003"
+aqs$site_id[str_detect(string = aqs$Site, pattern = "Duwamish")] <- "MC0126"
+aqs$site_id[str_detect(string = aqs$Site, pattern = "Kent")] <- "MC0406"
+aqs$site_id[str_detect(string = aqs$Site, pattern = "Allentown")] <- "MC0002"
+
+aqs <- aqs %>%
+  #add geocovariates
+  left_join(mm_aqs_2019) %>%
+  #won't be using these annual avg estimates from the MM campaign
+  select(-c(bc, ufp))
+
+```
+
 
 
 ```{r}
@@ -283,6 +383,18 @@ pop_2010_2018_prop <-  (acs$Estimate[nrow(acs)] - acs$Estimate[1])/acs$Estimate[
 
 ```
 
+```{r}
+# shapefiles for maps
+
+#background map slightly larger than the study area  
+study_area <- readRDS(file.path("Data", "GIS", "study_area_df.rda"))
+monitoring_area <- readRDS(file.path("Data", "GIS", "monitoring_area_df.rda")) 
+map0 <- map_base(dt=study_area, latitude_name = "lat", longitude_name = "long")
+aviation_area <- readRDS(file.path("Data", "GIS", "zoning_df.rda")) 
+airports_area <- readRDS(file.path("Data", "GIS", "airports_df.rda")) 
+
+```
+
 ###--> check that n_components still the same for BC & UFP
 
 ```{r}
@@ -322,8 +434,15 @@ pop_model_yr <- 2010
 ndvi_model_yr <- 2006
 emissions_model_yr <- 2015
 
+# first prediction year
+first_p_yr <- 1995
+last_p_yr <- 2019
+
 # pollutant names
 pollutants <- c("bc", "ufp")
+
+#mapping years
+mapping_yrs <- c(seq(first_p_yr, last_p_yr-1, 15), 2019)
 
 ```
 
@@ -332,8 +451,8 @@ pollutants <- c("bc", "ufp")
 Each of these TVCs has several buffers for each year.
 
 * Decenial US Census surveys (1990, 2000 and 2010) 
-* NDVI for 1990-1993,2006 or 2010  
-* Emissions every 5 years from 1990-2015 from MOVES emission factors for King County and WADOT AADT estimates 
+* NDVI for 1990-1993,2006 and 2010/2019
+* Emissions every 5 years from 1990-2015 and for 2019 from MOVES emission factors for King County (1995-2019) and WADOT AADT (1995-2015) estimates 
 
 
 # Create dimension-reduced versions of time-varying covariates
@@ -342,14 +461,12 @@ Transforming space-varying covariates (for M=3 components), population density (
 
 $Z_m = \sum_{j=1}^p \phi_{j,m}X_j$, where $p$ are our original predictors. 
  
-### --> ??? build PLS model using 2019 Ys & most recent covariate predictors values (e.g., 2010 census) and use these to build linear transformation of covariates from different years? 
-
 Fit PLS models using 2019 TRAP (BC, UFP) and:
 
 * space-varying covariates
 * population: Census 2010   
 * NDVI __2006__ [for now]
-* emissions 2015 [not yet]   
+* emissions 2019 [not yet]   
 
 ```{r}
 pop_model_vars <- "pop10_"
@@ -365,6 +482,7 @@ ndvi2006_models <- fit_pls(dt = mm, x = ndvi_model_vars, .ncomp = 1)
 Variability explained by each model.
 
 ```{r}
+variance_explained <- data.frame()
 
 for(i in seq_along(pollutants)) {
   
@@ -372,14 +490,14 @@ for(i in seq_along(pollutants)) {
                                                     
   pop_var <- explvar(pop2010_models[[pollutants[i]]]) %>% as.vector() %>% 
     # NAs for 2nd & 3rd components 
-    append(c(NA, NA))
+    append(rep(NA, n_components-1))
   ndvi_var <- explvar(ndvi2006_models[[pollutants[i]]]) %>% as.vector() %>% 
-    append(c(NA, NA))
+    append(rep(NA, n_components-1))
    
   # ec_var <- explvar(ec2019_models[[pollutants[i]]]) %>% as.vector() %>% 
-  #   append(c(NA, NA))
+  #   append(rep(NA, n_components-1))
   
-  variance_explained <- rbind(space_var,
+  var0 <- rbind(space_var,
         pop_var,
         ndvi_var
         ) %>%
@@ -392,17 +510,21 @@ for(i in seq_along(pollutants)) {
                             pop_var = "Population Density",
                             ndvi_var = "NDVI"
                             #ec_var = "EC"
-                            )
+                            ),
+      Pollutant = toupper(pollutants[i])
       ) %>%
+    select(Pollutant, everything())
+  
+  variance_explained <- rbind(variance_explained, var0)
+   
+}
+
+variance_explained %>%
     kable(
       caption = paste0("Percent of variability explained by each PLS model for annual average ", toupper(pollutants[i] )),
       digits = 1
     ) %>%
-    kable_styling()
-
-  print(variance_explained)
-  
-}
+    kable_styling() 
 
 ```
 
@@ -506,7 +628,7 @@ loading_plots_tvcs <- function(dt, tvc_name) {
 ```
 
 ```{r}
-loading_plots_tvcs(dt = pop2010_models, tvc_name = paste0("population density (", pop_model_yr, ")"))  
+loading_plots_tvcs(dt = pop2010_models, tvc_name = paste0("population density (", pop_model_yr, ")"))
   
 loading_plots_tvcs(dt = ndvi2006_models, tvc_name = paste0("NDVI (", ndvi_model_yr, ")"))  
 
@@ -519,10 +641,11 @@ loading_plots_tvcs(dt = ndvi2006_models, tvc_name = paste0("NDVI (", ndvi_model_
 ### --> ? don't need mm dataset since don't want to predict here? should predict at all AQS sites instead?
 
 
-#list of 3 different datasets where we want PLS scores
-dt_list <- list(mm = mm, cohort = cohort, grid = grid#,
-                #aqs = aqs
-                )
+#list of different datasets where we want PLS scores
+dt_list <- list(mm = mm, 
+                cohort = cohort, 
+                grid = grid,
+                aqs = aqs)
 
 ```
 
@@ -531,10 +654,6 @@ dt_list <- list(mm = mm, cohort = cohort, grid = grid#,
 space-varying covariates
 
 ```{r}
-# bc_scores_space <- get_scores(dt = mm, 
-#                               rename_vars = FALSE, 
-#                               pls_model = space_models$bc, 
-#                               rename_components = paste0("space", c(1:n_components)))
 
 # place to save PLS scores 
 bc_scores_space <- list()
@@ -633,7 +752,7 @@ for (i in seq_along(dt_list)) {
 
 NDVI
 
-#### --> update once get new variables 
+### --> update once get new variables 
 
 ```{r}
 ####################################################################################################
@@ -753,6 +872,15 @@ bc_scores_grid0 <- cbind(grid[site_loc_vars],
                    )%>% 
   mutate(Pollutant = "bc")
 
+bc_scores_aqs0 <- cbind(aqs[site_loc_vars],
+                   bc_scores_space$aqs,
+                   bc_scores_pop$aqs,
+
+                   bc_scores_ndvi$aqs #,
+                   # bc_scores_ec$aqs
+                   )%>%
+  mutate(Pollutant = "bc")
+
  
 # UFP
 ufp_scores_mm0 <- cbind(mm[site_loc_vars],
@@ -782,13 +910,28 @@ ufp_scores_grid0 <- cbind(grid[site_loc_vars],
                    ) %>% 
   mutate(Pollutant = "ufp")
 
+ufp_scores_aqs0 <- cbind(aqs[site_loc_vars],
+                   ufp_scores_space$aqs,
+                   ufp_scores_pop$aqs,
+
+                   ufp_scores_ndvi$aqs #,
+                   # ufp_scores_ec$aqs
+                   ) %>%
+  mutate(Pollutant = "ufp")
+
+
+
+
 # combine before doing interpollation
 
 mm_scores0 <- rbind(bc_scores_mm0, ufp_scores_mm0)
 cohort_scores0 <- rbind(bc_scores_cohort0, ufp_scores_cohort0)
 grid_scores0 <- rbind(bc_scores_grid0, ufp_scores_grid0)
+aqs_scores0 <- rbind(bc_scores_aqs0, ufp_scores_aqs0)
 
 ```
+
+
 
 
 Plots of TVCs over time.
@@ -848,44 +991,147 @@ cohort_scores0 %>%
 
 ```
 
-### --> add scatterplot of distribution of the scores at different places. Are our assumptions correct? Are some places increasing/decreasing differently than the general trend? 
-
-### --> compare first & last time period for each location. X: pLS score for current vs y: PLS for past. Is the trend line parallel to the 1-1 line? 
-
-
-
-### --> ? could do for specific sites to show contrast over time 
-
-* The 1990 population density PLS scores only explain about 60% of the variability in the 2010 population density scores.    
 * the best fit line is not parallel to the 1-1 line. In general, higher density areas had a greater increase in population density over time than lower density areas.
 * Some sites deviate from the general trend more than others.    
 
 
 TVCs will characterize temporal site changes better than our trend adjustment at sites where the change in population density between 1990 and 2010 differs from what would be our trend adjustment (i.e., a parallel line above the 1-1 line)
 
-###--> ? see strange pattern 
+###--> ? see strange pattern. Amanda says it is due to transformation issues in Tacoma area.
 
 ```{r}
- 
-cohort_scores0 %>%
+ cohort_scores0 %>%
   gather(key = "Census", value = "Value", contains("pop"), -contains("90")) %>%
   mutate(
     Census = str_extract(Census, "\\d{4}"),
     Pollutant = toupper(Pollutant)
   ) %>%
   ggplot(aes(x=pop1990, y=Value, col=Census)) + 
-  geom_point(alpha=0.05) + 
-  geom_smooth(se=F) + 
+  geom_point(alpha=0.02) + 
+  #geom_smooth(se=F) + 
+  geom_smooth(method = "lm", aes(linetype="lm") ) +  #
   geom_abline(aes(slope = 1, intercept = 0, linetype= "1-1")) +
   facet_grid(Census~Pollutant) + 
   labs(
-    title = "Population density PLS scores over time",
+    title = "Cohort population density PLS scores over time",
     x = "1990 Census",
     y = "PLS Score",
     linetype = ""
   )
 
+
 ```
+
+Locations with high residuals.
+
+```{r}
+#list to store model results
+pop_m1 <- list()
+
+for(i in seq_along(pollutants)) {
+  
+  #save model results
+  pop_m1[i] <- cohort_scores0 %>%
+  #filter(Pollutant == pollutants[1]) %>%
+  lm(pop2010~pop1990, data = ., subset = Pollutant == pollutants[i]) %>%
+  list()
+  
+  # rename saved models
+  names(pop_m1)[i] <- pollutants[i]
+
+}
+
+```
+
+```{r}
+high_quant <- 0.99
+
+```
+
+```{r}
+#use model to predict & estimate residuals
+cohort_scores0 %>%
+  mutate(
+    #lm_prediction = ifelse(Pollutant == "bc", predict(pop_m1$bc), predict(pop_m1$ufp)),
+    lm_residual = ifelse(Pollutant == "bc", residuals(pop_m1$bc), residuals(pop_m1$ufp))
+  ) %>%
+  
+  #View()
+  
+  gather(key = "Census", value = "Value", contains("pop"), -contains("90")) %>%
+  mutate(
+    Census = str_extract(Census, "\\d{4}"),
+    Pollutant = toupper(Pollutant),
+    #indicator for high residual
+    high_residual = lm_residual < quantile(lm_residual, 1-high_quant) | 
+           lm_residual > quantile(lm_residual, high_quant)
+  ) %>%
+  
+  
+  ggplot(aes(x=pop1990, y=Value, col=lm_residual)) + 
+  geom_point(aes(shape=high_residual),
+    #alpha=0.5, 
+    ) + 
+  #geom_smooth(se=F) + 
+  geom_smooth(method = "lm", aes(linetype="lm") ) +  #
+  geom_abline(aes(slope = 1, intercept = 0, linetype= "1-1")) +
+  facet_grid(Census~Pollutant) + 
+  labs(
+    title = "Cohort population density PLS scores over time",
+    subtitle = paste0("high residual = < ",1-high_quant, " or > ", high_quant, " quantile"),
+    x = "1990 Census",
+    y = "PLS Score",
+    linetype = ""
+  ) + 
+  scale_color_gradient2()
+  
+
+```
+
+Map of places with large residuals (<`r 1-high_quant` or > `r high_quant` quantile).
+
+In the BC model, places with higher than expected population densities in 2010 concentrations based on 1990 concentrations were locations:
+
+* downtown   
+* in Everrett east of Paine Field airport 
+* in/near Mill Creek 
+
+```{r}
+
+# --> only do this for BC since maps look very similar to as UFP
+cohort_scores_high_residual <- cohort_scores0 %>%
+  filter(Pollutant == "bc") %>%
+  mutate(
+    #lm_prediction = ifelse(Pollutant == "bc", predict(pop_m1$bc), predict(pop_m1$ufp)),
+    lm_residual = ifelse(Pollutant == "bc", residuals(pop_m1$bc), residuals(pop_m1$ufp)),
+    lm_residual = as.double(lm_residual)
+    
+  ) %>%
+  filter(lm_residual < quantile(lm_residual, 1-high_quant) | 
+           lm_residual > quantile(lm_residual, high_quant)
+         ) 
+
+map0 +
+  geom_polygon(data = study_area,
+                aes(x = long, y = lat, group = group, fill = "Study Area"),
+                alpha = 0.1) +
+  geom_polygon(data = monitoring_area,
+                aes(x = long, y = lat, group = group, fill = "Monitoring Area"),
+                alpha = 0.1) +
+  geom_point(data = cohort_scores_high_residual,
+                 aes(x = longitude, y = latitude, col = lm_residual),
+                 #alpha=0.3
+                 ) + 
+  scale_color_gradient2(name = "lm residual",
+                        ) +
+  labs(
+    title = "Cohort sites with large residuals (using the BC model)",
+    fill = "",
+    col = ""
+    ) 
+
+```
+
 
 
 ## Inter- and intra-polation of PLS scores over time
@@ -972,6 +1218,11 @@ bc_grid_scores <- interpolate_pop(dt = bc_scores_grid0)%>%
          value = NA) %>%
   select(Pollutant, value, everything())
 
+bc_aqs_scores <- interpolate_pop(dt = bc_scores_aqs0)%>%
+  mutate(Pollutant = "bc",
+         value = NA) %>%
+  select(Pollutant, value, everything())
+
 # UFP
 ufp_mm_scores <- interpolate_pop(dt = ufp_scores_mm0) %>%
   # add observed pollutant concentration
@@ -989,10 +1240,18 @@ ufp_grid_scores <- interpolate_pop(dt = ufp_scores_grid0) %>%
          value = NA) %>%
   select(Pollutant, value, everything())
 
+ufp_aqs_scores <- interpolate_pop(dt = ufp_scores_aqs0) %>%
+  mutate(Pollutant = "ufp",
+         value = NA) %>%
+  select(Pollutant, value, everything())
+
 ## combine pollutants
 mm_scores <- rbind(bc_mm_scores, ufp_mm_scores)
 cohort_scores <- rbind(bc_cohort_scores, ufp_cohort_scores)
 grid_scores <- rbind(bc_grid_scores, ufp_grid_scores)
+aqs_scores <- rbind(bc_aqs_scores, ufp_aqs_scores) %>%
+  #drop aqs sites w/o geocovariats. no aqs sites have "value" estimates
+  drop_na(-value) 
 
 ```
 
@@ -1015,8 +1274,6 @@ grid_scores <- rbind(bc_grid_scores, ufp_grid_scores)
 
 
 ```
-
-### --> ? why are pop density values more dispersed over time? there may be some issues w/ the 2010 census data that will be updated
 
 Plots show a steady change in TVC values over time. 
 
@@ -1078,6 +1335,163 @@ ggplot(aes(x=Year, y=value, )) +
   
 ```
 
+```{r}
+site_sample_n <- 150
+
+cohort_scores %>%
+  gather("Year", "Value", paste0("pop", c(census_data_yrs, last_acs_yr))
+         
+         #contains("pop")
+         
+         ) %>%
+  mutate(
+    Year = as.numeric(str_extract(Year, "\\d{4}"))
+  ) %>%
+  
+  #View()
+  #only plot a subsample of sites
+  filter(site_id %in% sample(site_id, size = site_sample_n, replace = F)) %>%
+  #View()
+  
+  ggplot(aes(x=Year, y= Value, group=site_id)) + 
+  geom_point(alpha=0.2) + 
+  geom_line(alpha=0.2) + 
+  
+  facet_wrap(~Pollutant) + 
+  scale_x_continuous(breaks = c(census_data_yrs, last_acs_yr)) +
+  labs(
+    title = paste0("Population density PLS scores over time for a sample of cohort sites ", "(n = ",site_sample_n, ")"),
+    y = "PLS Score"
+  )  
+
+```
+
+
+Map TVC Surfaces
+
+```{r}
+# map visualization ideas
+# https://gist.github.com/jebyrnes/f3f626aa24f565d78003f05aab4d0372 
+
+```
+
+```{r, fig.height=8}
+# FN returns list of mapped PLS scores for particular TVC variables & years
+
+# dt <- grid_scores
+# yrs <- mapping_yrs
+# vars <- paste0("pop",  yrs)
+
+map_scores <- function(
+  #data
+  dt,
+  # years to plot
+  yrs,
+  #PLS variables to plot
+  vars, 
+  legend_title = ""
+  ) {
+  
+  vars <- paste0(vars,  yrs)
+  
+  #if no label is given, automatically add this label
+  if(legend_title == "") {
+    legend_title <- "PLS\nScore"
+  }
+  
+  
+  plot_range <- data.frame(
+    min = min(dt[vars]),
+    max = max(dt[vars])
+  )
+  
+  plots_list <- list()
+  
+  for(i in seq_along(yrs)) {
+    #i=1
+  
+    df <- dt %>%  
+    #select that yrs variable
+    rename(new_var = vars[i])  
+    
+    p <- map0 + 
+      geom_point(data = df, aes(x=longitude, y=latitude, col = new_var),
+                 alpha=0.5
+                 ) +
+      scale_color_gradient(low = "yellow", high = "red",
+                          #make all legends have the same range
+                          limits = c(plot_range$min, plot_range$max)) +
+    labs(
+       title = paste0(yrs[i]),  
+      col = legend_title #paste0("Population\nDensity") #"\n ", "\n ", "\n "
+      ) 
+   
+    plots_list[i] <- list(p)
+  
+  }
+  
+  return(plots_list)
+
+}
+
+```
+
+PLS score maps.
+
+Note: PLS scores are composed of both small and large population buffers, thus these are indicative of population nearby. 
+
+Not plotting these maps for smaller buffers alone since these are only available for specific years (e.g., 1990, 2000, 2010 population Census)
+
+Higher PLS scores are indicative of higher population densities (population density is positively associated with TRAP).
+
+```{r}
+# Pop
+map_scores(dt = grid_scores, yrs = mapping_yrs, vars = "pop") %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "Population density" ) 
+
+```
+
+Higher NDVI PLS scores are indicative of lower raw NDVI values (NDVI is negatively associated with TRAP). We see the highest NDVI PLS scores (lowest raw NDVI values) near seattle, and lower PLS scores east of Seattle and I-5.
+
+```{r}
+
+# NDVI
+map_scores(dt = grid_scores, yrs = 2006, vars = c("ndvi")) %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right"
+          ) %>%
+  annotate_figure(top = "NDVI" ) 
+
+
+# --> add EC
+
+```
+
+PLS score differences maps.
+
+* most areas have seen a similar change in population density over time.   
+* Some areas have seen greater changes in population density than others. The Seattle area, for example, has seen larger increases in population density than other surrounding places. These are the places that will benefit from using time-varying covariates rather than just using a trend adjustment.   
+
+
+```{r}
+grid_scores %>%
+  mutate(pop_diff1995_2019 = pop2019 - pop1995) %>%
+  map_scores(dt = ., yrs = c("1995_2019"), vars = "pop_diff", 
+             legend_title = paste0("PLS Score\nDifference")
+             ) %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "Change in population density over time") 
+
+
+## --> repeat for NDIV, EC
+
+```
 
 # UK Models
 
@@ -1085,7 +1499,9 @@ ggplot(aes(x=Year, y=value, )) +
 
 Since we will be using BC emission for UFP model. 
 
-UFP and BC appear to be moderately positively correlated. BC may serve as a decent surrogate for UFP at many locations, except those furthest away from the best fit line?
+```{r}
+high_quant <- 0.97
+```
 
 ```{r}
 model1 <- "ufp~bc"
@@ -1099,25 +1515,121 @@ fit.info <- paste0(lm_fit,
                    "\nR2 = ", lm_r2,  
                    "\nRMSE = ", rmse,
                    "\nNo. Pairs = ", nrow(mm))
-  
+
+
+```
+
+```{r, results="asis"}
+# show equation in Rmd render
+
+## --> error installing/using package
+#install.packages("texPreview", dependencies = T)
+#library(texPreview) #%>% texPreview::preview()
+
+equatiomatic::extract_eq(ufp_bc) #%>% texPreview::preview()
+
+#equatiomatic::extract_eq(ufp_bc, use_coefs=T)
+
+ 
+```
+
+Basic plot
+
+* UFP and BC appear to be moderately positively correlated. This suggests taht BC may serve as a decent surrogate for UFP at many locations, though less well at locations furthest away from the best fit line.
+
+
+```{r}
 mm %>%
   ggplot(aes(x=bc, y=ufp)) + 
-  geom_point(alpha=0.7) + 
-  geom_smooth(se=F) + 
+  geom_point(alpha=0.5) + 
+  geom_smooth(method = "lm", se=F, aes(linetype = "lm")) + 
   labs(
     x= "ln BC (ln ng/m3)",
     y = "ln UFP (ln pt/cm3)",
     title = "Comparison of annual average BC and UFP in mobile monitoring campaign",
-    caption = paste0("R2 and RMSE are based on OLS for ", model1, ". RMSE is calculated on native scale")
+    caption = paste0("R2 and RMSE are based on OLS for ", model1, "model. RMSE is calculated on the native scale."),
+    linetype = ""
   ) +
-  annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1)
+  #annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1) + 
+  annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1) + 
+  
+  scale_color_gradient2()
+```
+
+Plot highlighting residuals.
+
+```{r}
+mm %>%
+  mutate(
+    lm_residual = residuals(ufp_bc),
+    high_residual = lm_residual <= quantile(lm_residual, 1-high_quant) |
+           lm_residual >= quantile(lm_residual, high_quant)
+  ) %>%
+  
+  #View()
+  
+  ggplot(aes(x=bc, y=ufp)) + 
+  geom_point(alpha=0.7, aes(col=lm_residual, shape=high_residual)) + 
+  #geom_smooth(se=F) + 
+  geom_smooth(method = "lm", se=F, aes(linetype = "lm")) + 
+  labs(
+    x= "ln BC (ln ng/m3)",
+    y = "ln UFP (ln pt/cm3)",
+    title = "Comparison of annual average BC and UFP in mobile monitoring campaign",
+    subtitle = paste0("high residual: value <=", 1-high_quant, " or > ", high_quant, " quantile"),
+    caption = paste0("R2 and RMSE are based on OLS for ", model1, "model. RMSE is calculated on the native scale."),
+    shape = "high residual",
+    col = "lm residual",
+    linetype = ""
+  ) +
+  annotate("text", -Inf, Inf, label = fit.info, hjust = 0, vjust = 1) + 
+  scale_color_gradient2()
   
 
 ```
 
-### --> ? where are the sites furthest form the 1-1 line? 
+Map of where high residuals are found. 
+
+* When we map the high residuals, we see that many of these are near airports.   
+* When we map the low residuals (higher BC levels than expected), most are near rialroad tracks
 
 ```{r}
+ufp_bc_lm_high_residuals <- mm %>%
+  mutate(
+    lm_residual = residuals(ufp_bc)
+  ) %>%
+  filter(lm_residual <= quantile(lm_residual, 1-high_quant) |
+           lm_residual >= quantile(lm_residual, high_quant)
+           )
+
+```
+
+```{r, fig.height=8}
+map0 +
+  geom_polygon(data = study_area,
+                aes(x = long, y = lat, group = group, fill = "Study Area"),
+                alpha = 0.1) +
+  geom_polygon(data = monitoring_area,
+                aes(x = long, y = lat, group = group, fill = "Monitoring Area"),
+                alpha = 0.1) +
+  #airport area
+  geom_polygon(data = airports_area, #aviation_area, #airports_area
+                aes(x = long, y = lat, group = group, 
+                    fill = "Airport"
+                    #fill = "Aviation zones"
+                    ),
+                #alpha = 0.3
+               ) +
+      geom_point(data = ufp_bc_lm_high_residuals,
+                 aes(x = longitude, y = latitude, col = lm_residual),
+                 #alpha=0.3
+                 ) + 
+  scale_color_gradient2(name = "lm residual") +
+  labs(
+    title = "Cohort sites with large UFP~BC model residuals",
+    fill = "",
+    col = ""
+    ) 
 
 ```
 
@@ -1127,22 +1639,25 @@ mm %>%
 # bc_mm_scores  #mm_scores  
 # bc_cohort_scores 
 # bc_grid_scores 
+# bc_aqs_scores
 # 
 # # UFP
 # ufp_mm_scores 
 # ufp_cohort_scores 
 # ufp_grid_scores 
-
+# ufp_aqs_scores
 ```
 
 ## CV RMSE and R2 for the 2019 surface
+
+### --> ? parallel code? 
 
 ```{r}
 
 uk_predictors. <- c(paste0("space", c(1:n_components)), "pop", "ndvi"#, "ec"
                                                   )
 
-# returns CV predictions from fitting a UK model. This fn is similar to pls_uk_cv_predictions() in A2.0.1_Var&Fns.R, but it does not fit PLS since we have already built & determined those parameters. It can be used to predict within the same dataset (10 FCV - generates training/test sets) or to predict at new locations (uses MM stops IDs to find the training dataset).
+# FN returns CV predictions from fitting a UK model. This fn is similar to pls_uk_cv_predictions() in A2.0.1_Var&Fns.R, but it does not fit PLS since we have already determined these parameters in Aim 2. It can be used to predict within the same dataset (10 FCV - generates training/test sets) or to predict at new locations (uses MM stops IDs to find the training dataset).
 
 # #performing CV 
 # #dt = mm_scores %>% filter(grepl("BC", Pollutant))
@@ -1199,8 +1714,8 @@ uk_predictions <- function(dt,
     }
     
     if(perform_cv == FALSE) { 
-      #ID MM stops as the training data
-      train_grp <- grepl("MS|MC", dt$site_id)
+      #ID non-aqs site MM stops as the training data
+      train_grp <- grepl("MS", dt$site_id) #"MS|MC"
     }
     
     dt_train <- dt %>% filter(train_grp)  
@@ -1292,6 +1807,7 @@ uk_predictions <- function(dt,
   if(perform_cv == FALSE) {
     result <- list(data=dt,
                    # include additional information on residual model
+                   residual_model = resid_model_train,
                    residual_model_table = residual_model_table,
                    variogram = variog_train
                    )
@@ -1355,34 +1871,40 @@ cv_results %>%
   kable_styling()
 ```
 
-## fit UK model & predict at cohort & grid locations  
-
-
-### --> fn errror: "NAs introduced by coercion"
+## UK model fitting & prediction at cohort & grid locations  
 
 ```{r}
-# dt_for_prediction = cohort_scores
+# FN returns UK predictions for new locations (e.g., cohort, grid) and times after fitting a UK model to MM observations in 2019 
+
+# dt_for_prediction = aqs_scores
 # dt_mm2019 = mm_scores_2019
-# prediction_yrs = c(seq(1990,2019, by=5), 2019 ) 
+# #only need to predict when AQS sites start measuring BC (2003+)
+# prediction_yrs = sort(unique(bc_validation$Year))
 # pollutants. = pollutants
 # uk_predictors.. = uk_predictors.
 
 predict_over_time <- function(
-  dt_for_prediction = cohort_scores,
+  dt_for_prediction,  
   dt_mm2019 = mm_scores_2019,
-  prediction_yrs = c(seq(1990,2019, by=5), 2019 ), #seq(1990,2019)
+  prediction_yrs = c(seq(first_p_yr, last_acs_yr, by=5), 2019),  
   pollutants. = pollutants,
   uk_predictors.. = uk_predictors.
   ) {
   
+  dt <- dt_for_prediction %>%
+    select(Pollutant, site_id, latitude, longitude) %>%
+    #for merging later since AQS sites are strings
+    mutate(site_id = as.character(site_id))
+    
+    
   for(y in seq_along(prediction_yrs)) {
-  #y=1    #i=30 #2019
+  #y=1   
   
-  dt. <- dt_for_prediction %>%
+  dt0 <- dt_for_prediction %>%
     #select & rename TVCs for prediction
     select(Pollutant:lambert_y,
            contains("space"),
-           #select TVCs for modeling
+           #rename TVCs
            pop = paste0("pop", prediction_yrs[y]),
            
            ### --> update these when get new covarites
@@ -1401,193 +1923,466 @@ predict_over_time <- function(
     #i=1
     
     # list w/ UK results
-    dt_list <- dt. %>% 
+    dt_list <- dt0 %>% 
       filter(grepl(pollutants.[i], Pollutant)) %>%
       uk_predictions(dt = ., y_name = "value", perform_cv = FALSE, 
                      uk_predictors = uk_predictors..)
      
+    # pull the df out of the list
     predictions_df0 <- dt_list$data %>% 
       select(Pollutant, site_id, uk_prediction) %>%
-      #drop MM stops, which don't have predictions
-      drop_na(uk_prediction) %>%
-      mutate(site_id = as.numeric(site_id),
+      #drop MM stops, which don't have predictions & to match dt_for_prediction rows
+      filter(!str_detect(site_id, "MS")) %>%
+      mutate(#site_id = as.numeric(site_id),
              #convert prediction back to the native scale
              uk_prediction = exp(uk_prediction)
              )
     
     predictions_df <- rbind(predictions_df, predictions_df0)
     
+    # include the residual table & variogram from the last models fit to each pollutant. They should all be very similar since all models are fit to the same MM data alone, but they predict at different locations/times
+    if(pollutants.[i] == "bc" & y==length(prediction_yrs)) {
+      
+      bc_residual_model <- dt_list$residual_model
+      bc_residual_model_table <- dt_list$residual_model_table %>%
+        mutate(Pollutant = "BC")
+      
+      bc_variogram  <- dt_list$variogram 
+      
+    }
+    
+    if(pollutants.[i] == "ufp" & y==length(prediction_yrs)) {
+      
+      ufp_residual_model <- dt_list$residual_model
+      ufp_residual_model_table <- dt_list$residual_model_table %>%
+        mutate(Pollutant = "UFP")
+      
+      ufp_variogram <- dt_list$variogram
+      
+    }
+     
   }
   
-  names(predictions_df)[names(predictions_df) == "uk_prediction"] <- paste0("prediction_", prediction_yrs[y])
+  names(predictions_df)[names(predictions_df) == "uk_prediction"] <- paste0("uk_", prediction_yrs[y])
   
-  #save predictions to main dataset
-  dt. <- dt. %>%
-    mutate(site_id = as.numeric(site_id)) %>%
-    left_join(predictions_df)
+  #save predictions 
+  dt <- dt %>% left_join(predictions_df)
   
-   
   }
 
-  return(dt.)
+  # combine residual model parameters for pollutants
+  residual_model_table <- rbind(bc_residual_model_table,
+                                   ufp_residual_model_table) %>%
+    select(Pollutant, everything())
+  
+  result <- list(
+    #predictions for all location-years
+    dt = dt,
+    
+    #UK residual model parameters
+    bc_residual_model = bc_residual_model,
+    ufp_residual_model = ufp_residual_model,
+    residual_model_table = residual_model_table,
+    #variograms for each pollutant
+    bc_variogram = bc_variogram,
+    ufp_variogram = ufp_variogram
+    )
+  
+  #return(dt)
+  return(result)
 
 }
 
-
-test <-predict_over_time()
-
-# check this against cohort_scores (below)
-
 ```
 
-### --> delete this chunk after get fn to work
+#### --> UPDATE aqs sites
+
 ```{r, results="hide"}
-# mm_cohort_scores <- rbind(mm_scores, cohort_scores)
-# mm_grid_scores <- rbind(mm_scores, grid_scores)
+# use UK to make perdictions
 
- 
-#cohort_scores_copy <- cohort_scores 
+cohort_predictions <- predict_over_time(dt_for_prediction = cohort_scores,
+                                        dt_mm2019 = mm_scores_2019,
+                                        prediction_yrs = mapping_yrs 
+                                        )
 
-prediction_yrs <- c(seq(1990,2019, by=5), 2019 ) #seq(1990,2019)
-
-for(y in seq_along(prediction_yrs)) {
-#i=1    #i=30 #2019
-
-mm_cohort <- cohort_scores %>%
-  #select & rename TVCs for prediction
-  select(Pollutant:lambert_y,
-         contains("space"),
-         #select TVCs for modeling
-         pop = paste0("pop", prediction_yrs[y]),
-         
-         ### --> update these when get new covarites
-         ndvi = paste0("ndvi", "2006"),
-         
-         #ec = ec2019
-         
-         ) %>%
-  #attach modeling data 
-  rbind(mm_scores_2019)
-  
-
-predictions_df <- data.frame()
-
-for(i in seq_along(pollutants)) {
-  #i=1
-  
-  # list w/ UK results
-  cohort_predictions <- mm_cohort %>% 
-    filter(grepl(pollutants[i], Pollutant)) %>%
-    uk_predictions(dt = ., y_name = "value", perform_cv = FALSE, 
-                   uk_predictors = uk_predictors.)
-   
-  predictions_df0 <- cohort_predictions$data %>% 
-    select(Pollutant, site_id, uk_prediction) %>%
-    #drop MM stops, which don't have predictions
-    drop_na(uk_prediction) %>%
-    mutate(site_id = as.numeric(site_id),
-           #convert prediction back to the native scale
-           uk_prediction = exp(uk_prediction)
-           )
-  
-  predictions_df <- rbind(predictions_df, predictions_df0)
-  
-}
-
-names(predictions_df)[names(predictions_df) == "uk_prediction"] <- paste0("prediction_", prediction_yrs[y])
-
-#save predictions to main dataset
-cohort_scores <- cohort_scores %>%
-  left_join(predictions_df)
-
- 
-}
+grid_predictions <- predict_over_time(dt_for_prediction = grid_scores,
+                                        dt_mm2019 = mm_scores_2019,
+                                      prediction_yrs = mapping_yrs 
+                                        )
+#for validation
+aqs_predictions <- predict_over_time(dt_for_prediction = aqs_scores, 
+                    dt_mm2019 = mm_scores_2019,
+                    #only need to predict when AQS sites start measuring UFP, BC (2001, 2003+)
+                    prediction_yrs = sort(unique(c(ufp_validation$Year, bc_validation$Year)))
+                    )
 
 ```
 
-### --> repeate for grid
+Variogram plots
 
 ```{r}
+# BC
+plot(cohort_predictions$bc_variogram,
+     main = paste0("Binned empirical and modeled variogram for BC model"),
+     xlab = "Distance (m)")
 
-
-
-
+lines(cohort_predictions$bc_variogram, lty=1)
+lines(cohort_predictions$bc_residual_model, lty=2, col=2)
+legend("bottomright",
+       legend = c("Empirical", paste0("Residual Model")),
+       lty=c(1:2), col = c(1:2))
 
 ```
 
-Residual model parameters & plots
+### --> ? improve fit? 
 
 ```{r}
-#cohort_predictions$residual_model_table 
+# UFP
+plot(cohort_predictions$ufp_variogram,
+     main = paste0("Binned empirical and modeled variogram for UFP model"),
+     xlab = "Distance (m)")
+
+lines(cohort_predictions$ufp_variogram, lty=1)
+lines(cohort_predictions$ufp_residual_model, lty=2, col=2)
+legend("bottomright",
+       legend = c("Empirical", paste0("Residual Model")),
+       lty=c(1:2), col = c(1:2))
 
 ```
+
+Residual model parameters 
+
+```{r}
+cohort_predictions$residual_model_table  %>%
+  kable(digits = 3, 
+        col.names = c("Pollutant", "Partial Sill", "Range (m)", "Nugget"),
+        caption = "UK residual model parameters for each pollutant"
+        ) %>%
+  kable_styling()
+
+```
+
 
 # Temporal trend adjustment
 
-```{r}
+Conducting a multiplicative (rather than an additive) trend adjustment since EC, BC and UFP scales and/or units are different. 
 
-```
-
-
-# Out of sample validation   
-
-e.g., Molter 2010 Table 2: Year, N AQS sites, RMSE, R2
+### --> update other Rmd so get 2019 trend as well
 
 ```{r}
+#trend_adjustment
+#trend_yrs <- unique(trend_adjustment$Year)
 
-```
-
-
-# Predictions at cohort locations over time
-
--distribution plot
-
-### --> ? why are they almost identical??
-
-```{r}
-cohort_scores %>%
-  gather("Year", "value", contains("prediction")) %>%
+#cohort
+cohort_uk_trend_predictions <- cohort_predictions$dt %>%
+  #rename_at(vars(contains("uk_")), ~str_replace(., "uk_", "uk_trend_")) %>%
+  gather(Year, uk_p, contains("uk")) %>%
+  mutate(Year = as.numeric(str_extract(Year, "\\d{4}"))) %>%
+  #merge w/ trend adjustment
+  left_join(trend_adjustment) %>%
   mutate(
-    Year = substr(Year, nchar(Year)-3, nchar(Year))
+    #adjust UK predictions using trend
+    uk_trend_p = uk_p*ratio_adjustment
+  )
+
+
+#grid
+grid_uk_trend_predictions <- grid_predictions$dt %>%
+  gather(Year, uk_p, contains("uk")) %>%
+  mutate(Year = as.numeric(str_extract(Year, "\\d{4}"))) %>%
+  #merge w/ trend adjustment
+  left_join(trend_adjustment) %>%
+  mutate(
+    #adjust UK predictions using trend
+    uk_trend_p = uk_p*ratio_adjustment
+  )
+
+#aqs sites
+aqs_uk_trend_predictions <- aqs_predictions$dt %>%
+  gather(Year, uk_p, contains("uk")) %>%
+  mutate(Year = as.numeric(str_extract(Year, "\\d{4}"))) %>%
+  #merge w/ trend adjustment
+  left_join(trend_adjustment) %>%
+  mutate(
+    #adjust UK predictions using trend
+    uk_trend_p = uk_p*ratio_adjustment
+  )
+```
+
+####--> relabel pollutants: capitalize, add units
+
+Plots comparing predictions before and after the trend adjustment.
+
+-density plot
+
+TRAP predictions are very similar across years unless a trend adjustment is applied. 
+
+The trend adjustment makes TRAP predictions more variable back in time.
+
+```{r}
+cohort_uk_trend_predictions %>%
+  gather("trend", "prediction", contains("uk")) %>%
+  mutate(
+    Trend = ifelse(str_detect(trend, "trend"), "trend-adjusted", "non trend-adjusted")
   ) %>%
   #View()
-  ggplot(aes(x=value, fill=Year)) + 
+  
+  ggplot(aes(x=prediction, fill=Year, group=Year)) + 
   geom_density(alpha=0.3) + 
-  facet_wrap(~Pollutant, scales="free") +
+  facet_wrap(Trend~Pollutant, scales="free",
+             #labeller = "label_both"
+             ) +
   labs(
-    title = "Pollutant predictions over time at cohort locations"
+    title = "UFP and BC predictions before and after applying a trend adjustment"
   )
+```
+
+scatterplot.
+
+for any given year, the sites most impacted by the multiplicataive trend adjustment are those with higher concentrations (these are further away from the 1-1 line).
+
+```{r}
+cohort_uk_trend_predictions %>%
+  # relabel pollutants
   
-  
+  ggplot(aes(x=uk_p, y=uk_trend_p, col=Year)) + 
+  geom_point(alpha=0.1) + 
+  geom_abline(aes(slope = 1, intercept = 0, linetype = "1-1")) +
+  facet_wrap(~Pollutant, scales="free") + 
+  labs(
+    title = "UFP and BC predictions before and after applying a trend adjustment",
+    x = "Non-Adjusted",
+    y = "Adjusted",
+    linetype = ""
+    
+  )
 
 ```
 
 -table
 
 ```{r}
-cohort_scores %>%
-  gather("Year", "value", contains("prediction")) %>%
+cohort_uk_trend_predictions %>%
+  drop_na(uk_trend_p) %>%
+  gather("trend", "prediction", contains("uk")) %>%
   mutate(
-    Year = substr(Year, nchar(Year)-3, nchar(Year))
+    trend = ifelse(str_detect(trend, "trend"), "adjusted", "non-adjusted")
   ) %>%
-  group_by(Pollutant, Year) %>%
-  distribution.table(var.string = "value") %>%
-  kable(caption = "Pollutant predictions over time at cohort locations") %>%
+  
+  mutate(Year = as.factor(Year)) %>%
+  group_by(Pollutant, Year, trend) %>%
+  
+  #--> relabel pollutants
+  
+  
+  distribution.table(var.string = "prediction") %>%
+  kable(caption = "Trend-adjusted pollutant predictions over time at cohort locations") %>%
   kable_styling()
 
 
 ```
 
-### --> make scatterplot of pollutant predictions over time at cohort locations
+
+# Validation - out of sample  
+
+### --> ? don't include BH since we used EC trend? Fit is the best for BH
+
+```{r}
+#combine observation & prediction datasets for AQS sites
+bc_valid_p <- bc_validation %>%
+  #only keep predictions for site-years w/ AQS estimates
+  left_join(aqs_uk_trend_predictions) %>%
+  #drop sites w/o geocovariates...or UK predictions
+  drop_na()
+
+ufp_valid_p <- ufp_validation %>%
+  left_join(aqs_uk_trend_predictions)
+
+```
+
+### --> calc RMSE, R2.   e.g., Molter 2010 Table 2: Year, N AQS sites, RMSE, R2
+
+Table
 
 ```{r}
 
+
+
 ```
+
+
+
+Plots 
+```{r}
+# overall
+bc_valid_p %>%
+  colo.plot(data.wide = ., x.variable = "mean_ng_m3", x.label = "Observed",
+          y.variable = "uk_trend_p", y.label = "Predicted",
+          col.by = "Site", 
+          alpha_value = 1, 
+          mytitle = paste0("Comparison of ", toupper(bc_valid_p$Pollutant)[1], " Concentration (ng/m3)")
+          )
+
+```
+
+```{r}
+# by site
+validation_site_names <- unique(bc_valid_p$Site)
+plot_list <- list()
+
+for(i in seq_along(validation_site_names)) {
+  #i=5
+  p <- bc_valid_p %>%
+  filter(Site == validation_site_names[i]) %>%
+    colo.plot(data.wide = ., x.variable = "mean_ng_m3", x.label = "Observed",
+          y.variable = "uk_trend_p", y.label = "Predicted",
+          col.by = "Year", 
+          alpha_value = 1, 
+          mysubtitle = validation_site_names[i]
+          )
+  
+  plot_list[i] <- list(p)
+  names(plot_list)[i] <- validation_site_names[i]
+
+}
+
+ggarrange(plotlist = plot_list) %>%
+  annotate_figure(top = "Comparison of observed and predicted BC concentrations (ng/m3)" ) 
+
+```
+
+
 
 
 # Map predictions to a grid over time
 
+Actual predictions 
+
 ```{r}
+
+pollutant_units <- c("BC (ng/m3)", "UFP (pt/cm3)")
+#place to save maps
+bc_plots <- list()
+ufp_plots <- list()
+
+for (i in seq_along(pollutants)) {
+  #i=1
+  #select a specific year
+  df1 <- grid_uk_trend_predictions %>%
+      filter(Pollutant == pollutants[i])
+  
+  # range of all yrs for any given pollutant
+  plot_range <- data.frame(
+    min = min(df1$uk_trend_p, na.rm = T),
+    max = max(df1$uk_trend_p, na.rm = T)
+  )
+  
+  for(yr in seq_along(mapping_yrs)) {
+    #yr=1
+    # select a single pollutant
+    df2 <- df1 %>% 
+    filter(Year == mapping_yrs[yr]) %>% 
+      select(Pollutant, latitude, longitude, uk_trend_p)
+    
+    p_map <- map0 +
+        geom_point(data = df2,
+                   aes(x = longitude, y = latitude, 
+                       col = uk_trend_p),
+                   alpha=1) + 
+    scale_color_gradient(name=paste0(pollutant_units[i]), 
+                         low = "yellow", high = "red", 
+                         #plot all maps on same scale
+                         limits = c(plot_range$min, plot_range$max)
+                         ) +
+    labs(
+      title =mapping_yrs[yr]
+      ) 
+
+    # save BC/UFP plots 
+    if(pollutants[i] == "bc") {
+      bc_plots[yr] <- list(p_map)
+      names(bc_plots)[yr] <- mapping_yrs[yr]
+    }
+    
+    if(pollutants[i] == "ufp") {
+      ufp_plots[yr] <- list(p_map)
+      names(ufp_plots)[yr] <- mapping_yrs[yr]
+    }
+
+  }
+  
+}
+ 
+```
+
+```{r}
+#bc 
+bc_plots %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "Predicted BC Exposure Surfaces" ) 
+
+#ufp 
+ufp_plots %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "Predicted UFP Exposure Surfaces" ) 
+
 
 ```
 
+Prediction differences
+
+* TRAP concentration differences vary over space. This indicates that TRAP concentrations are predicted to have dropped more drastically at some locations (e.g., downtown Seattle and highways) than other locations over time.
+  - the general trend in decreasing concentrations over time is a result of using the trend adjustment
+  - the spatial differences in concentration differences are a result of using TVCs in our models
+
+```{r}
+diff_plots <- list()
+
+for (i in seq_along(pollutants)) {
+  #i=1
+  #select a specific year
+  df1 <- grid_uk_trend_predictions %>%
+      filter(Pollutant == pollutants[i],
+             Year %in% c(first_p_yr, last_prediction_yr)) %>%
+    select(Pollutant, site_id, latitude, longitude, Year, uk_trend_p) %>%
+    #calculate prediction differences
+    spread(Year, uk_trend_p) %>%
+    mutate(diff_p = `2019`-`1995`)
+    
+    p_map <- map0 +
+        geom_point(data = df1,
+                   aes(x = longitude, y = latitude, 
+                       col = diff_p),
+                   alpha=1) + 
+    scale_color_gradient(name=paste0(pollutant_units[i]), 
+                         #low = "yellow", mid = "white", high = "red",  
+                         ) +
+    labs(
+      title =toupper(pollutants[i])
+      ) 
+
+    diff_plots[i] <- list(p_map)
+    names(diff_plots)[i] <- pollutants[i]
+
+  }
+  
+ 
+diff_plots %>%
+  ggarrange(plotlist = .,
+          nrow = 1) %>%
+  annotate_figure(top = paste0("Differences in predicted BC and UFP exposure surfaces (", last_prediction_yr, "-", first_p_yr, ")") )
+
+```
+
+
+
+\newpage
+# Code
+
+```{r,ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=60), include=T}
+```
+ 

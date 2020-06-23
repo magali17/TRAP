@@ -2200,19 +2200,140 @@ ufp_valid_p <- ufp_validation %>%
 
 ```
 
-### --> calc RMSE, R2.   e.g., Molter 2010 Table 2: Year, N AQS sites, RMSE, R2
-
-Table
+Site-years available for validation
 
 ```{r}
+bc_valid_p %>%
+  ggplot(aes(x=Year, y=Site, fill=Site)) + 
+  stat_bin2d() + 
+  labs(
+    title = "Site-years used to validate BC model"
+  )
 
+```
+
+### --> calc RMSE, R2.   e.g., Molter 2010 Table 2: Year, N AQS sites, RMSE, R2
+
+-overall 
+
+```{r}
+#calculate RMSE and R2 (MSE-based) around the 1-1 line
+bc_valid_overall <- bc_valid_p %>%
+  dplyr::summarize(
+    N = n(), #all site-years
+    Years = paste(unique(Year), collapse = ", ")      ,
+    Sites = paste(unique(Site), collapse = ", ")      ,
+    RMSE = round(rmse(obs = mean_ng_m3, pred = uk_trend_p)),
+    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
+  ) 
+
+bc_valid_overall %>%
+  kable(#digits = 2, 
+        caption = "Out-of-sample validation for all AQS sites and years with BC observations. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
 
 
 ```
 
+-by site
 
+* The BC model performed better (lower RMSE) at some sites than others
 
-Plots 
+```{r}
+bc_valid_by_site <- bc_valid_p %>%
+  group_by(Site) %>%
+  dplyr::summarize(
+    N = n(),  
+    Years = paste(unique(Year), collapse = ", ")      ,
+    RMSE = round(rmse(obs = mean_ng_m3, pred = uk_trend_p)),
+    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
+  ) 
+
+bc_valid_by_site %>%
+  kable(digits = 2, 
+        caption = "Out-of-sample validation results for the BC model by AQS site. N is the number of years avaialble for that site. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
+
+```
+
+```{r}
+scale_val <- 600
+
+bc_valid_by_site %>%
+  mutate(R2 = R2*scale_val,
+         #sorten site names
+         Site = str_remove(Site, "Seattle ")
+         ) %>%
+  gather(key = Measure, value = value, RMSE, R2) %>%
+  ggplot(aes(x=Site, y=value, shape=Measure, col=N )) + 
+  geom_point() +
+  geom_hline(aes(yintercept = bc_valid_overall$RMSE, linetype="RMSE")) +
+  geom_hline(aes(yintercept = bc_valid_overall$R2*scale_val, linetype="R2")) +
+  
+  scale_y_continuous(sec.axis = sec_axis(~./scale_val, name = "R2")) + 
+  labs(y = "RMSE (ng/m3)",
+       title = "Out-of-sample validation results for the BC model by AQS site",
+       linetype = "Overall",
+       shape="Site",
+       col = "No. Years"
+       )
+  
+## fix overalpping labels
+#scale_x_discrete(guide = guide_axis(n.dodge=2))+
+
+```
+
+-by year
+
+* the BC model generally performs better (lower RMSE) during more recent years 
+
+```{r}
+bc_valid_by_yr <- bc_valid_p %>%
+  group_by(Year) %>%
+  dplyr::summarize(
+    N = n(),  
+    Sites = paste(unique(Site), collapse = ", ")      ,
+    RMSE = round(rmse(obs = mean_ng_m3, pred = uk_trend_p)),
+    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
+  ) 
+
+bc_valid_by_yr %>%
+  kable(digits = 2, 
+        caption = "Out-of-sample validation by year. N is the number of sites avaialble for that year. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
+```
+
+```{r}
+scale_val <- 1e3
+
+bc_valid_by_yr %>%
+  mutate(R2 = R2*scale_val) %>%
+  gather(key = Measure, value = value, RMSE, R2) %>%
+  ggplot(aes(x=Year, y=value, shape=Measure, col=N)) + 
+  geom_point() + 
+  geom_smooth(se=F) +
+  geom_hline(aes(yintercept = bc_valid_overall$RMSE, linetype="RMSE")) +
+  geom_hline(aes(yintercept = bc_valid_overall$R2*scale_val, linetype="R2")) +
+  scale_y_continuous(sec.axis = sec_axis(~./scale_val, name = "R2")) + 
+  labs(y = "RMSE (ng/m3)",
+       title = "Out-of-sample validation results for the BC model by year",
+       linetype = "Overall",
+       shape="Site",
+       col = "No. Sites"
+       )
+  
+
+```
+
+## --> ? 
+
+Scatter plots 
+
+-overall
+
 ```{r}
 # overall
 bc_valid_p %>%
@@ -2220,35 +2341,65 @@ bc_valid_p %>%
           y.variable = "uk_trend_p", y.label = "Predicted",
           col.by = "Site", 
           alpha_value = 1, 
-          mytitle = paste0("Comparison of ", toupper(bc_valid_p$Pollutant)[1], " Concentration (ng/m3)")
+          mytitle = paste0("Comparison of ", toupper(bc_valid_p$Pollutant)[1], " Concentrations (ng/m3)")
           )
 
 ```
 
 ```{r}
-# by site
-validation_site_names <- unique(bc_valid_p$Site)
-plot_list <- list()
+# # by site
+# validation_site_names <- unique(bc_valid_p$Site)
+# plot_list <- list()
+# 
+# for(i in seq_along(validation_site_names)) {
+#   #i=5
+#   p <- bc_valid_p %>%
+#   filter(Site == validation_site_names[i]) %>%
+#     colo.plot(data.wide = ., x.variable = "mean_ng_m3", x.label = "Observed",
+#           y.variable = "uk_trend_p", y.label = "Predicted",
+#           col.by = "Year", 
+#           alpha_value = 1, 
+#           mysubtitle = validation_site_names[i]
+#           )
+#   
+#   plot_list[i] <- list(p)
+#   names(plot_list)[i] <- validation_site_names[i]
+# 
+# }
+# 
+# ggarrange(plotlist = plot_list) %>%
+#   annotate_figure(top = "Comparison of observed and predicted BC concentrations (ng/m3)" ) 
 
-for(i in seq_along(validation_site_names)) {
-  #i=5
-  p <- bc_valid_p %>%
-  filter(Site == validation_site_names[i]) %>%
-    colo.plot(data.wide = ., x.variable = "mean_ng_m3", x.label = "Observed",
-          y.variable = "uk_trend_p", y.label = "Predicted",
-          col.by = "Year", 
-          alpha_value = 1, 
-          mysubtitle = validation_site_names[i]
-          )
+```
+
+-by site
+
+The BC model produces underpredicts observed BC concentrations
+
+```{r}
+#calculate plot range
+plot_range <- bc_valid_p %>%
+  dplyr::summarize(
+    min_val = min(c(mean_ng_m3, uk_trend_p)),
+    max_val = max(c(mean_ng_m3, uk_trend_p))
+    )
   
-  plot_list[i] <- list(p)
-  names(plot_list)[i] <- validation_site_names[i]
-
-}
-
-ggarrange(plotlist = plot_list) %>%
-  annotate_figure(top = "Comparison of observed and predicted BC concentrations (ng/m3)" ) 
-
+bc_valid_p %>%
+  ggplot(aes(x = mean_ng_m3, y = uk_trend_p, 
+             col=Year,
+             shape=Site,
+             )) + 
+  geom_point() + 
+  geom_smooth(se=F, span=1) +
+  geom_abline(aes(slope = 1, intercept = 0, linetype="1-1")) + 
+  #make square plot
+  lims(x=c(plot_range$min_val, plot_range$max_val),
+       y=c(plot_range$min_val, plot_range$max_val)) +
+  labs(x= "Observed", 
+       y= "Predicted",
+       title = "Scatterplot of observed vs predicted BC concentration (ng/m3)"
+       )
+  
 ```
 
 

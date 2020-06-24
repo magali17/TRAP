@@ -1,0 +1,85 @@
+---
+title: "Models"
+output:
+  word_document: default
+  html_document: default
+---
+
+# Aim 3
+
+We hypothesize that we can predict TRAP concentrations at a particular location and time given a location's geocovariates (which may vary over time) and a temporal trend that accounts for decreasing TRAP concentrations over time, with some prediction error due to some unknowns. Our assumed underlying model is: 
+
+$$Conc_{s,t} = exp{(\theta_0 + \sum_{f=1}^{3}\theta^{f} Z_{s}^{f} + \theta^{pop} Z_{s,t}^{pop} + \theta^{NDVI} Z_{s,t}^{NDVI} + \theta^{EC} Z_{s,t}^{EC})} \alpha_{t}^{trend} + \epsilon_{s}$$
+
+Where:
+
+* $Conc_{s,t}$ denotes the annual-average BC (ng/m3) or UFP (pt/cm3) concentration for a particular location $s$ within our study area and year $t$, where $t=1995-2019$.
+
+* $Z$ are dimension-reduced, linear combinations of geocovariate predictors for location $s$ that are fixed over time ($Z_s$), or for a specific time $t$ ($Z_{s,t}$). These are derived from PLS regression used to predict $Ln(Conc_{s,t})$ from geocovariate predictors, such that: $Z_s^{m} = \sum_{j=1}^p \phi_{j,m}X_{s,j}$, where $p$ are our original geocovariate predictors and $m$ is the PLS component number. Specifically, 
+
+  - $f$ denotes multiple geocovariates that are largely fixed ($f$) in time
+  - $pop$ denotes population density geocovariates
+  - $NDVI$ denotes Normalized Difference Vegetation Index (NDVI) geocovariates
+  - $EC$ denotes elemental carbon (EC) emissions geocovariates
+
+* $\theta$ are the model coefficients.
+
+* $\alpha_{t}^{trend}$ is the overall temporal trend in TRAP  
+
+* $\epsilon_{s}$ is the residual term with mean zero and a geostatistical structure assumed to be an exponential function with range $\phi$, partial sill $\sigma$ and nugget $\gamma_{s}$.
+
+
+Given our data from the 2019 mobile monitoring campaign, we hypothesize our undelying model to be the following:
+
+$$Ln(Conc_{s,t=2019}) = \theta_0 + \sum_{f=1}^{3}\theta^{f} Z_{s}^{f} + \theta^{pop} Z_{s,t=2019}^{pop} + \theta^{NDVI} Z_{s,t=2019}^{NDVI} + \theta^{EC} Z_{s,t=2019}^{EC}$$
+
+### -->? why no s*?
+
+We estimate the modeling parameters for a UK model with PLS in order to predict the outcome:
+
+$$\hat{Ln(Conc_{s,t=2019})} = \hat{\theta}_0 + \sum_{f=1}^{3}\hat{\theta}^{f} Z_{s}^{f} + \hat{\theta}^{pop} Z_{s,t=2019}^{pop} + \hat{\theta}^{NDVI} Z_{s,t=2019}^{NDVI} + \hat{\theta}^{EC} Z_{s,t=2019}^{EC}$$
+
+where:
+
+* ($\hat{Ln(Conc_{s,t}^{})}$) is the predicted log-transformed annual-average BC (ng/m3) or UFP (pt/cm3) concentration 
+
+* The PLS regression loadings ($\sum_{j=1}^p \phi_{j,m}$) are calibrated using TRAP concentrations and geocovariates from our mobile monitoring campaign stops ($s^*$, where $s^*=1,...,309$) for the 2019 year ($t*=2019$): $Z_{s^*,t^*,m} = \sum_{j=1}^p \hat{\phi}_{j,m}X_{s^*,t^*,j}$   
+
+* The model coefficients are estimated ($\hat{\theta}$) using TRAP concentrations and geocovariates from our 2019 mobile monitoring campaign.  
+
+
+Next, we estimate TRAP concentrations from 1995-2019 at cohort locations within our study  area using a two-step approach:
+
+First, the fitted model is used to estimate TRAP concentrations for specific locations and times. Estimates for particular locations vary over time based on changing geocovariate values ($pop, NDVI, EC$). 
+
+$$\hat{Ln(Conc_{s,t})} = \hat{\theta}_0 + \sum_{f=1}^{3}\hat{\theta}^{f} Z_{s}^{f} + \hat{\theta}^{pop} Z_{s,t}^{pop} + \hat{\theta}^{NDVI} Z_{s,t}^{NDVI} + \hat{\theta}^{EC} Z_{s,t}^{EC} $$
+
+Next, we exponentiate and apply a temporal trend to these estimates to account for the fact that TRAP concentrations have been steadily decreasing since the early 1990s:
+ 
+$$\hat{Conc}_{s,t} = exp(\hat{Ln(Conc}_{s,t})) * \hat{\alpha}_t^{trend} $$
+
+Where: 
+
+* $\hat{\alpha}_t^{trend}$ estimates the temporal trend in TRAP ($\alpha_t^{trend}$) based on historical observations of EC at the Beacon Hill AQS site.
+
+To calculate $\hat{\alpha}_t^{trend}$, we use fit the following model:
+
+$$\hat{EC_{t}} = \hat{\beta}_0 + \sum_{l=1}^{3}\hat{\beta}_{l}b_{l}{t}$$  
+
+Where:
+
+* $\hat{EC_{t}}$ is the predicted, smoothened annual average EC concentration for Beacon Hill for a particular year   
+
+* $t$ is the observation year, fit as a cubic spline using $b$ basis functions
+
+* $\hat{\beta}$ are the estimated model parameters 
+
+
+$\hat{\alpha}_t^{trend}$ is calculated as the difference between the predicted EC concentration for any given year $t$ and the predicted EC concentration for 2018 (the reference year), such that:
+
+$$\hat{\alpha}_t^{trend} = \hat{EC_{t}} - \hat{EC}_{2018}$$
+
+### --> or multiplicative trend:
+
+$$\hat{\alpha}_t^{trend} = \hat{EC_{t}} / \hat{EC}_{2018}   $$
+

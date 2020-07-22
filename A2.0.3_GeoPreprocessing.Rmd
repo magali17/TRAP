@@ -110,6 +110,8 @@ grid_covars0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "time-varyi
 
 
 
+### --> ?? also get native_id ??
+
 act_area <- read.csv(file.path("..", "GIS", "Shapefiles", "ACT", "cohort_lat_long.csv")) %>%
   select(location_id = location_i,
          site_location = site_loc) %>%
@@ -181,7 +183,7 @@ locations_act <- cov_act1 %>%
   # add site_location (monitoring vs within a monitoring buffer)
   left_join(act_area, by= "location_id") %>%
   #save act location info 
-  select(site_id = location_id,
+  select(site_id = native_id,  # USED TO BE: location_id
          latitude:lambert_y, 
          site_location)
 
@@ -205,7 +207,7 @@ grid_covars1 <- grid_covars0 %>%
   #drop rows w/ NAs
   drop_na() %>%
   mutate(site_type = "P") %>% # [delete?]
-  rename(site_id = location_id)
+  rename(site_id = native_id)  # USED TO BE: location_id
 
 locations_grid <- grid_covars1 %>%
   select(site_id,
@@ -213,7 +215,7 @@ locations_grid <- grid_covars1 %>%
 
 grid_covars1 <- grid_covars1 %>%
   #only keep covariates
-  select(-c(native_id, latitude:lambert_y))  
+  select(-c(location_id, latitude:lambert_y))   # USED TO BE: native_id
 
 grid_names <- names(grid_covars1)
 
@@ -249,13 +251,13 @@ Length: `r ncol(cov_act1)-1`
 
 # Final covariates to be used in analysis
 
-clean up geocovariates using covariate.preprocess() function (lab protocol/code) and additional cleaning 
+clean up geocovariates using covariate.preprocess() function (lab protocol/code) and additional cleaning  
 * returns log-transformed proximity variables; drops old land use ("lu") variables; drops variables not available/ready for use in our study area
 
 ```{r}
 ######################## covariate.preprocess() ########################
 cov_preprocessed <- covariate.preprocess(covars.mon = cov_mm1, 
-                                         covars.sub = cov_act1, #cov_act_fake0,  #cov_act1,
+                                         covars.sub = cov_act1,    
                                          region = "NW")
 
 ######################## Drop additinoal variables I won't be using ########################
@@ -278,16 +280,13 @@ cov_act <- cbind(locations_act, cov_act)
 
 ```
 
+* don't use covariate.preprocess() for the grid b/c some covariates may be dropped that are not when mobile monitoring & ACT covariates are run. Use individual transformation functions instead to ensure that all datasets have the same predictors.
+
 ```{r}
 ################### grid ###################
-# grid_preprocessed <- covariate.preprocess(covars.mon = cov_mm1, 
-#                                          covars.sub = grid_covars1, 
-#                                          region = "NW"
-#                                          )
-# 
-# cov_grid <- grid_preprocessed$covars.sub 
 
-# don't use covariate.preprocess() b/c some cov may be dropped that are not when mobile monitoring & ACT covariates are run. Use individual transformation fns instead.
+# don't use covariate.preprocess() b/c some cov may be dropped that are not when mobile monitoring & ACT covariates are run. Use individual transformation functions instead.
+
 cov_grid <- grid_covars1 %>%
   combine_a123_m() %>%
   combine_a23_m() %>%
@@ -301,6 +300,7 @@ cov_grid <- cbind(locations_grid, cov_grid)
 ```
 
 ### --> add emissions description: "emissions (g)"
+
 ```{r}
 cov_descrip <- data.frame(Covariate = final_cov) %>%
   mutate(Covariate= as.character(Covariate)) %>%
@@ -466,7 +466,6 @@ cov_act %>%
 
 ```
 
-### --> error? % of locations in study area too small? 
 
 ```{r}
 

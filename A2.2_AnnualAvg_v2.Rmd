@@ -628,6 +628,13 @@ stops_l %>%
   
 ```
 
+### --> ? Compare temporal trends of sites w/ ~5 TOD visits vs those w/ ~2 TODs?
+### --> boxplots of ufp vs hour for a few sites - show that conc's vary drastically within a site for any given hour (~ANOVA)
+
+```{r}
+
+```
+
 
 # ANOVA for stop medians
 
@@ -899,6 +906,13 @@ stops_l <- stops_l %>%
 ```
 
 # Regression  
+
+### --> add others:
+### --> month, day, hour regression? 
+### --> interaction regressions: create site type: based on rd proximity, airport prox, pop, ndvi? interact: site_type*TOD, site_type*TOW
+### ? are interactions significant? how do the annual averages compare? 
+
+### also? use PLS, divide high vs low scores to create site_type A vs B
 
 Averaging method weight description
 
@@ -1260,6 +1274,17 @@ p4 <- annual %>%
   annotate_figure(fig.lab = paste0("BC annual average site concentration estimates from desired regression estimation method and site-only averaging methods"))
  
 ```
+
+### Additional
+
+###
+
+```{r}
+
+```
+
+
+
 
 ## Method comparison plots.
 

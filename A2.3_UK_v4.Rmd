@@ -175,7 +175,7 @@ validation_idx <- sample(c(TRUE, FALSE), replace = T,
 
 ```{r}
 # grid in study area (from GIS) 
-grid_in_study <- read.csv(file.path("..", "GIS", "Shapefiles", "Study area", "grid", "grid_mm.csv")) %>%
+grid_in_study <- read.csv(file.path("..", "GIS", "Shapefiles", "Predictions", "grid", "grid_mm.csv")) %>%
   filter(study) %>%
   select(native_id)  
 

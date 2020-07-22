@@ -50,7 +50,9 @@ We will use daily EC and BC data rather than annual estimates to ensure that eac
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE, fig.height = 8)  
+knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE 
+                      #fig.height = 8
+                      )  
 
 # # Clear workspace of all objects and unload all extra (non-base) packages
 # rm(list = ls(all = TRUE))
@@ -88,17 +90,7 @@ plot_palette <- "Set3" #Set1, Paired
 
 ```
 
-# Map of AQS sites used for trend adjustment and/or validation
-
-**Site Notes**
-
-* Tacoma, Puyallup and Marysville AQS sites are near but not within the study area     
-* Lake Forest Park, Tacoma South L, Puyallup and Marysville were traditionally wood smoke impacted areas (though BC 880 is not affected by wood smoke as much, so elevated BC levels are presumably from truck and ship traffic)   
-* Tacoma Tideflats (Alexander Ave) is by the Port of Tacoma    
-* Tacoma tideflats & Duwamish have a lot of truck traffic
-
-* Duwamish, 10th & Weller & tideflats may have seen a bigger change in TRAP over time as a result of stricter emission standards
-
+# AQS sites used for trend adjustment and/or validation
 
 ```{r}
 aqs_monitors0 <- read.csv(file.path(folder_path, "EPA", "aqs_monitors.csv")) %>%
@@ -110,7 +102,19 @@ aqs_monitors0 <- read.csv(file.path(folder_path, "EPA", "aqs_monitors.csv")) %>%
 aqs_monitor_names <- c("Kent - James & Central" , "Lake Forest Park", "Marysville", "Puyallup - 128", "10th & Weller", "Beacon Hill", "Duwamish", "Tacoma - L Street", "Tacoma - Alexander", "Tukwila Allentown") %>% 
   paste0(collapse="|")
 
+# AQS location types based on PSCAA 2015 & 2017 Air Quality Data Summary Report
+aqs_location_description <- data.frame(
+  code = letters[1:6],
+  description = c("Urban Center", 
+                  "Suburban",
+                  "Rural",
+                  "Commercial",
+                  "Industrial",
+                  "Residential"
+                  )
+  )
 
+ 
 aqs_monitors <- aqs_monitors0 %>%
   # only look at BC since we already know BH has EC 
   filter(
@@ -120,9 +124,28 @@ aqs_monitors <- aqs_monitors0 %>%
   mutate(
     Local.Site.Name = str_to_title(Local.Site.Name)
   ) %>%
-  select(Local.Site.Name, Address, Latitude, Longitude) %>%
+  select(Local.Site.Name, Address, Latitude, Longitude,
+         # add details about each site # not doing this b/c have too many options - these differ for the Many different Parametesr that are measured
+         #Parameter.Name,
+         #Monitoring.Objective, 
+         #Measurement.Scale, Measurement.Scale.Definition,
+         ##??
+         #Monitor.Type, 
+         #Networks, 
+         ) %>%
   mutate(
-    #Name = factor(Local.Site.Name),
+    Location_code = as.character(recode_factor(factor(Local.Site.Name),
+                         "Lake Forest Park Towne Center" = "b, d, f",
+                         "Seattle-10th & Weller" = "a",
+                         "Seattle - Duwamish" = "a, e",
+                         "Tukwila Allentown" = "b, e, f",
+                         "Seattle - Beacon Hill" = "b, d, f",
+                         "Kent - James & Central" = "b, d",
+                         "Tacoma - L Street" = "b, f",
+                         "Tacoma - Alexander Ave" = "a, e",
+                         "Puyallup - 128th St" = "b, f",
+                         "Marysville - 7th Ave (Marysville Junior High)" = "b, d"
+                         )),
     Local.Site.Name = recode_factor(factor(Local.Site.Name),
                          "Lake Forest Park Towne Center" = "Lake Forest Park",
                          "Kent - James & Central" = "Kent",
@@ -134,12 +157,88 @@ aqs_monitors <- aqs_monitors0 %>%
   ) %>%
   unique()
 
+
+#add location descriptions
+loc_desc <- aqs_monitors$Location_code
+
+for(i in seq_along(aqs_location_description$code)) {
+  #i=1
+  #crosswalk for each code
+  df <- aqs_location_description[i,] %>%
+    mutate_if(is.factor, as.character)
+  
+  # replace letters (entire words only) with description
+  temp <- gsub(pattern = paste0("\\<", df$code, "\\>"),
+                   replacement = df$description, 
+                   x = loc_desc
+                   )
+  #update the string to include recently substituted text
+  loc_desc <- temp
+  
+}
+
+aqs_monitors <- cbind(aqs_monitors, 
+                      Location_description = loc_desc
+                      ) %>%
+  mutate(Location_description = as.character(Location_description))
  
+
+ 
+
+
+
 # write.csv(aqs_monitors, file.path(folder_path, "EPA", "aqs_monitors_nearby_bc.csv"), row.names = F)
 
 ```
 
+
+```{r}
+aqs_monitors %>%
+  select(Site = Local.Site.Name,
+         "Location Type" = Location_description 
+         ) %>%
+  kable(caption = "Description of AQS sites in or near our study are. Source: PSCAA Air Quality Data Summary Reports, 2015+", row.names = F) %>%
+  kable_styling()
+  
+```
+
+* We have a good mixture of AQS site types that we expect will have a wide range of TRAP concentrations   
+  - many are considered suburban and residential areas    
+
+```{r}
+
+#strsplit(aqs_monitors$Location_description, "\\W+")  
+
+aqs_monitors %>%  
+  #create new columns for each descriptor (for plotting)
+  separate(., Location_description, 
+           into = c("A", "B", "C"), 
+           sep = ",") %>%
+  gather(key = "key", value = "Type", A:C) %>%
+  drop_na(Type) %>%
+  #View()
+
+  ggplot(aes(x=Type, fill=Local.Site.Name)) + 
+  geom_bar() + 
+  labs(
+    x= "Location type",
+    title = "Number of AQS sites by location type",
+    fill = "Site"
+  )
+  
+```
+
+
 Map includes all sites for which the PSCAA has historical BC data for.
+
+**Site Notes**
+
+* Tacoma, Puyallup and Marysville AQS sites are near but not within the study area     
+* Lake Forest Park, Tacoma South L, Puyallup and Marysville were traditionally wood smoke impacted areas (though BC 880 is not affected by wood smoke as much, so elevated BC levels are presumably from truck and ship traffic)   
+* Tacoma Tideflats (Alexander Ave) is by the Port of Tacoma    
+* Tacoma tideflats & Duwamish have a lot of truck traffic
+
+* Duwamish, 10th & Weller & tideflats may have seen a bigger change in TRAP over time as a result of stricter emission standards
 
 ```{r}
 study_area <- readRDS(file.path("Data", "GIS", "study_area_df.rda"))
@@ -368,7 +467,7 @@ epa_daily <- epa_daily %>%
 
 # all months
 epa_daily_all_mo <- epa_daily %>%
-  group_by(Year) %>%
+  group_by(Year, Parameter.Name) %>%
   dplyr::summarize(mean_all_months = mean(Arithmetic.Mean))
 
 # only keep non-heating (nh) month data (non winter wood-heating): April - Sept (PSCAA 2017 Annual Report)
@@ -414,7 +513,8 @@ epa_daily_join %>%
   geom_smooth(method=lm, formula = as.formula(formula1), se = F) +
   labs(y = "EC Conc (ug/m3)",
        title = "Annual Avg EC at Beacon Hill estimated from \nheating, non-heating and all months", 
-       subtitle = paste0("Source: EPA Daily files. ", formula1)
+       subtitle = paste0("Source: EPA Daily files. ", formula1, "\nParameter Name:", unique(epa_daily_join$Parameter.Name))
+        
        )
 ```
 
@@ -436,9 +536,12 @@ epa_daily_join %>%
 
 ```
 
+
 ## Fit a trend line to Beacon Hill EC readings 
 
 Fit a trend using all of the months. 
+
+* when an ln(EC) fitted model produces the same predictions/plot?
 
 ```{r}
 last_prediction_yr <- 2019
@@ -447,23 +550,35 @@ aqs_trend <- data.frame(Year =c(1995:last_prediction_yr)) %>%
 
 #don't use bad years in prediction
 
+# for a natural cubic spline, df = knots +1 (for  a cubic spline, df=knots+3). Knots are placed accordingly at quantiles of Year.
 spline_fit <- "mean ~ splines::ns(Year, df = 3)"
+#spline_fit <- "log(mean) ~ splines::ns(Year, df = 3)"
 
 m1 <- aqs_trend %>%
+  #otherwise, the boundary knots are placed at first/last prediction year (1995, 2019)
+  drop_na(mean) %>%
   lm(as.formula(spline_fit), data = .)
   
-aqs_trend$yhat <- predict(m1, newdata = aqs_trend)
+aqs_trend$yhat <- predict(m1, newdata = aqs_trend) #%>% exp()
 
 #calculate the relative difference between EC for any given year, relative to 2018 (latest year), on an additive and multiplicative scale
-ref_2018 <- aqs_trend$yhat[aqs_trend$Year==2018]
+trend_ref <- 2019
+ref_2019 <- aqs_trend$yhat[aqs_trend$Year==trend_ref]
 
 aqs_trend <- aqs_trend %>%
   mutate(
-    difference = yhat - ref_2018,
-    ratio = yhat/ref_2018
+    difference = yhat - ref_2019,
+    ratio = yhat/ref_2019
   )
   
 ```
+
+```{r}
+# learning about model's dfs, knots...
+#m1$terms  # knots at 33% and 66% year percentiles (2005, 2012). Boundary knots at 1997 and 2018
+ 
+```
+
 
 ```{r}
 aqs_trend %>%  
@@ -475,7 +590,7 @@ aqs_trend %>%
   labs(col = "Estimate", 
        y = "Annual Average EC (ug/m3)",
        title = "Annual average EC at Beacon Hill - observed and predicted",
-       subtitle = paste0("model: ", spline_fit)
+       subtitle = paste0("model: ", spline_fit, "\nParameter Name: ", unique(epa_daily_join$Parameter.Name))
          )  
 
 ```
@@ -486,13 +601,13 @@ aqs_trend %>%
 
 aqs_trend %>%
   gather("method", "value", difference:ratio) %>%
-  mutate(year_type = ifelse(Year ==2018, "reference", 
+  mutate(year_type = ifelse(Year ==trend_ref, "reference", 
                             ifelse(Year %in% seq(min(epa_yearly_mean$Year), max(epa_yearly_mean$Year)), "within range", "extrapolation"))) %>%
   ggplot(aes(x=Year, y = value, col=method, shape = year_type)) + 
   geom_point() + 
   labs(
     title = "2019 Model prediction adjustment factors based on EC (ug/m3) trend at Beacon Hill",
-    subtitle = paste0("EC data available between ", paste0(range(epa_yearly_mean$Year), collapse = "-")), 
+    subtitle = paste0(unique(epa_daily_join$Parameter.Name), " data available between ", paste0(range(epa_yearly_mean$Year), collapse = "-")), 
     shape = "Year Type"
     )
 
@@ -928,13 +1043,22 @@ weller %>%
   geom_smooth()
   
 ```
- 
-Drop 2015 annual average at 10th & Weller, which seems different than other years because it:
 
-* contains a lot more 0 readings than other years 
-* is not included in the EPA's yearly avearge files - is this an indication of erroneous readings?
+**Drop the following site-years from the validation**
+
+* Drop 2015 annual average at 10th & Weller, which seems different than other years because it:   
+  - contains a lot more 0 readings than other years   
+  - is not included in the EPA's yearly avearge files - is this an indication of erroneous readings?
+
+* Drop Duwamish site since its temporal trend appears to be different than the rest since there are different air pollution souces at this site that are unique to this area   
+
+  - more heavy duty diesel trucks, including a lot of idling traffic
+  - heavy boat emissions
+  - heavy train traffic
+  - a temporal trend that is different from other sites. Thus our models will "appear" to perform worse.
 
 ```{r}
+#keeping duwamish in this dataaset for now so that i can later show its poor performance in A3.1_UK.Rmd
 pscaa_yearly <- pscaa_yearly %>%
   filter(!(grepl("Weller", Site) & Year==2015))
 
@@ -944,25 +1068,190 @@ pscaa_yearly <- pscaa_yearly %>%
 Final dataset to be used for validation.
 
 ```{r}
+#drop Duwamish form plot
+pscaa_yearly_short <- pscaa_yearly[str_detect(pscaa_yearly$Site, "Duwamish", negate = T),]
+
 aqs_trend %>%
   gather("method", "value", difference:ratio) %>%
   ggplot(aes(x=Year, y = value)) + 
   geom_point(alpha=0.4) + 
   geom_line(aes(group=method, linetype=method), alpha=0.4) +
   
-  geom_point(data=pscaa_yearly, aes(y=mean, col = Site, shape=Site)) + 
-  geom_line(data=pscaa_yearly, aes(y=mean, col = Site)) +
-  scale_shape_manual(values =  seq_along(unique(pscaa_yearly$Site)) ) + 
+  geom_point(data=pscaa_yearly_short, aes(y=mean, col = Site, shape=Site)) + 
+  geom_line(data=pscaa_yearly_short, aes(y=mean, col = Site)) +
+  scale_shape_manual(values =  seq_along(unique(pscaa_yearly_short$Site)) ) + 
 
   labs(
     title = "BC readings (ug/m3) to be used for validation \nand temporal trend adjustment factors"
-    ) #+ 
-  #scale_colour_brewer(palette = plot_palette) 
+    )  
+   
 
 
 ```
 
+
+# Follow-ups 
+
+## Trend investigation - 
+
+### --> ? see ratio of BH BC/EC & not use BH for validation? 
+### --> see data from somewhere else? E.g., CA to get a ratio?
+### --> can also use BC trend & acknowledge we can’t validate it anymore b/c we’re using the same data 
+
+
+
+**Rationale**: UK model predictions are lower than observations at all of these AQS sites 
+
+Dropping Duwamish Valley from this analysis
+
+Plotting splines at all sites to see if the EC trend at BH generally captures the temporal trend at other locations.
+
+* The EC trends appears to have less contrast over time than the observed EC trends at other locations, including Beacon Hill, especially between ~2005-2012 when the curve is the steepest
+
+```{r}
+aqs_trend_short <- aqs_trend %>%
+  select(Year, mean) %>%
+  mutate(Site = "Seattle Beacon Hill",
+         Pollutant = "EC"
+         )
+
+pscaa_yearly_short <- pscaa_yearly %>%
+    select(Year, mean, Site) %>%
+  mutate(Pollutant = "BC") %>%
+  filter(str_detect(Site, "Duwamish", negate = T))
+
+bc_ec <- rbind(aqs_trend_short, pscaa_yearly_short)
+
+fm <- "y~splines::ns(x, df=3)"
+
+bc_ec %>%
+  ggplot(aes(x=Year, y=mean, col=Site, shape=Site, linetype=Pollutant)) + 
+  geom_smooth(se=F,
+              method = "lm", formula = fm
+              ) +
+  geom_point() + 
+  scale_shape_manual(values =  seq_along(unique(bc_ec$Site)) ) + 
+
+  labs(
+    y = "Value (ug/m3)",
+    title = "Comparison of trends at other locations with fitted natural splines",
+    subtitle = fm
+    
+  )
+
+```
+
+**What if we fit a natural cubic spline to all of the BC data (vs EC at Beacon Hill) and use that to adjust predictions?**
+
+### --> don't do for CV reasons? 
+
+for a natural spline, dfs = k (knots) + 1. So, for a natural cubic spline (df=3), k=2 knots.
+
+```{r}
+#spline terminology: linear splines (splines of degree 1), quadratic splines (splines of degree 2), and cubic splines (splines of degree 3)
+
+```
  
+```{r}
+first_p_yr <- 1995
+first_bc_yr <- min(bc_ec$Year[bc_ec$Pollutant=="BC"]) #2003
+last_p_yr <- 2019
+#knots
+k1 <- 2005
+k2 <- 2012
+bk1 <- first_bc_yr
+bk2 <- last_p_yr
+
+```
+
+* setting knots for `r k1` when new diesel particle counter filters were introduced and later on when concentrations seem to flatten (`r k2`)   
+  - the BC trend line is steeper than the EC trend line between these knots. This should help with prediction accuracy during these time periods since our current estimates using the EC trend line are too low.
+* when the lower boundary knot is set to the minimum data range (`r bk1`), the slope for earlier times appears to be steeper than that of EC. This may be too aggressive? 
+* when the upper boundary knot is set to the maximum data range (`r bk2`), it curves up. Is this due to new 10th & Weller readings? 
+
+```{r}
+# lm1 <- bc_ec %>% lm(formula = mean~splines::ns(Year, knots = c(2005, 2010), Boundary.knots = c(bk1, bk2) ), data = .)
+
+#df=3 is for a cubic spline
+fm <- "y~splines::ns(x, knots = c(k1, k2), Boundary.knots = c(bk1, bk2))" 
+
+fm_label <- fm %>%
+  #begining of a word has k1 or k2
+  gsub("\\<k1", k1, .) %>%
+  gsub("\\<k2", k2, .) %>%
+  
+  gsub("bk1", bk1, .) %>%
+  gsub("bk2", bk2, .)
+
+bc_ec %>%
+  ggplot(aes(x=Year, y=mean,  
+             linetype=Pollutant
+             )) + 
+  geom_smooth(se=F,
+              method = "lm", formula = fm, 
+              #plot lines along the entire x range, not just the point data range
+              fullrange=TRUE
+              ) +
+  geom_point(aes(col=Site, shape=Site)) + 
+  #predict back to 1995
+  xlim(first_p_yr, 2019) +
+  
+  scale_shape_manual(values =  seq_along(unique(bc_ec$Site)) ) + 
+  labs(
+    y = "Value (ug/m3)",
+    title = "Comparison of trends at other locations if natural splines are fit",
+    subtitle = fm_label
+  )
+ 
+```
+
+Setting inner and boundary knots at different locations. 
+
+```{r}
+#knots
+bk1 <- first_bc_yr +1
+bk2 <- last_p_yr-5
+
+fm <- "y~splines::ns(x, knots = c(k1, k2), Boundary.knots = c(bk1, bk2))" 
+
+fm_label <- fm %>%
+  #begining of a word has k1 or k2
+  gsub("\\<k1", k1, .) %>%
+  gsub("\\<k2", k2, .) %>%
+  
+  gsub("bk1", bk1, .) %>%
+  gsub("bk2", bk2, .)
+
+bc_ec %>%
+  ggplot(aes(x=Year, y=mean,  
+             linetype=Pollutant,
+             #linetype = "new fit"
+             )) + 
+  geom_smooth(se=F,
+              method = "lm", formula = fm, 
+              #plot lines along the entire x range, not just the point data range
+              fullrange=TRUE
+              ) +
+  geom_point(aes(col=Site, shape=Site)) + 
+  #predict back to 1995
+  xlim(first_p_yr, 2019) +
+  
+  # #add original trend fit
+  # geom_smooth(data= aqs_trend_short, 
+  #             se=F, method = "lm", formula = "y~splines::ns(x,3)", 
+  #             fullrange=TRUE,
+  #             #aes(linetype="original fit")
+  #             ) +
+  
+  scale_shape_manual(values =  seq_along(unique(bc_ec$Site)) ) + 
+  labs(
+    y = "Value (ug/m3)",
+    title = "Comparison of trends at other locations if natural splines are fit",
+    subtitle = fm_label
+  )
+
+```
+
  
 
 Save datasets.

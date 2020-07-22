@@ -44,9 +44,10 @@ fit_pls <- function(dt,
 # can rename variables (e.g. TVC names) or use the same covariates (space-varying covariates)
 
 # dt = mm
-# rename_vars = FALSE
-# pls_model = space_models$bc
-# rename_components = paste0("space", c(1:n_components))
+# rename_vars = TRUE
+# change_var_name = "ec_g_1995_"
+# pls_model = ec2019_models$bc
+# rename_components = "ec1995"
 
 
 get_scores <- function(dt,
@@ -63,7 +64,6 @@ get_scores <- function(dt,
     
     #prefix for predictors in PLS model
     .model_vars <- rownames(pls_model$coefficients)
-    #.model_vars <- rownames(pop2010_models$bc$coefficients)
     #only keep name before "_"
     .model_vars <- unique(sub("_.*", "_", .model_vars))
     

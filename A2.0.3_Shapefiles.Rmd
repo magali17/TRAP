@@ -178,6 +178,7 @@ airports_points_df <- fortify(shp) %>%  # could also use: broom::tidy(shp,region
 Railroad trakcs
 
 ### --> Error: how to upload geodatabase?
+### --> only include railroad in study area before using readOGR()?
 
 ```{r}
 # shp <- readOGR(file.path("..",  "GIS", "Shapefiles", "Other features","Roads", "Freight and Goods Transportation System", "FGTSWA.gdb"))  

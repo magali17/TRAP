@@ -1,0 +1,48 @@
+---
+title: "Grid"
+author: "Magali Blanco"
+date: "2/23/2020"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+pacman::p_load(dplyr, stringr)
+
+```
+
+```{r}
+# make new grid
+no_pts <- 5000
+  
+#based on CRS EPSG: 4326
+min_long <- -122.439228999999997 
+max_long <- -121.879884000000004
+min_lat <- 47.166826999999998
+max_lat <- 48.060476000000001
+
+grid_area <- (max_long-min_long)*(max_lat-min_lat)/no_pts
+pt_dist <- sqrt(grid_area)
+  
+long <- seq(min_long, max_long, pt_dist)
+lat <- seq(min_lat, max_lat, pt_dist)
+
+new_grid <- expand.grid(longitude = long,
+                     latitude = lat) %>%
+  mutate(native_id = paste("grid_mm_", 
+                           #make all numbers the same length
+                           str_pad(seq(1, length.out = nrow(.)),
+                                   width = nchar(nrow(.)), 
+                                   pad="0")
+                           )
+         ) %>%
+  select(native_id, everything())
+
+
+
+#write.csv(new_grid, file = file.path("Output", "new_grid.csv"), row.names = F)
+
+
+```
+

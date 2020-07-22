@@ -35,6 +35,9 @@ r2_mse_based <- function(obs, pred) {
 ############################################################################################## 
 #returns table of distribution of a variable
 
+# dt <- dem1 %>%   drop_na(m2_vars) 
+# var.string = "exp_avg10_yr_SP"
+
 # note var.string should not have NAs, otherwise can return wrong results 
 distribution.table <- function(dt,
                                var.string = "ptrak_pt_cm3",
@@ -44,17 +47,17 @@ distribution.table <- function(dt,
     dplyr::rename(var = var.string) %>%
     dplyr::summarize(
       N = n(),
-      Min = min(var),
-      Q05 = quantile(var, 0.05),
+      Min = min(var, na.rm = T),
+      Q05 = quantile(var, 0.05, na.rm = T),
       #"Mean (SD)" =  qwraps2::mean_sd (var, digits = round.int, na_rm = T, denote_sd = "paren"),
-      Mean = mean(var),
-      SD = sd(var),
+      Mean = mean(var, na.rm = T),
+      SD = sd(var, na.rm = T),
       #"Median (IQR)" =  qwraps2::median_iqr(var, digits = round.int, na_rm = T, ),
-      Median = median(var), 
-      IQR = IQR(var),
+      Median = median(var, na.rm = T), 
+      IQR = IQR(var, na.rm = T),
       #IQR = round(IQR(var), round.int),
-      Q95 = quantile(var, 0.95),
-      Max = max(var)
+      Q95 = quantile(var, 0.95, na.rm = T),
+      Max = max(var, na.rm = T)
     ) %>%
     # round values
     mutate_if(is.numeric, ~round(., round.int)) %>%

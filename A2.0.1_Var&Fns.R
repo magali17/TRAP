@@ -817,12 +817,17 @@ label_pollutant <- function(dt,
     
     dt <- dt %>%
       mutate(var = recode_factor(var,
+                                 #Aim 2
                                  "ptrak_pt_cm3" = "UFP (pt/cm3)",
                                  "ufp_pt_cm3" = "UFP (pt/cm3)",
                                  #"scan_20_420_pt_cm3" = "UFP (20-420 nm)",
                                  "ona_bc" = "ONA-corrected BC (ng/m3)",
                                  "ma200_bc" = "BC (ng/m3)",
-                                 "bc_ng_m3" = "BC (ng/m3)"
+                                 "bc_ng_m3" = "BC (ng/m3)",
+                                 
+                                 #Aim 3
+                                 "bc" = "BC (ng/m3)",
+                                 "ufp" = "UFP (pt/cm3)"
                                  )) 
   }
   

@@ -341,11 +341,12 @@ models.fn <- function(mydata = dem.w,
   
   #rename variables for fns
   mydata <- mydata %>%
-    #want to rename categorical bmi4 as bmi later
-    #select(-bmi) %>%
+    #want to use 5 yr bins instead of this one w/ larger categories
+    select(-birth_cohort) %>%
     rename(
       #m1 
       no2 = no2.var,
+      birth_cohort = birth_cohort_5yr,
       #m2
       income = income_cat,
       edu = degree,

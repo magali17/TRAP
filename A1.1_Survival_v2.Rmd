@@ -48,7 +48,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
-                      cache=T, cache.comments = F, 
+                      cache=F, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE,
                       dpi=300,
@@ -64,6 +64,10 @@ if (!is.null(sessionInfo()$otherPkgs)) {
       detach, character.only=TRUE, unload=TRUE, force=TRUE))
 }
 
+# Load key packages using pacman 
+my_repo <- 'http://cran.r-project.org'
+if (!require("pacman")) {install.packages("pacman", repos = my_repo)}
+
 #Himsc: describe(); EnvStats: summaryFull(); survminer: ggflexsurvplot()  
 pacman::p_load(knitr, kableExtra,
                Hmisc, EnvStats, lubridate, 
@@ -72,6 +76,20 @@ pacman::p_load(knitr, kableExtra,
                tidyverse, dplyr
                )  
 
+```
+
+# Model Notation
+
+Primary analysis model
+
+$$h(age) = h_0(age|APOE) exp ( \beta_1 X_{NO_2} } + \beta_2 X_{gender} + \beta_3 X_{edu} + \beta_4 X_{income} + \beta_5 X_{race} + \beta_6 X_{birthcohort} )$$
+
+
+
+
+
+
+```{r}
 #other directory:/home/gradstudent/magali/a. TRAP Project/R TRAP Project/data/issue_001.sas7bdat 
 # dem0 <- read_sas(file.path("~", "a. TRAP Project", "R TRAP Project", "data", "issue_001.sas7bdat"), NULL)
 
@@ -79,9 +97,9 @@ source("0.Global_Fns.R")
 source("A1.0.2_Var&Fns.R")
 
 # main dataset
-dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "200331", "issue_001.sas7bdat"), NULL)
+dem0.0 <- haven::read_sas(file.path("Data", "Aim 1", "200702 Survival", "issue_001.sas7bdat"), NULL)
 # exposure at age 65
-dem0.0_65 <-  haven::read_sas(file.path("Data", "Aim 1", "200331", "issue_001_supp.sas7bdat"), NULL)
+dem0.0_65 <-  haven::read_sas(file.path("Data", "Aim 1", "200702 Survival", "issue_001_supp.sas7bdat"), NULL)
 
 #remove SAS labels
 labelled::var_label(dem0.0) <- NULL
@@ -99,7 +117,7 @@ use_model <- c("_SP", "_ST")
 #data that can be used for all analyses 
 dem0.1 <- dem0.0 %>% 
   #drop PM10 predictions
-  filter(pollutant %in% c("no2", "pm25")) %>%
+  filter(pollutant != "pm10") %>%
   select(
     study_id,
     birthdt,
@@ -162,9 +180,13 @@ dem0.1 <- dem0.0 %>%
     #traditional definition used by ACT for follow-up time for cases and controls
     age_onset = as.numeric(onsetdate - birthdt)/365, 
     age_act = ifelse(!is.na(age_onset), age_onset, age_last_visit), 
-    #collapse earliest & latest cohorts since there are few ppl here 
+    
+    # original binning for modeling
+    birth_cohort_5yr = birth_cohort,
+    #collapse earliest & latest cohorts since there are few ppl here - for tables/figures
     birth_cohort = factor(ifelse(birth_cohort <= 1905, 1895,
                            ifelse(birth_cohort >= 1935, 1935, birth_cohort))),
+    
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
     dsmivdx = ifelse(is.na(dsmivdx), 0, dsmivdx),
@@ -203,7 +225,7 @@ dem0.1 <- dem0.0 %>%
     ) %>%
   select(
   study_id,
-  birthdt, birth_cohort, cohort, intakedt, onsetdate, last_visit,
+  birthdt, birth_cohort_5yr, birth_cohort, cohort, intakedt, onsetdate, last_visit,
   age_intake, age_act, age_last_visit,
 
   anydementia, dsmivdx, nindx, ad_nincds,
@@ -270,6 +292,9 @@ dem1 <-  dem0.1 %>%
     exposure_year <= as.numeric(format(last_visit, "%Y")),  
     ) 
 
+```
+
+```{r}
 #make wide format
 no2 <- dem1 %>% 
   filter(pollutant == "no2") %>%
@@ -324,14 +349,77 @@ pm25 <- dem1 %>%
   # drop ST predictions 
   select(-contains("SP", ignore.case = F))
 
+a1  <- dem1 %>% 
+  filter(pollutant == "a1") %>%
+    select(-pollutant) %>%
+  # values are available under "SP" rather than "ST"
+  rename(a1_10yr = exp_avg10_yr_SP) %>%
+  #drop these columns, which are blank or unnecessary for road analysis since they are duplicated in the no2 and pm25 datasets
+  select_if(str_detect(names(.), "exp_avg|exp_wks_coverage", negate = T)) 
+            
+a2  <- dem1 %>% 
+  filter(pollutant == "a2") %>%
+    select(-pollutant) %>%
+  # values are available under "SP" rather than "ST"
+  rename(a2_10yr = exp_avg10_yr_SP) %>%
+  #drop these columns, which are blank or unnecessary for road analysis since they are duplicated in the no2 and pm25 datasets
+  select_if(str_detect(names(.), "exp_avg|exp_wks_coverage", negate = T))  
 
-dem.w <- full_join(no2, pm25)  
+a3  <- dem1 %>% 
+  filter(pollutant == "a3") %>%
+    select(-pollutant) %>%
+  # values are available under "SP" rather than "ST"
+  rename(a3_10yr = exp_avg10_yr_SP) %>%
+  #drop these columns, which are blank or unnecessary for road analysis since they are duplicated in the no2 and pm25 datasets
+  select_if(str_detect(names(.), "exp_avg|exp_wks_coverage", negate = T))  
+
+# define TIME near road as falling in columns m_a-m_d
+near_rd <- dem1 %>%
+  # define near-road as ma-me
+  filter(grepl(pattern ="^m_[a-d]", x = pollutant)) %>%
+  group_by(study_id, exposure_year) %>%
+  #mutate(
+  dplyr::summarize(
+    near_rd_10yr = sum(exp_avg10_yr_SP)
+  ) #%>% select(study_id, exposure_year, pollutant, exp_avg10_yr_SP, near_rd_10yr)
+
+
+dem.w <- full_join(no2, pm25)  %>%
+  #left join since a1 has more person-years corresponding to ppl who moved otu of the ST modeling area (where we have no NO2 or PM2.5 predictions)
+  left_join(a1) %>% left_join(a2) %>% left_join(a3) %>%
+  left_join(near_rd)
+
+#check that only a few additinoal columns have been added (i.e., not additional duplicate columns due to name changes) #looks good
+#dim(dem.w)
+
+#define near rd
+near_a1 <- 300
+near_a2 <- 50
+near_a3 <- 50
+
+dem.w <- dem.w %>%
+  # DISTANCE from road - if on avg, they lived near road
+  mutate(
+  near_rd_cat = ifelse(exp(a1_10yr) <= near_a1 | exp(a2_10yr) <= near_a2 | exp(a3_10yr) <= near_a3, "Near (A-D)", 
+                          ifelse(exp(a1_10yr) > near_a1 & (exp(a2_10yr) > 150 | exp(a3_10yr) > 150), "Far (F)", "Mid (E)")
+                          )
+  )
+
+#dem.w.$near_rd_cat
 
 ```
 
+```{r}
+# dem.w.2 %>% group_by(near_rd_cat) %>% dplyr::summarize(n = n(), min_a1 = min(exp(a1_10yr)), max_a1 = max(exp(a1_10yr)), min_a2 = min(exp(a2_10yr)), max_a2 = max(exp(a2_10yr)), min_a3 = min(exp(a3_10yr)), max_a3 = max(exp(a3_10yr))) 
+
+ 
+
+```
+
+
 Add estimates at age 65 to main dataset. 
 
-### --> change _SP to _ST later
+### --> change _SP to _ST later?
 
 ```{r}
 
@@ -411,7 +499,9 @@ create a person-level (non-time-varying, fixed covariate) dataset
 # create a person-level, fixed covariates dataset 
 fixed.covariates <- dem.w %>%
   select(
-    study_id:ad_nincds,
+    study_id:birthdt, 
+    #don't include birth_cohort_5yr
+    birth_cohort:ad_nincds,
     apoe:casi_irt
     ) %>% 
   #make all variables numeric; code has values starting at 0, whereas as.numeric() starts at 1, subtract 1 to fix
@@ -433,10 +523,13 @@ fixed.covariates <- dem.w %>%
 
 ```{r}
 # common variables 
-## includes no2
-m2_all_vars <- c("apoe", "male", "race_white", "income_cat", "degree", "birth_cohort", "no2_10yr") 
+m2_all_vars <- c("apoe", "male", "race_white", "income_cat", "degree", "birth_cohort", 
+                 #"birth_cohort_5yr", 
+                 "no2_10yr") 
 ## adjustment variables
-m2_vars <- c("apoe", "male", "race_white", "income_cat", "degree", "birth_cohort") 
+m2_vars <- c("apoe", "male", "race_white", "income_cat", "degree", "birth_cohort" 
+             #"birth_cohort_5yr"
+             ) 
 
 
 
@@ -875,8 +968,6 @@ Participant characteristics.
 
 Dementia
 
-### --> issue, why is entry age & FU yrs pct weird?
-
 ```{r}
 #table1
 
@@ -1048,6 +1139,144 @@ dem.w %>%
            ) 
 ```
 
+Distribution of geometric mean road proximity.
+
+* On average, most participants lived relatively far from an A1 or A2 road, and closer to A3 roads when looking at the 10 yr geometric mean. 
+
+```{r}
+#road proximity
+dem.w %>%
+  drop_na(m2_vars) %>%
+  gather(Road, Distance, str_subset(names(.), "^a[1-3]_10yr")) %>%
+  #View()
+  mutate(Road = toupper(str_sub(Road, 1,2)),
+         Distance = exp(Distance)
+         ) %>%
+  ggplot(aes(x=Distance, fill=Road)) +
+  geom_density(alpha=0.3) +
+  facet_wrap(~Road, scales="free") +
+    labs(x = "Road Proximity (m)",
+         title = "10 yr road proximity for person-years in the primary analysis"
+         )
+
+```
+
+```{r}
+dem.w %>%
+  gather(Road, Distance, str_subset(names(.), "^a[1-3]_10yr")) %>%
+    drop_na(m2_vars, Distance) %>%
+  mutate(Road = toupper(str_sub(Road, 1,2)),
+         Distance = exp(Distance)
+         ) %>% 
+  group_by(Road) %>%
+  #View()
+  distribution.table(var.string = "Distance") %>%
+  kable(caption = "Distribution of geometric mean 10 yr road proximity (m) by road type. N are person-years.") %>%
+  kable_styling()
+
+```
+
+Define "near road" (A-D) as being within `r near_a1` m of an A1 road, `r near_a2` m of an A2 road or `r near_a3` m of an A3 road. Midway is (E): A1 > 300 m & A2/3 51-150 m. Away (F) is A1 > 300 m and A2/3 > 150 m.
+
+```{r}
+dem.w %>%
+  drop_na(m2_all_vars,
+          # --> ? why are there NAs in this variable?
+          near_rd_cat
+          ) %>%
+  group_by(near_rd_cat) %>%
+  dplyr::summarize(
+    n = n(),
+    perc = n/nrow(.)*100
+  # "#near_rd_cat" = qwraps2::n_perc(near_rd_cat, na_rm = T, 
+  #                                    show_denom = "always",
+  #                                    markup = "markdown", digits = 0)  
+  ) %>%
+  kable(caption = "Near-road proximity and person-years (categorical analysis)", 
+        col.names = c("Category", "Person-Years", "%"), 
+        digits = 1,
+        ) %>%
+  kable_styling()
+   
+```
+
+### Time near road
+
+```{r}
+road_prop_t <- data.frame(A2_or_A3 = c("<= 50 m", "51-150 m", ">150 m"), 
+                          A1_within300m = c("A","B","C"),
+                          A1_morethan300m = c("D", "E", "F")
+                          )  
+   
+
+road_prop_t %>%
+  kable(col.names = c("", "≤300 m", ">300 m"), 
+        align = "lcc",
+        caption = "Definition table for the geometric mean proportion of time spent 'near road' within the past 10 yrs (A-F). A-F add up to 1 for any given person-year."
+          ) %>%
+  add_header_above(c("A2 or A3", "A1"=2)) %>%
+  column_spec(1, bold = TRUE,  
+              )   %>%
+  kable_styling()
+
+```
+
+Distribution of the proporiton of time individuals spend in each cell
+
+```{r}
+#m2_all_vars 
+dem1 %>%
+  drop_na(m2_vars,
+          
+          ) %>% 
+  filter(str_detect(pollutant, "^m_[a-f]")) %>%
+  ggplot(aes(x=exp_avg10_yr_SP, fill=pollutant)) +
+  geom_density(alpha=0.3)
+  
+```
+
+
+
+
+```{r}
+# # - on average, most exposure periods are  spent in categories D, E and F, away from A1 roads  
+# 
+# dem.w %>%
+#   #pearson-years w/o missing no2... predictions
+#   drop_na(m2_all_vars) %>%
+#   select(study_id, exposure_year) %>%
+#   unique() %>%
+#   
+#   # dataset w/ non-aggragated, m_a-f pollutant values
+#   left_join(dem1) %>%
+# 
+#   filter(str_detect(pollutant, "^m_[a-f]")) %>%
+#   mutate(pollutant = toupper(str_extract(pollutant, "[a-f]"))) %>%
+#   
+#   group_by('Proximity Category' = pollutant) %>%
+#   distribution.table(var.string = "exp_avg10_yr_SP",round.int = 2) %>%
+#   kable(caption = "Proportion of time in past 10 yrs that individuals lived 'near road' ", 
+#         ) %>%
+#   kable_styling()
+   
+
+```
+
+
+Proportion of time near an A1 (≤ 300 m) or near an A2/3 (≤ 50 m).
+
+-on average, more than half of the person-years in this analysis were spent "near road."
+
+```{r}
+dem.w %>%
+  drop_na(m2_all_vars, near_rd_10yr) %>%
+  distribution.table("near_rd_10yr", round.int = 2) %>%
+  kable(caption = "Proportion of time during past 10 yrs that individuals lived 'near road' ") %>%
+  kable_styling()
+
+```
+
+
 
 PM2.5 exposure over time
 
@@ -1123,6 +1352,7 @@ dem.w %>%
            ) 
 ```
 
+
 ## Covariate Correlations 
 
 ```{r}
@@ -1171,17 +1401,15 @@ Dementia
 # note, functions use cluster = study_id in order for coxph() to calculate robust SEs
 
 dem_10yr <- dem.w %>%
-  #filter(cohort != 1) %>% 
-  #filter(birth_cohort != "1935") %>%
   models.fn(.,
                 models = paste0("m", c(1, 2, "3a", "3b",  "4a", "4b", 5, 6)),  
                 surv.time2 = "age_end_exposure", 
                 surv.event = "dementia_now", 
                 no2.var = "no2_10yr",
-                pm25.var = "pm25_10yr" #pm25.units = 5
+                pm25.var = "pm25_10yr"  
                 )
 
- 
+#dem_10yr$raw_model_output
 #dem_10yr$hrs
 
 dem_10yr_hrs <- dem_10yr$hrs %>%
@@ -1493,8 +1721,7 @@ Dementia
 ### --> ? run other analyses w/ this subset of ppl? These models have a different subste of people than other models 
 ```
 
-
-```{r}
+```{r, eval=T}
 
 dem_never_movers <- dem.w %>%
   filter(one_location == 1,
@@ -1516,7 +1743,7 @@ dem_never_movers_hrs <- dem_never_movers$hrs %>%
 
 AD
 
-```{r}
+```{r, eval=T}
 ad_never_movers <- dem.w %>%
   filter(one_location == 1,
          exact_coverage10_yr >= 0.8) %>%
@@ -1623,83 +1850,6 @@ ad_age_entry_hrs <- ad_age_entry$hrs %>%
 
 ```
 
-### Road Proximity exposure
-
-TEST - avaraging
-
--both are still "away" from roadways
-```{r}
-mean(c(rep(1500, 8), rep(10, 2)))  # 1202
-
-# log-transform distnace, then exponentiate
-mean(c(rep(log(1500), 8), rep(log(10), 2))) %>% exp()  # 550 
-
-
-```
-
-
-#### "near road" 
-
-Wilker 2015: "proximity is an integrated measure of exposure to traffic, which includes vehicle emissions, noise, ultrafine particles, road dust, and gaseous pollutants such as nitrogen dioxide, carbon monoxide, and volatile organic compounds but does not specifically account for the intensity of traffic or meteorologic conditions"
-
-Chen 2013: "LUR modeling of TRAP (NO2) takes into account roadway proximity, topography, meteorological factors affecting disperison and vehicle mix...LUR models should thus be omre accurate estimates of TRAP exposure than road proximity alone." Though NO2 HRs can't be interpreted as causal since they are used as markers of overall TRAP.
-
-define "near road" as:   
-a) < 150 m from A1 or < 50 m A2 for longest-lived address *OR* use TWA of all addresses after max distance is set to ~500 m
-b) < 400 m from A1 or < 200 m A2... 
-
-using A1 or A2 b/c:
-* have heavier, more consistent traffic patterns
-* these are more likely to have diesel trucks, large TRAP emitters (Auchincloss 2008)
-
-using the longest-lived address may add some exposure misclassification to this analysis because it assumes this a person lived at the same location or a comparable one the entire time.
-
-### --> ? only using longest-lived address?
-
-Dementia
-
-```{r}
-
-# dem_road <- dem.w %>%
-#   models.fn(mydata = .,
-#                 models = "m2",
-#                 surv.time2 = "age_end_exposure",
-#                 surv.event = "dementia_now",
-#             
-#             # --> update 
-#                 no2.var = "no2_10yr",
-#             
-#                 pm25.var = "pm25_10yr")
-# 
-# dem_road_hrs <- dem_road$hrs %>%
-#   mutate(Model = "2",
-#          Description = "Road proximity exposure") 
-
-```
-
-AD
-
-```{r}
-
-```
-
-#### log(distance to A1 or A2)
-
-natural log of distnace has been linearly related to martality and morbidity outcomes.(Chen 2017  living near; Wilker 2014 & 2015; 24: chen 2012)
-
-### --> truncate max distance to 1500 m before taking average
-
-Dementia
-
-```{r}
-
-```
-
-AD
-
-```{r}
-
-```
 
 
 ### Finer Adjustment for Calendar time
@@ -1910,6 +2060,7 @@ ad_cal_time_hrs <- mydata %>%
 ```
 
 #### Spline adjustment 
+
 to account for trends in the outcome, using continuous time (meaning calendar time on the day scale) 
 
 Don’t care about model fit, but how well we can control confounding (How much is the NO2 HR affected?). Can increase/decrease the df's in the ns() function to make the fit more/less flexible. This does not appear to have a large effect on the NO2 HR.
@@ -1954,8 +2105,165 @@ ad_spline_cal_time_hrs <- mydata %>%
 
 ```
 
+## Road Proximity exposure
 
-### Stratify by all confounders
+* advantages of using time-varying road proximity 
+  - incorportates all residential hx, and does not assume individuals lived at a single residence during their entire follow-up period
+
+separating A1 from A2-3 b/c:
+* have heavier, more consistent traffic patterns
+* these are more likely to have diesel trucks, large TRAP emitters (Auchincloss 2008)
+
+
+### Categorical near road (Proximity/Ln distnace)
+ 
+* Wilker 2015: "proximity is an integrated measure of exposure to traffic, which includes vehicle emissions, noise, ultrafine particles, road dust, and gaseous pollutants such as nitrogen dioxide, carbon monoxide, and volatile organic compounds but does not specifically account for the intensity of traffic or meteorologic conditions"
+
+* Chen 2013: "LUR modeling of TRAP (NO2) takes into account roadway proximity, topography, meteorological factors affecting disperison and vehicle mix...LUR models should thus be omre accurate estimates of TRAP exposure than road proximity alone." Though NO2 HRs can't be interpreted as causal since they are used as markers of overall TRAP.
+
+* rationale natural log of distance has been linearly related to martality and morbidity outcomes.(Chen 2017  living near; Wilker 2014 & 2015; 24: chen 2012)
+
+
+Dementia
+
+* Have narrower HRs b/c pppl mostly low/high a-d/e categories. Have Maximum variability in that variable. 
+
+
+* near-road is defined as being within a geometric mean of `r near_a1` m from an A1 or within `r near_a2` m from an A2/A3 in the past 10 yrs.
+
+```{r}
+
+#m_units <- 100
+#log(m_units) # 4.60517 ln m = 100 m
+
+dem_near_road_cat_proximity_hrs <- mydata %>%
+  coxph(s.dem ~  near_rd_cat +  
+          strata(apoe) + male + race_white + income + edu + birth_cohort,
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+    hr.output.fn(., no2.coef = "near_rd_catNear (A-D)") %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "2",
+      Description = paste0("near major road (categorical avg proximity)")
+    )
+
+```
+
+AD
+
+```{r}
+
+ad_near_road_cat_proximity_hrs <- mydata %>%
+  coxph(s.ad ~  near_rd_cat + 
+          strata(apoe) + male + race_white + income + edu + birth_cohort,
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+    hr.output.fn(., no2.coef = "near_rd_catNear (A-D)") %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "2",
+      Description = paste0("near major road (categorical avg proximity)")
+    )
+
+#ad_near_road_binary_hrs
+
+```
+
+
+### Time "near road" 
+
+* Hazard ratios are for every additional year, in the past 10 yrs, living near-road.
+
+```{r}
+near_rd <- c("A", "B", "C", "D") #, "E")
+
+```
+
+Defining "near road" as being in cells: `r paste(near_rd, collapse = " or ")`
+
+```{r}
+road_prop_t %>%
+  mutate(
+    A1_morethan300m = cell_spec(A1_morethan300m, "html", color = ifelse(A1_morethan300m %in% near_rd, "blue", "black")),
+A1_within300m = cell_spec(A1_within300m, "html", color = ifelse(A1_within300m %in% near_rd, "blue", "black"))
+  ) %>%
+  kable(
+    #allow cell_spec() to work properly
+    format="html",
+    escape=F,
+    
+    col.names = c("", "≤300 m", ">300 m"), 
+        align = "lcc",
+        caption = paste0("Defining 'near road' as the proportion of time spent in cells ",
+                         min(near_rd), "-", max(near_rd)),
+    #paste(near_rd, collapse = " or ")
+    
+    ) %>%
+  add_header_above(c("A2 or A3", "A1"=2)) %>%
+  column_spec(1, bold = TRUE)   %>%
+  column_spec(2, color = "blue")   %>%
+  #row_spec(1:2, color = "blue")   %>%
+
+  kable_styling()
+
+```
+
+ 
+Dementia
+
+### --> should n be 40243 here?
+
+```{r, eval=T}
+
+dem_time_near_road <- mydata %>%
+  #drop_na(no2) %>%
+  #convert from a 10 yr proportion to 1 yr estimates
+  mutate(near_rd_10yr = near_rd_10yr*10) %>%
+  coxph(s.dem ~  near_rd_10yr + 
+          strata(apoe) + male + race_white + income + edu + birth_cohort,
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+    hr.output.fn(., no2.coef = "near_rd_10yr") %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "2",
+      Description = paste0("Time near road")
+    )
+ 
+dem_time_near_road
+
+```
+
+AD
+
+```{r}
+ad_time_near_road <- mydata %>%
+  #convert from a 10 yr proportion to 1 yr estimates
+  mutate(near_rd_10yr = near_rd_10yr*10) %>%
+  coxph(s.ad ~  near_rd_10yr + 
+          strata(apoe) + male + race_white + income + edu + birth_cohort,
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+    hr.output.fn(., no2.coef = "near_rd_10yr") %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "2",
+      Description = paste0("Time near road")
+    )
+```
+
+
+
+## Stratify by all confounders
 
 Plots checking to see if the proportional hazards assumptions appear to be true.
 
@@ -2087,13 +2395,17 @@ dem_all_hrs <- rbind(
   # high quality address imputation
   dem_highest_qual_hrs,
   dem_high_quality_hrs,
+  
   dem_never_movers_hrs,
+  
   # using fixed exposure at age 65
   dem_age_65_hrs,
   # using fixed exposure at entry
   dem_age_entry_hrs,
   # road proximity
-  #dem_road
+  dem_near_road_cat_proximity_hrs,
+  dem_time_near_road,
+  
   # adjusting for birth cohort/calendar time more finely
   dem_cal_time_hrs,
   dem_spline_cal_time_hrs,
@@ -2154,13 +2466,18 @@ ad_all_hrs <- rbind(
   #high address quality
   ad_highest_qual_hrs,
   ad_high_quality_hrs,
+  
+  ### --> add
   ad_never_movers_hrs,
+  
   # using fixed exposure at age 65
   ad_age_65_hrs,
   # using fixed exposure at entry
   ad_age_entry_hrs,
   # road proximity
-  #ad_road
+  dem_near_road_cat_proximity_hrs,
+  ad_time_near_road,
+  
   # adjusting for calendar time more finely
   ad_cal_time_hrs,
   ad_spline_cal_time_hrs,
@@ -2209,7 +2526,7 @@ Dementia
 -reduced, primary, exntended models; different exposure windows
 
 
-### --> note: adjusting for birth cohort more finely (round_year = 5)
+**note: adjusting for birth cohort more finely (round_year = 5)**
 
 ```{r}
 round_year <- 5

@@ -3,6 +3,8 @@ title: "Grid"
 author: "Magali Blanco"
 date: "2/23/2020"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r setup, include=FALSE}
@@ -11,6 +13,8 @@ knitr::opts_chunk$set(echo = TRUE)
 pacman::p_load(dplyr, stringr)
 
 ```
+
+# New MM Study Grid w/ even spacing
 
 ```{r}
 # make new grid
@@ -46,3 +50,141 @@ new_grid <- expand.grid(longitude = long,
 
 ```
 
+# Grid for ST study area
+
+
+
+```{r}
+# fn returns grid given a point grid range & an estimated number of desired points
+    
+
+  
+make_grid <- function(
+  # grid area
+  min_x, min_y, max_x, max_y,
+  # estimated number of desired points
+  no_pts,
+  id_suffix = "id"
+  ) {
+  
+  
+  #area of entire grid area
+  grid_area <- (max_y-min_y)*(max_x-min_x)
+  
+  #area of each small box? - can't remember why mathematically this works eventhough the # of points != the number of boxes created inside the entire grid
+  grid_area <- grid_area/no_pts
+  
+  #distance between each point (length of side of each small box)
+  pt_dist <- sqrt(grid_area)
+    
+  y <- seq(min_y, max_y, pt_dist)
+  x <- seq(min_x, max_x, pt_dist)
+  
+  new_grid <- expand.grid(x = x, y = y) %>%
+    mutate(native_id = paste0(id_suffix, "_", 
+                             #make all numbers the same length
+                             str_pad(seq(1, length.out = nrow(.)),
+                                     width = nchar(nrow(.)), 
+                                     pad="0")
+                             )
+           ) %>%
+    select(native_id, everything())
+  
+  return(new_grid)
+  
+}
+
+```
+
+
+```{r}
+# fn returns coordinates for a different transformation. it convertes the dataset into a spatial object, calculates coordinates for a diff refernce system, converts these to a df, and attaches these to the original coordinates
+
+#  make the data spatial, by assigning it a projection or CRS
+# dt = st_grid
+# original_crs <- 32148
+# new_crs <- 4326
+# original_coords = c("x", "y")
+# new_coordinates = c("long", "lat") 
+
+add_crs <- function(
+  dt,
+  original_crs, original_coords,
+  new_crs, new_coord_names = c("long", "lat") 
+  ) {
+
+  library(sf)
+  
+  #convert flat file to spatial file, give it the original CRS
+  dt_sp <- st_as_sf(dt, coords = original_coords, crs = original_crs)
+  
+  #convert to different CRS, and save the coordinates
+  new_coords <- st_transform(dt_sp, crs = new_crs) %>%
+    st_coordinates() %>%
+    as.data.frame() %>%
+    rename(new_x = X, 
+           new_y = Y) %>%
+    mutate(new_crs = new_crs)  
+  
+  #rename new columns
+  names(new_coords) <- c(new_coord_names, paste0(c(new_coord_names, "crs"), collapse = "_"))
+  
+  # add new coords to original dt
+  dt2 <- cbind(dt, new_coords)
+  
+  return(dt2)
+  
+  
+  }
+
+
+```
+
+
+
+CRS EPSG:32148 (meters)
+
+```{r}
+#OLD - based on CRS EPSG: 4326
+# min_long <- -123.269
+# max_long <- -121.871
+# min_lat <- 46.787
+# max_lat <- 49.112
+
+
+st_grid <- make_grid(min_x = 310000, min_y = -15000, max_x = 430000,max_y = 235000,
+                  no_pts = 10000, 
+                  id_suffix = "st"
+                  ) %>%
+  mutate(x_y_crs = "wa_north_m_32148") %>%
+  
+  # add lat/long coordinates
+  add_crs(dt = ., 
+                original_crs = 32148, original_coords = c("x", "y"), 
+                new_crs = 4326, new_coord_names = c("long", "lat") 
+                ) 
+
+ 
+```
+
+```{r}
+#plot to make sure it looks ok
+st_grid %>%
+  #look at a few points to make sure they look even
+  filter(x < quantile(x, 0.05),
+         y < quantile(y, 0.03),
+         ) %>%
+  ggplot(aes(x=x, y=y)) + 
+  geom_point() +
+  #  ensures that one unit on the x-axis is the same length as one unit on the y-axis
+  coord_fixed(ratio = 1) 
+
+
+#write.csv(st_grid, file = file.path("Output", "st_grid.csv"), row.names = F)
+
+```
+
+
+
+ 
+ 

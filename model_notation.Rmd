@@ -1,0 +1,129 @@
+---
+title: "Models"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  word_document: default
+editor_options:
+  chunk_output_type: console
+---
+
+
+```{r, echo=F} 
+knitr::opts_chunk$set(echo = F)
+
+pacman::p_load(knitr, 
+               tinytex
+               ) #need tinytext for exporting to pdf
+
+
+```
+
+```{r}
+# render to a word doc - note this needs to be entered into the console or terminal (after opening R), not kept in the script itself
+## ERROR rendering
+# rmarkdown::render(input = "model_notation.Rmd", output_format = "word_document")
+ 
+
+# numbering equations works for pdfs using the following format: 
+# 
+# \begin{equation}
+# \bar{x} = \frac{1}{n} \sum_{i=1}^{n}x_{i}.
+# \label{eq:mean}
+# \end{equation}
+
+```
+
+
+
+# Aim 3
+
+### --> upate what f goes to (2 or 3)
+
+We hypothesize that we can predict TRAP concentrations at a particular location and time given a location's geocovariates (some of which will vary over time) and a temporal trend that accounts for decreasing TRAP concentrations over time, with some prediction error due to some unknowns. Our assumed underlying model is: 
+
+
+$$Conc_{s,t} = exp \left (\theta_0 + \sum_{f=1}^{3}\theta^{f} Z_{s}^{f} + \theta^{pop} Z_{s,t}^{pop} + \theta^{NDVI} Z_{s,t}^{NDVI} + \theta^{EC} Z_{s,t}^{EC} + \epsilon_{s} \right )   \alpha_{t}^{trend} + \epsilon_{t}  ~~~~(1)$$
+
+Where:
+
+* $Conc_{s,t}$ denotes the annual-average BC (ng/m3) or UFP (pt/cm3) concentration for a particular location $s$ within our study area and year $t$, where $t=1995-2019$.
+
+* $Z$ are PLS scores (dimension-reduced, linear combinations of geocovariate predictors) for locations $s$. They are fixed over time ($Z_s$), or are for a specific year $t$ ($Z_{s,t}$). Specifically: 
+
+  - $f$ denotes multiple land geocovariates that are fixed ($f$) in time (e.g., elevation, roads)
+  - $pop$ denotes population density geocovariates
+  - $NDVI$ denotes Normalized Difference Vegetation Index (NDVI) geocovariates
+  - $EC$ denotes elemental carbon (EC) emissions geocovariates
+
+* $\theta$ are the model coefficients.
+
+* $\alpha_{t}^{trend}$ is a temporal trend describing decreasing TRAP concentrations over time not otherwise captured by the time-varying PLS scores
+
+* $\epsilon_{s}$ is the residual term that varies over space with mean zero and a geostatistical structure assumed to be an exponential function with range $\phi_s$, partial sill $\sigma_s^2$ and nugget $\gamma_{s}^2$ $\left( \epsilon_{s} \sim N(0, \sum(\phi_s, \sigma_s^2, \gamma_s^2)) \right)$. 
+
+
+* $\epsilon_{t}$ is the residual term for a given year
+
+
+Given our data from the mobile monitoring campaign, we hypothesize the underlying model for the 2019 exposure surface ($t=2019$) to be the following:
+
+$$Ln(Conc_{s,t=2019}) = \theta_0 + \sum_{f=1}^{3}\theta^{f} Z_{s}^{f} + \theta^{pop} Z_{s,t=2019}^{pop} + \theta^{NDVI} Z_{s,t=2019}^{NDVI} + \theta^{EC} Z_{s,t=2019}^{EC} + \epsilon_{s} ~~~~(2)$$
+
+Where: 
+
+* $Ln(Conc_{s,t=2019})$ is the log-transformed annual-average BC (ng/m3) or UFP (pt/cm3) concentration for 2019.   
+* $\alpha_{t}^{trend}$ and $\epsilon_{t}$ are omitted in this model since the model is defined for a single, reference year 
+
+We estimate the modeling parameters for a UK model with PLS in order to predict the outcome at locations within our study area. The estimated concentrations in UK are a given by both regression and kriging:
+
+$$\hat{Ln(Conc_{s,t=2019})} = \hat{\theta}_0 + \sum_{f=1}^{3}\hat{\theta}^{f} \hat{Z}_{s}^{f} + \hat{\theta}^{pop} \hat{Z}_{s,t=2019}^{pop} + \hat{\theta}^{NDVI} \hat{Z}_{s,t=2019}^{NDVI} + \hat{\theta}^{EC} \hat{Z}_{s,t=2019}^{EC} + \hat{\epsilon}_s ~~~~(3)$$
+
+where:
+
+* ($\hat{Ln(Conc_{s,t=2019})}$) is the predicted log-transformed annual-average BC (ng/m3) or UFP (pt/cm3) concentration for 2019
+
+
+* $\hat{Z}$ values are estimated from PLS regression used to predict $\hat{Ln(Conc_{s,t=2019})}$ from geocovariate predictors, such that: $\hat{Z}_{i}^{m} = \sum_{j=1}^p \hat{\phi}_{j}^m X_{i,j}$, where: 
+  - $p$ are our original geocovariate predictors    
+  - $m$ is the PLS component number. For space-varying geocovariates ($f$), $m=f=\{1,2,3\}$ since two PLS components are used, based on the results from Aim 2. For space-time-varying geocovariates ($pop$, $NDVI$ and $EC$), $m=1$ and we substitute the covariate name for m since only the first PLS component is used.     
+  - $i$ is an index defined as $s$ for space-varying covariates and $s,t$ for space-time-varying covariates. 
+ 
+```{r}
+# deleted - repetitive?
+# * The PLS regression loadings $\left(\sum_{j=1}^p \phi_{j,m}\right)$ are calibrated using TRAP concentrations and geocovariates from our mobile monitoring campaign ($t=2019$) $\left(\sum_{j=1}^p \hat{\phi}_{j,m}\right)$
+
+```
+
+* $\hat{\theta}$ are the estimated model coefficients derived from measured TRAP concentrations and PLS scores from our 2019 mobile monitoring campaign.
+
+* $\hat{\epsilon}_s$ is the kriging contribution to the overall model prediction, a linear combination of the model residuals that is are weighted based on distance by the estimated covariance matrices for the monitored and unmonitored locations, and between monitored locations, such that residuals at monitoring locations closer to prediction sites are given a higher weight. These parameters are estimated for $t=2019$, the mobile monitoring campaign year. 
+
+Next, we estimate TRAP concentrations from 1995-2019 at cohort locations within our study area using a two-step approach. **An important feature of this fitted model is its reliance on the PLS regression loadings and the estimated kriging contribution from our 2019 mobile monitoring campaign.**
+
+
+First, the fitted model is used to estimate TRAP concentrations at new locations and for specific times based on space- and space-time- varying geocovariates.  
+
+Next, we exponentiate and scale them by an estimated temporal trend to **more thoroughly  [vs "fully"]**  account for the fact that TRAP concentrations have been steadily decreasing since the early 1990s:
+
+$$\hat{Conc}_{s,t} = exp \left(\hat{\theta}_0 + \sum_{f=1}^{3}\hat{\theta}^{f} Z_{s}^{f} + \hat{\theta}^{pop} Z_{s,t}^{pop} + \hat{\theta}^{NDVI} Z_{s,t}^{NDVI} + \hat{\theta}^{EC} Z_{s,t}^{EC} + \hat{\epsilon}_s) \right) \hat{\alpha}_t^{trend} ~~~~(4)$$
+
+
+Where: 
+
+* ($\hat{Conc_{s,t}}$) is the predicted annual-average BC (ng/m3) or UFP (pt/cm3) concentration for a given location within our study area and study period.
+
+* $\hat{\alpha}_t^{trend}$ estimates the temporal trend in TRAP ($\alpha_t^{trend}$) based on historical observations of EC at the Beacon Hill AQS site. It is calculated as the ratio of the predicted EC concentration for any given study year t ($\hat{EC}_t$) and the predicted EC concentration for 2019, the reference year ($\hat{EC}_{t=2019}$):
+
+__What is the purpose of possibly fitting a spline to ln EC? To upweight earlier/smaller years?__
+	
+$$\hat{\alpha}_t^{trend} = \hat{EC_{t}} / \hat{EC}_{t=2019}   ~~~~(5)$$
+
+* 
+  - we use a natural cubic spline function, $\hat{f}(t)$, to estimate $\hat{EC_{t}}$, where $\hat{f}(t)$ has 2 knots at $t=\{2005, 2012\}$ (3 degrees of freedom) and boundary knots at $t=\{1997, 2018\}$, the first and last years of observed EC readings. This model is thus extrapolated to 1995 and 2019.
+
+$$\hat{EC_{t}} = \hat{f}(t) ~~~~(6)$$  
+
+ 
+ 
+

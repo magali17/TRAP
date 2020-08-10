@@ -1,0 +1,336 @@
+---
+title: "CA Sampling Simulations"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output:
+  html_document:
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+editor_options: 
+  chunk_output_type: console
+---
+
+### --> note, will have issue adding water on top? or will have to just color grid points (no smoothing)?? 
+### --> check after get real grid. does QGIS produce a better map?
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=F, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      dpi=300
+                      #fig.height = 6
+                      )  
+set.seed(1)
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+      detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+# Load key packages using pacman 
+my_repo <- 'http://cran.r-project.org'
+if (!require("pacman")) {install.packages("pacman", repos = my_repo)}
+
+pacman::p_load( 
+               #ggforce,
+               sf, #mapping
+               
+               #readraster
+               raster, stars, 
+               
+               ggspatial, #mapping, adding scales, N arrows...
+               ggrepel, #avoid overlapping labels
+               kableExtra,
+               ggmap, # get_stamenmap() # NEED?
+               #caret, #need?
+               #attach these last to use these functions as the defaults?
+               tidyverse,
+               lubridate
+               )  
+
+ 
+
+# ggplot settings
+theme_set(theme_bw())
+#theme_update(legend.position = "bottom")
+```
+
+```{r}
+crs_m <- 32148
+crs_deg <- 4326
+
+```
+
+# notes: 
+* CRS: 32148 is in meters
+* CRS: 4326 is in degrees
+
+
+```{r}
+source("map_fns.R")
+
+        # CRS is 4326
+st_area <- read_sf(file.path("..",  "GIS", "Shapefiles", "Study area", "Spatiotemporal",  "st_area_land.shp"))
+
+water <- read_sf(file.path("..",  "GIS", "Shapefiles", "Other features", "Water", "DNR_Hydrography__Water_Bodies",  "DNR_Hydrography__Water_Bodies.shp"))
+
+ 
+
+cohort_jittered <- st_as_sf(read.csv(file.path("Data", "ACT", "cohort_st_pm25_preds_jittered_1000.csv")),
+                            #USA_Contiguous_Lambert_Conformal_Conic 
+                            coords=c("jitter_lamb_x","jitter_lamb_y"), crs=102004,
+                            remove=F
+                            ) %>%
+  #put on same CRS as
+  st_transform(crs = crs_deg) %>%
+  mutate(
+    map_pt = sample(c(1:100), size = nrow(.), replace = T,# prob = c(pts_to_plot, 1-pts_to_plot) 
+                    )/100
+  )
+
+
+```
+
+
+```{r}
+# grid w/ predictions
+grid0 <- read.csv(file.path("Data", "Grid predictions", "grid_predictions_20200807.csv"))[-1]
+
+grid <- grid0 %>% 
+  filter(year == 2010)
+  
+grid_shp <- st_as_sf(grid, 
+                     coords = c("latitude", "longitude"), crs = crs_deg, remove = F)
+
+
+# # export grids for QGIS use
+# grid %>%
+#   filter(grepl("st", grid$native_id)) %>%
+#   write.csv(., file.path("Data", "Grid predictions", "grid_predictions_20200807_st_2010.csv"), row.names = F)
+# 
+# grid %>%
+#   filter(grepl("dt", grid$native_id)) %>%
+#   write.csv(., file.path("Data", "Grid predictions", "grid_predictions_20200807_dt_2010.csv"), row.names = F)
+
+
+```
+
+
+
+```{r, D?}
+# SURFACE
+### --> UPDATE
+pm25 <- st_as_sf(read.csv(file.path("Data", "ACT", "cohort_st_pm25_preds_jittered_1000.csv")),
+                            coords=c("longitude","latitude"), crs = 4326,
+                            remove=F
+                            )  
+
+
+blank_grid <- st_as_sf(read.csv(file.path("Output", "st_grid.csv")),
+                            coords=c("long","lat"), crs = 4326, remove=F
+                            ) %>% 
+  #only keep points in ST area
+  mutate(intersects =as.logical(st_intersects(., st_area)),
+         #fake conc estimates
+         conc = rnorm(n = nrow(.), mean = 5, sd=1)
+         ) %>%
+  filter(intersects)
+
+
+# --> update
+
+pm25_surface <- read_stars(file.path("..",  "GIS", "Shapefiles", "Predictions", "PM2.5 from jittered cohort.tif")) %>%
+  st_transform(crs = 4326) #%>%
+  #drop NA values
+  #filter(!is.na(PM2.5_from_jittered_cohort))
+
+# # ALTERNATIVE
+# 
+pm25_surface2 <- raster(file.path("..",  "GIS", "Shapefiles", "Predictions", "PM2.5 from jittered cohort.tif")) #%>%
+  # #convert to df and then sf for plotting
+  # as.data.frame(xy=TRUE) #%>%
+  # st_as_sf(coords=c("x","y"), remove=F,
+  #                           #USA_Contiguous_Lambert_Conformal_Conic
+  #                           crs=102004) %>%
+
+#reproject CRS
+pm25_surface2 <- projectRaster(pm25_surface2, crs = crs(cohort_jittered))
+
+# resolution. no need to adjust?
+#res(pm25_surface2)
+
+# 
+pm25_surface2 <- pm25_surface2 %>% 
+  #need df for plotting
+  as.data.frame(xy=TRUE) %>%
+  #drop NA values
+  filter(!is.na(PM2.5_from_jittered_cohort))
+
+
+# #add new lat/long coordinates
+# coords <- st_coordinates(pm25_surface2) %>%
+#   as.data.frame() %>%
+#   rename(
+#     long = X,
+#     lat = Y
+#   )
+
+# pm25_surface2 <- bind_cols(pm25_surface2, coords) %>%
+#   #drop NA values
+#   filter(!is.na(PM2.5_from_jittered_cohort))
+
+```
+
+ 
+
+
+
+
+```{r}
+background_map <- suppressMessages(get_stamenmap(bbox = add_bbox_buffer(st_area, 
+                                                                        x_buffer = 0.5, 
+                                                                        y_buffer = 0.1
+                                                                        ),
+#terrain, terrain-background, terrain-labels, terrain-lines, toner, toner-2010, toner-2011, toner-background, toner-hybrid, toner-labels, toner-lines, toner-lite, or watercolor
+                                                 maptype = "toner-lite", #"terrain-lines",   #"terrain-background",
+                                                 zoom = 8
+                                                 )) 
+
+#background_map %>% ggmap()
+
+
+```
+
+### --> ? try using geom_raster() w/ ggmap() when have a denser network? still will have issue of projecting to water
+
+```{r, D? old code with issues, eval=F}
+#ggmap(ggmap = background_map) +
+ 
+
+
+ggplot() +
+  #only works w/ ggplot()
+  # get error w/ use ggmap() : Error: geom_raster only works with Cartesian coordinates
+    geom_raster(data = pm25_surface2,
+              aes(x = x, y = y,
+                  fill = PM2.5_from_jittered_cohort,
+
+                  # what does this do?
+                  #interpolate=TRUE
+                  )
+              )  
+ 
+# takes LONG time to load
+ggmap(ggmap = background_map) +
+  geom_tile(data = pm25_surface2, 
+          aes(x = x, y = y, fill = PM2.5_from_jittered_cohort))   
+
+
+# ggplot() +
+# #takes a long time to load
+# geom_stars(data = pm25_surface, #aes(x = x, y = y,
+#             #col = PM2.5_from_jittered_cohort
+#                                         )
+#               
+
+   # WRONG: this is a density plot. shows where most of the points are.
+  # stat_density_2d(data = pm25,
+  #             aes(x = longitude,
+  #                 y = latitude,
+  #                 fill = conc_lt
+  #                 #fill = stat(level)
+  #                 ),
+  #             alpha = .2,
+  #             bins = 25,
+  #             geom = "polygon"
+  #             )
+ 
+
+ 
+
+  
+```
+
+### --> see if this looks similar to QGIS plot? 
+
+```{r}
+plot_pts <- 0.05 
+ 
+ggmap(ggmap = background_map) +
+   #for some reason this doesn't plot anything..??? need it for the scale bar
+  geom_sf(data=grid_shp[grepl("st", grid_shp$native_id),],
+          aes(col = avg_PM25),
+          inherit.aes = FALSE,
+          alpha=0.1,
+          #size=0.5
+          )  +
+  #PM2.5 surface
+  geom_point(data=grid_shp[grepl("st", grid_shp$native_id),],
+          aes(x=longitude, y=latitude, col = avg_PM25),
+          alpha=0.3,
+          #size=0.5
+          )  +
+
+ 
+
+
+  # # create smooth surface
+  # stat_summary_2d(data=grid_shp[grepl("st", grid_shp$native_id),],
+  #                 aes(x = longitude, y = latitude, z = avg_PM25),
+  #                 fun = "mean",
+  #                 #bins = 200, # issue? bins are taller than they are wide
+  #                 binwidth = c(0.03, 0.03),
+  #                 alpha=0.8
+  #                 ) +
+  
+  
+  # #jittered cohort
+  # #only plot 30% of the points  
+  # geom_sf(data = filter(cohort_jittered, map_pt <=plot_pts),
+  #         #aes(col = "ACT"),
+  #         #col="blue",
+  #         
+  #         inherit.aes = FALSE,
+  #         alpha=0.4,
+  #         ) +
+  #select specific color for labeled color
+  #scale_color_manual(name = element_blank(),
+  #labels = c("ACT\nLocation"),
+  #values = "blue") +
+  
+    # add scale & N arrow to top left
+    annotation_scale(location = "tr",
+                     #width_hint = 0.5
+                     ) +
+    annotation_north_arrow(location = "tr",
+                           #point towards North Pole
+                           which_north = "true",
+                          # pad_x = unit(0.75, "in"),
+                           pad_y = unit(0.5, "in"),
+                           style = north_arrow_fancy_orienteering
+                           ) +
+    theme(
+        # Put bottom-left corner of legend box in bottom-left corner of graph
+        legend.justification=c(1,0), legend.position=c(1,0),
+        legend.background = element_blank()
+          ) +
+    scale_color_gradient(low = "yellow", high = "red") +
+    #scale_fill_gradient(low = "yellow", high = "red") +
+    labs( 
+         col = "PM2.5",
+         title = "PM2.5 (ug/m3) Predictions from the ST Model", # \nwith Jittered cohort residences",
+         #caption = paste0("1 cohort dot = ", round(1/plot_pts, 1), " locations"),
+         x = "Longitude",
+         y = "Latitude"
+         )
+  
+
+
+```
+

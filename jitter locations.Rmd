@@ -1,0 +1,162 @@
+---
+title: "Location Jittering"
+author: "Magali Blanco"
+date: ' `r Sys.Date()` '
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+# About this script 
+
+Purpose:  
+* script jitteres locations, typically for mapping Cohort locations
+
+Notes:   
+* jittering results in some locations being moved to water locations. This may only be a problem if generating a highly zoomed in map. 
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F,  
+                      cache=F, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE
+                      )  
+
+# Clear workspace of all objects and unload all extra (non-base) packages
+rm(list = ls(all = TRUE))
+if (!is.null(sessionInfo()$otherPkgs)) {
+  res <- suppressWarnings(
+    lapply(paste('package:', names(sessionInfo()$otherPkgs), sep=""),
+           detach, character.only=TRUE, unload=TRUE, force=TRUE))
+}
+
+pacman::p_load(kableExtra,
+               tidyverse
+               
+               )
+
+source("0.Global_Fns.R")
+
+set.seed(1)
+
+```
+
+# Calculating the maximum jittered distance between original and jittered lcoations 
+
+Since jittering occurs in the x and y directions, the final distance between an original and a jittered location can be calculated using the Pythagorean Theorem:
+
+$$a^2 + b^2 = c^2 $$
+
+where:   
+* $a$ and $b$ are the amount of jittering that occurs in the lambert_x and lambert_y coordinates, and $c$ is the difference between the original and the jittered location
+
+We will jitter x and y the same amount such that $a=b$ and thus:
+
+$$a^2 + a^2 = c^2 $$  
+$$2a^2 = c^2 $$
+
+If we want to set a maximum jittered distance ($c$), we can solve for $a$ to determine how much jittering should occur in both directions:
+
+$$a = \sqrt{\frac{c^2}{2} } $$
+
+
+```{r}
+# fn calculates jittering "amount" given a maximum distanace that any point should be jittered
+
+max_point_distance <- function(c){
+  a =sqrt(c^2/2)
+  return(a)
+  
+}
+
+```
+
+
+```{r}
+max_dist <- 1000
+
+```
+
+Thus, if we want the maximum jittered distance (c) = `r max_dist` m, lambert_x and y should be jittered by the following amount (a): 
+
+```{r}
+max_point_distance(max_dist)
+
+```
+
+
+# Jitter Cohort locations in the ST area
+
+```{r}
+cohort0 <- read.csv(file.path("Data", "ACT", "cohort_st_pm25_preds.csv"))[-1]
+
+cohort <- cohort0 %>%
+  mutate(
+    jitter_lamb_x = jitter(lambert_x, 
+                      # min/max amount of jittering that shoud be done (in CRS units - m)
+                      amount = max_point_distance(max_dist)
+                      ),
+    jitter_lamb_y = jitter(lambert_y, 
+                      # min/max amount of jittering that shoud be done (in CRS units - m)
+                      amount = max_point_distance(max_dist)
+                      ),
+    
+    
+  )
+
+```
+
+```{r}
+# # difference between jitter & original coordinates
+# cohort %>%
+#   mutate(
+#     diff_x = jitter_lamb_x - lambert_x
+#   ) %>%
+#   distribution.table(var.string = "diff_x")
+ 
+
+#difference in original and jittered location (c)
+cohort %>%
+  mutate(
+    c = sqrt((jitter_lamb_x-lambert_x)^2 + (jitter_lamb_y-lambert_y)^2)
+  ) %>%
+  distribution.table(var.string = "c") %>%
+  kable(caption = "Amount of jittering (m) that occurred for the cohort locations.") %>%
+  kable_styling()
+
+ 
+cohort %>%
+  mutate(
+    c = sqrt((jitter_lamb_x-lambert_x)^2 + (jitter_lamb_y-lambert_y)^2)
+  ) %>%
+  ggplot(aes(x=c)) +
+  geom_histogram() + 
+  labs(x= "Total Point Location Jittering (m)",
+      title = "Amount of jittering (m) that occurred for the cohort locations."  
+       )
+
+
+```
+
+
+### --> Future work: see tutorial for ensuring that jittering is within a polygon? note: ST land area polygon may have geometry issues? 
+
+https://stackoverflow.com/questions/27622483/how-can-ggplot2-keep-jittered-locations-within-a-map-boundary-such-as-a-us-stat 
+
+ 
+
+
+# Save datasets
+
+```{r}
+# cohort %>%
+#   # only keep jittered locations & PM2.5 predictions
+#   #select(location_id, jitter_lamb_x, jitter_lamb_y, conc_lt) %>%
+#   write.csv(., file = file.path("Data", "ACT", paste0("cohort_st_pm25_preds_jittered_",max_dist,  ".csv")),
+#             row.names = F)
+
+
+
+```
+

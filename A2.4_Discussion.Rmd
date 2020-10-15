@@ -1,9 +1,17 @@
 ---
-title: "Other studies"
-output: html_document
-editor_options: 
+title: 'Aim 2: Discussion'
+author: "Magali Blanco"
+date: '`r Sys.Date()`'
+output:
+  html_document:
+    number_sections: yes
+    df_print: paged
+    toc: yes
+    toc_depth: '3'
+editor_options:
   chunk_output_type: console
 ---
+
 
 **TO DO**   
 
@@ -40,12 +48,9 @@ text_size <- 3
 
 ```
 
+# UFP 
 
-# Aim 2 
-
-## UFP 
-
-### Concentrations in other studies
+## Concentrations in other studies
 
 
 ```{r}
@@ -76,65 +81,6 @@ ufp <- ufp0 %>%
          
 ```
 
-
-```{r, fig.height=6, eval=F}
-#label position
-set.seed(2)
-
-ufp0 %>%
-  ggplot(aes(x=Country, y=Mean,
-             col = grepl("This Study", ufp0$Title),
-             #col = Country,
-             label = Location,
-             
-             )) + 
-   
-  
-
-  # #city names 
-  geom_text_repel(size = text_size, #ifelse(grepl("Seattle", ufp0$Location), 5, 4), 
-                  fontface = "plain", # ifelse(grepl("Seattle", ufp0$Location), "bold", "plain"),
-                   ) +
-  
-  #this study
-  geom_hline(yintercept = ours$Mean,
-             linetype = "dashed",
-             alpha=0.5
-             ) +
-  # annotate(geom="text", x=1, y= ours$Mean+1500,
-  #          label="This Study",
-  #          #color="red",
-  #          fontface =2,
-  #          size=4
-  #          ) +
-  
-  #city locations & y axis scale
-  geom_point(alpha=0.6,
-             size = 2 #ifelse(grepl("Seattle", ufp0$Location), 3, 2)
-             ) +
-  # Add a second axis and specify its features
-  scale_y_continuous(sec.axis = sec_axis(~./ours$Mean, 
-                                         name="UFP relative to this study", 
-                                         breaks = seq(1,8)
-                                         )
-                     ) +
-  #theme_classic(base_size = 15) + 
-  theme(axis.text.x  = element_text(angle=90,), 
-        
-        legend.position = "none",
-        plot.caption = element_text(size=8,
-                                    #left justify
-                                    hjust = 0),
-        ) + 
-  labs(title = "Mean UFP levels reported by current studies",
-       y = "UFP Conc (pt/cm3)",
-       caption = "AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"
-       )
-
-  
-```
-
-simpler alternative to above
 
 ```{r}
 set.seed(2)
@@ -253,7 +199,7 @@ ufp0 %>%
 
 
 
-### Model performances
+## Model performances
 
 ```{r}
 ufp_r2 <- readxl::read_xlsx(file.path("..", "References", "Mean UFP & BC comparison.xlsx"), sheet = 3) %>%
@@ -576,9 +522,9 @@ ufp_r2 %>%
 
 
 
-## BC 
+# BC 
 
-### Concentrations in other studies
+## Concentrations in other studies
 
 ```{r}
 bc0 <- readxl::read_xlsx(file.path("..", "References", "Mean UFP & BC comparison.xlsx"), sheet=2) %>%
@@ -601,160 +547,6 @@ bc_ours <- bc0 %>%
 
 ```
 
-```{r, fig.height=6, eval=F}
-
-#label position
-set.seed(2)
-
-bc0 %>%
-  ggplot(aes(x=Country, y=Mean,
-             col = grepl("This Study", bc0$Title),
-             #col = Location,
-             label = Location,
-             )) + 
-
-  # #city names 
-  geom_text_repel(size = text_size, #ifelse(grepl("Seattle", ufp0$Location), 5, 4), 
-                  fontface = "plain", # ifelse(grepl("Seattle", ufp0$Location), "bold", "plain"),
-                   ) +
-  
-  #this study
-  geom_hline(yintercept = bc_ours$Mean,
-             linetype = "dashed",
-             alpha=0.5
-             ) +
-  
-  #city locations & y axis scale
-  geom_point(alpha=0.6,
-             size = 2 #ifelse(grepl("Seattle", ufp0$Location), 3, 2)
-             ) +
-  # Add a second axis and specify its features
-  scale_y_continuous(sec.axis = sec_axis(~./bc_ours$Mean, 
-                                         name="Normalized", 
-                                         breaks = c(1, seq(5,20, 5))
-                                         )
-                     ) +
-  theme_classic(base_size = 15) + 
-  theme(axis.text.x  = element_text(angle=90,), 
-        
-        legend.position = "none",
-        plot.caption = element_text(size=8,
-                                    #left justify
-                                    hjust = 0),
-        ) + 
-  labs(title = "Mean BC levels reported by current studies",
-       y = "BC Conc (ng/m3)",
-       caption = "AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"
-       )
-
-  
-
-```
-
-```{r, fig.height = 6, eval=F}
-# ?? delete, not using plot
-
-# **this is not a comprehensive list**
-# Using Avg/Median observations 
-mean_median_estimates <- data.frame(
-  Location = c(
-    "Puget Sound",
-    "Oakland, CA",
-    "The Netherlands",
-    "Toronto, CA",
-    "New Delhi, India",
-    "Newark, NJ",
-    "Minneapolis, MN",
-    "Warwick, RI"
-               ),
-  Geographic_Area = NA,
-  Min = c(
-    500,
-    400,
-    1100,
-    1500,
-    600,
-    2500,
-    700,
-    500
-    ),
-  Max = c(
-    500,
-    1000,
-    2300,
-    1800,
-    2100,
-    2500,
-    2500,
-    500
-    ),
-  
-  Source = c(
-    #"Puget Sound"
-    "This Study",
-    # "Oakland, CA"
-    "Apte et al., 2017",
-    # "The Netherlands"
-    "Kerckhoffs et al. 2016 & 2017, Montagne et al. 2015",
-    #"Toronto, CA"
-    "Minet et al. 2018",
-    #New Delhi, India
-    "Saraswat et al. 2013",
-    # Newark, NJ
-    "Yu et al. 2016",
-    # Minneapolis, MN
-    "Hankey et al. 2015",
-    # Warwick, RI
-    "Dodson et al., 2009"
-    )
-   
-  
-) %>%
-  group_by(Location) %>%
-  mutate(
-    middle = mean(c(Min, Max))
-  )
-   
-
-
-#Plot of BC estimates from different studies
-
-our_bc_mean <- 500
-
-mean_median_estimates %>%
-  filter(Source != "This Study") %>%
-  ggplot(aes(x=Location)) +
-  geom_linerange(aes(ymin = Min, ymax = Max)) +
-  geom_point(aes(y=middle)) +
-  geom_hline(aes(yintercept=our_bc_mean, col= "This Study")) + 
-  annotate(geom="text", x=1, y=our_bc_mean+100, 
-           label="This Study",
-           color="red", 
-           fontface =2,
-           size=5
-           ) +
-  labs(
-    title = "Estimated mean or median BC concentrations from various studies",
-    subtitle = "Lines indicate the range of mean/median study estimates. \nDots are the center of each range.",
-    #wrap long string
-    caption = wrapper(paste0("Sources: ", 
-                     paste0(mean_median_estimates$Source, collapse = "; ")), 
-                     width=120 ),
-    y= "BC Conc (ng/m3)"
-    
-    ) +
-
-  theme_classic(base_size = 15) + 
-  theme(axis.text.x  = element_text(angle=90), 
-        legend.position = "none",
-        plot.caption = element_text(size=8, 
-                                    #left justify
-                                    hjust = 0),
-        ) 
-
-```
-
-simpler alternative to above
 
 ```{r}
 set.seed(2)
@@ -821,7 +613,7 @@ bc0 %>%
 ```
 
 
-### Model Performance 
+## Model Performance 
 
 ```{r}
 bc_r2 <- readxl::read_xlsx(file.path("..", "References", "Mean UFP & BC comparison.xlsx"), sheet = 4) %>%

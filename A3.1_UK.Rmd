@@ -11,13 +11,16 @@ editor_options:
 ---
 
 **TO DO**
-* --> ? parallel code
+
+### -->  spatial PM2.5 variation change over time analysis. Are the spatial contrasts conserved overtime? if trends are generally conserved, could justify this aim? could just use a trend adjustment for long-term exposure assessment?
+
+* ? apply a different trend?
 * update model notation   
 * Waiting for new data to update the script   
   - new TVCs for all existing datasets   
   - new TVCs for new datasets: extended AQS sites, new grid   
 * update PLS component numbers & UK plotting distance parameters after fit final Aim 2 model
-* ? apply a different trend?
+
 
 
 ```{r setup, include=FALSE}
@@ -48,7 +51,7 @@ pacman::p_load(knitr, kableExtra,
                akima, # interp() - interpolate predictions on map
                ggpubr, tidyverse,
                # 3D mapping
-               rayshader,
+               rayshader
                
                #parallel  # mclapply() for parallized processing;  detectCores()
                )    
@@ -76,6 +79,10 @@ rmse_fn <- function(obs, pred){
   sqrt(mean((obs - pred)^2))
   }
 
+# rmse <- function(obs, pred){
+#   sqrt(mean((obs - pred)^2))
+# }
+
 #returns MSE-based R2
 r2_mse_based <- function(obs, pred) {
   mse.est <- mse(obs, pred)
@@ -83,6 +90,9 @@ r2_mse_based <- function(obs, pred) {
   max(0, r2)
   }
 
+#######
+ 
+ 
 ```
 
 # Purpose & Approach
@@ -119,15 +129,16 @@ For quality control purposes, we:
 
 ## Sensitivity Analyses 
 
+### --> add model w/ just TVCs (& just space covariates?). compare these predictiosn to primary model. If predictions are not that different, TVCS/space cov don't add much to model predictions?
 
 ```{r}
 ### --> ? diff ML approaches: lasso, random forests...with stacked ensemble?
 
 cbind(
-  Analysis = c("Primary: EC emissions, additive temporal trend adjustment", 
-               "NOx Emissions (vs EC)",
-               "Ratio temporal trend adjustment (vs additive)",
-               "No temporal trend adjustment"
+  Analysis = c("Primary: EC emissions, ratio temporal trend adjustment", 
+               "NOx Emissions (vs EC)"
+               #"Ratio temporal trend adjustment (vs additive)",
+               #"No temporal trend adjustment"
                )
   ) %>%
   kable(., caption = "Description of primary and sensitivity analyses") %>%
@@ -400,8 +411,8 @@ pop_2010_2018_prop <-  (acs$Estimate[nrow(acs)] - acs$Estimate[1])/acs$Estimate[
 acs%>%
   ggplot(aes(x=Year, y=Estimate)) +
   geom_point() +
-  labs(title = "1 yr ACS survey total population estimate",
-       subtitle = "for the Seattle-Tacoma_Bellevue metropolitan area"
+  labs(title = "ACS survey total annual population estimates",
+       subtitle = paste0("Seattle-Tacoma_Bellevue metropolitan area:\n ~", round(pop_2010_2018_prop*100, 1), "% annual increase" )
        )
 
 ```
@@ -505,6 +516,7 @@ ec2019_models <- fit_pls(dt = mm, x = ec_model_vars, .ncomp = 1)
 nox2019_models <- fit_pls(dt = mm, x = nox_model_vars, .ncomp = 1)
 
 ```
+
 
 Variability explained by each model.
 
@@ -661,7 +673,10 @@ loading_plots_tvcs(dt = pop2010_models, tvc_name = paste0("population density ("
 loading_plots_tvcs(dt = ndvi2006_models, tvc_name = paste0("NDVI (", ndvi_model_yr, ")"))  
 
 loading_plots_tvcs(dt = ec2019_models, paste0("EC (", emissions_model_yr, ")"))   
-                                                       
+
+# sensitivity
+loading_plots_tvcs(dt = nox2019_models, paste0("NOx (", emissions_model_yr, ")"))   
+                                                      
                       
 ```
 
@@ -671,6 +686,7 @@ loading_plots_tvcs(dt = ec2019_models, paste0("EC (", emissions_model_yr, ")"))
 
 
 #list of different datasets where we want PLS scores
+## these already have NOx covariates
 dt_list <- list(mm = mm, 
                 cohort = cohort, 
                 grid = grid,
@@ -863,18 +879,19 @@ get_scores_ec_models <- function(
   #diff datasets
   .dt,
   # diff pollutant models
-  .pls_model
+  .pls_model,
+  #emissions covariates to use/look for. for sensitivity analyses, change this to "nox"
+  emissions = "ec"
   ) {
   
-  # scores for model years
-  # ec2019_scores <- get_scores(dt = .dt, 
-  #                              # no need to change var names here
-  #                              rename_vars = FALSE,
-  #                              pls_model = .pls_model,
-  #                              rename_components = "ec2019") 
   
+  pattern1 <- paste0("^", emissions, "[0-9]{4}")
   # ec names
-  df_names <- str_match(names(.dt), pattern = "^ec[0-9]{4}") %>% unique() %>% as.vector()
+  df_names <- str_match(names(.dt), pattern = pattern1 #"^ec[0-9]{4}"
+                        ) %>% 
+    unique() %>% as.vector()
+  
+  
   # drop "NA"
   df_names <- df_names[!is.na(df_names)]
 
@@ -899,30 +916,6 @@ get_scores_ec_models <- function(
   #drop NA column
   df <- df %>% select(df_names)
   
-  
-  # scores for other years
-  # ec1990_scores <- get_scores(dt = .dt, 
-  #                              #var names to change to match model variables (for estimating/predicting scores)
-  #                              rename_vars = TRUE, 
-  #                              change_var_name = "ec1990_",
-  #                              pls_model = .pls_model, 
-  #                              rename_components = "ec1990") 
-  # 
-  # ec1995_scores <- get_scores(dt = .dt, 
-  #                              #var names to change to match model variables (for estimating/predicting scores)
-  #                              rename_vars = TRUE, 
-  #                              change_var_name = "ec1995_",
-  #                              pls_model = .pls_model, 
-  #                              rename_components = "ec1995") 
-  # 
-  #  
-  # 
-  # #combine scores for diff years
-  # ec_scores <- cbind(ec1995_scores,                ec2019_scores) 
-  
-  #ec_scores <- cbind(df, ec2019_scores)
-  
-  #return(ec_scores)
   return(df)
   
   }
@@ -930,10 +923,10 @@ get_scores_ec_models <- function(
 
 ```
 
-### --> change to seq_along(dt_list) when get EC cohort estimates
+### --> change to seq_along(dt_list) when get EC cohort estimates (for() loop) here & for nox
 
 ```{r}
- # place to save PLS scores 
+# place to save PLS scores 
 bc_scores_ec <- list()
 ufp_scores_ec <- list()
 
@@ -950,6 +943,30 @@ for (i in c(1,3,4) ) {
 
 ```
 
+```{r}
+# nox 
+
+# place to save PLS scores 
+bc_scores_nox <- list()
+ufp_scores_nox <- list()
+
+### --> change c(1,3,4) to seq_along(dt_list) when get cohort estimates
+
+for (i in c(1,3,4) ) {   
+  #i=1
+  bc_scores_nox[i] <- list(get_scores_ec_models(.dt = dt_list[[i]], .pls_model = nox2019_models$bc,
+                                                emissions = "nox"
+                                                ))
+  ufp_scores_nox[i] <- list(get_scores_ec_models(.dt = dt_list[[i]], .pls_model = nox2019_models$ufp,
+                                                emissions = "nox"
+                                                ))
+  
+  names(bc_scores_nox)[i] <- names(dt_list)[i]
+  names(ufp_scores_nox)[i] <- names(dt_list)[i]
+}
+
+
+```
 
 
 **Combine all PLS scores**
@@ -965,7 +982,12 @@ bc_scores_mm0 <- cbind(mm[site_loc_vars],
                    bc_scores_space$mm,
                    bc_scores_pop$mm,
                    bc_scores_ndvi$mm, 
-                   bc_scores_ec$mm
+                   bc_scores_ec$mm,
+                   
+                   # ?? add NOX here??
+                   # sensitivity
+                   bc_scores_nox$mm
+                   
                    ) %>%
   mutate(Pollutant = "bc")
 
@@ -974,7 +996,11 @@ bc_scores_cohort0 <- cbind(cohort[site_loc_vars],
                    bc_scores_pop$cohort,
                    
                    bc_scores_ndvi$cohort #, 
+                   
                    # bc_scores_ec$cohort
+                   # # sensitivity
+                   # bc_scores_nox$cohort
+                   
                    ) %>% 
   mutate(Pollutant = "bc")
 
@@ -983,7 +1009,10 @@ bc_scores_grid0 <- cbind(grid[site_loc_vars],
                    bc_scores_pop$grid,
                    
                    bc_scores_ndvi$grid, 
-                   bc_scores_ec$grid
+                   bc_scores_ec$grid,
+                   
+                   #sensitivity
+                   bc_scores_nox$grid
                    )%>% 
   mutate(Pollutant = "bc")
 
@@ -992,7 +1021,8 @@ bc_scores_aqs0 <- cbind(aqs[site_loc_vars],
                    bc_scores_pop$aqs,
 
                    bc_scores_ndvi$aqs,
-                   bc_scores_ec$aqs
+                   bc_scores_ec$aqs,
+                   bc_scores_nox$aqs
                    )%>%
   mutate(Pollutant = "bc")
 
@@ -1003,7 +1033,10 @@ ufp_scores_mm0 <- cbind(mm[site_loc_vars],
                    ufp_scores_pop$mm,
                    
                    ufp_scores_ndvi$mm, 
-                   ufp_scores_ec$mm
+                   ufp_scores_ec$mm,
+                   
+                   #sensitivity
+                   ufp_scores_nox$mm
                    ) %>% 
   mutate(Pollutant = "ufp")
 
@@ -1012,7 +1045,8 @@ ufp_scores_cohort0 <- cbind(cohort[site_loc_vars],
                    ufp_scores_pop$cohort,
                    
                    ufp_scores_ndvi$cohort #, 
-                   # ufp_scores_ec$cohort
+                   # ufp_scores_ec$cohort,
+                   # ufp_scores_nox$cohort
                    ) %>% 
   mutate(Pollutant = "ufp")
 
@@ -1021,7 +1055,10 @@ ufp_scores_grid0 <- cbind(grid[site_loc_vars],
                    ufp_scores_pop$grid,
                    
                    ufp_scores_ndvi$grid, 
-                   ufp_scores_ec$grid
+                   ufp_scores_ec$grid,
+                   
+                   #sensitivity
+                   ufp_scores_nox$grid
                    ) %>% 
   mutate(Pollutant = "ufp")
 
@@ -1030,7 +1067,10 @@ ufp_scores_aqs0 <- cbind(aqs[site_loc_vars],
                    ufp_scores_pop$aqs,
 
                    ufp_scores_ndvi$aqs,
-                   ufp_scores_ec$aqs
+                   ufp_scores_ec$aqs,
+                   
+                   #sensitivity
+                   ufp_scores_nox$aqs
                    ) %>%
   mutate(Pollutant = "ufp")
 
@@ -1047,8 +1087,6 @@ aqs_scores0 <- rbind(bc_scores_aqs0, ufp_scores_aqs0)
 ```
 
 
-
-
 Plots of TVCs over time.
 
 * Population PLS scores generally increase over time (increasing population density?)
@@ -1058,6 +1096,44 @@ Plots of TVCs over time.
 
 * NDVI ______    
 * EC emissions ______
+
+
+Mobile monitorig PLS scores
+
+```{r}
+mm_scores0 %>%
+  # select(
+  #   Pollutant,
+  #   space1, space2, pop2010, 
+  #   ### --> update
+  #   ndvi2006,
+  #   ec2019
+  #   ) %>%
+   
+  gather("TVC", "value", #space1:ec2019 #c(
+    # space1, space2, pop2010, 
+    # ### --> update
+    # ndvi2006,
+    # ec2019
+    
+   paste0("pop", census_data_yrs),
+   paste0("ndvi", ndvi_data_yrs),
+   paste0("ec", emissions_data_yrs),
+   contains("space")
+         ) %>%
+  separate(col = TVC, 
+           into = c("TVC", "Year"), 
+           sep = "(?<=[A-Za-z])(?=[0-9])" 
+           ) %>%
+  mutate(TVC = toupper(TVC)) %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
+  group_by(Pollutant, Covariates=TVC, Year) %>%
+  distribution.table(var.string = "value", round.int = 1) %>%
+  kable(caption = "Distribution of PLS scores for the mobile monitoring locations, by pollutant and TVC") %>%
+  kable_styling()
+
+```
+
 
 ### --> replace all of grid_scores0 w/ cohort_scores0 once get all TVCs for cohort?
 
@@ -1082,33 +1158,231 @@ grid_scores0 %>%
 
 ```{r}
 
-grid_scores0 %>%
-  #            --> update when get new emission covariates
-  gather("tvc", "value", starts_with(c("pop", "ndvi", "ec"))) %>%
-  mutate(
-    Year = substr(tvc, nchar(tvc)-3, nchar(tvc)),
-    tvc = substr(tvc, 1, nchar(tvc)-4),
-    
-    #rename TVCs - for plotting
-    tvc = recode_factor(factor(tvc),
-                        "pop" = "Population Density",
-                        "ndvi" = "NDVI"
-                        ),
-    Pollutant = toupper(Pollutant)
-  ) %>%
-
-  ggplot(aes(x=value, fill=Year)) + 
-  geom_density(alpha=0.3) + 
-  facet_grid(Pollutant~tvc, scales="free") + 
-  labs(
-    title = "PLS scores for TVCs at grid locations",
-    x = "PLS score"
-    #subtitle = ""  
-  ) +
-  scale_fill_brewer(palette = "Spectral")  
+# grid_scores0 %>%
+#   #            --> update when get new emission covariates
+#   gather("tvc", "value", starts_with(c("pop" #, "ndvi", "ec"
+#                                        ))) %>%
+#   mutate(
+#     Year = substr(tvc, nchar(tvc)-3, nchar(tvc)),
+#     tvc = substr(tvc, 1, nchar(tvc)-4),
+#     
+#     #rename TVCs - for plotting
+#     tvc = recode_factor(factor(tvc),
+#                         "pop" = "Population Density",
+#                         "ndvi" = "NDVI"
+#                         ),
+#     Pollutant = toupper(Pollutant)
+#   ) %>%
+# 
+#   ggplot(aes(x=value, fill=Year)) + 
+#   geom_density(alpha=0.3) + 
+#   facet_grid(Pollutant~tvc, scales="free") + 
+#   labs(
+#     title = "PLS scores for TVCs at grid locations",
+#     x = "PLS score"
+#     #subtitle = ""  
+#   ) +
+#   scale_fill_brewer(palette = "Spectral")  
 
 
 ```
+
+
+ 
+
+Compare the distribution of the PLS scores at MM locations used to fit & transform all other geocovariates at cohort locations to linear combinations
+
+### --> replace grid w/ cohort predictions & change Location description to "Cohort"
+
+```{r}
+mm_og_scores <- mm_scores0 %>%
+  select(
+    Pollutant,
+    #space1, space2, 
+    pop2010, 
+    ### --> update
+    ndvi2006,
+    ec2019,
+    
+    #sensitivity
+    nox2019
+    ) %>%
+  gather("TVC", "value", c(pop2010, ndvi2006, ec2019,
+                           # sensitivity
+                           nox2019
+                           )) %>%
+  separate(col = TVC, 
+           into = c("TVC", "Year"), 
+           sep = "(?<=[A-Za-z])(?=[0-9])" 
+           )  %>%
+  mutate(Location = "Mobile Monitoring",
+         #Alpha=0.7,
+         #Pollutant = toupper(Pollutant)
+         )  
+
+### --> replace w/ cohort_scores0
+score_comp <- grid_scores0 %>%
+  select(
+    Pollutant,
+    #space1, space2, 
+    #all years prior to interpolation
+    starts_with(c("pop", "ndvi", "ec",
+                  # sensitivity
+                  "nox"
+                  ))
+    ) %>%  
+  
+  #            --> update when get new emission covariates
+  gather("TVC", "value", starts_with(c( "pop", "ndvi", "ec",
+                                        # sensitivity
+                                        "nox"
+                                        ))
+         ) %>%
+     separate(col = TVC, 
+           into = c("TVC", "Year"), 
+           sep = "(?<=[A-Za-z])(?=[0-9])" 
+           )  %>%
+  mutate(
+    Location = "Grid",
+    #Alpha=0.3,
+    
+  ) %>% 
+  rbind(mm_og_scores) %>%
+  mutate(
+    Pollutant = toupper(Pollutant),
+    TVC = toupper(TVC),
+    Location = factor(Location, levels = c("Mobile Monitoring", "Grid"))
+    
+  )
+
+```
+
+```{r, fig.height=10}
+
+score_comp %>%
+  filter(!grepl("nox", TVC, ignore.case = T),
+    TVC == "POP" & Year >= 1990 |     
+    Year >=1995
+         ) %>%
+    #mutate(Year = as.numeric(Year)) %>%
+  #View()
+  ggplot(aes(y=value,
+             x=Year, #group=Year,
+             #fill=Location
+             )
+         ) +
+  geom_boxplot(aes(
+    #fill=Location, 
+    col = Location
+  )) +
+  geom_smooth() +
+  facet_grid(TVC~Pollutant,
+              scales="free", 
+             labeller = "label_both"
+              ) +
+  labs(y = "PLS Score",
+       title = "Distribution of PLS scores"
+       )
+
+```
+
+NOx and EC emission covariates are almost identical 
+
+```{r}
+# nox
+score_comp %>%
+  filter(grepl("nox|ec", TVC, ignore.case = T),
+    TVC == "POP" & Year >= 1990 |     
+    Year >=1995
+         ) %>%
+  ggplot(aes(y=value,
+             x=Year, #group=Year,
+             #fill=Location
+             )
+         ) +
+  geom_boxplot(aes(
+    #fill=Location,
+    col = Location
+  )) +
+  geom_smooth() +
+  facet_grid(TVC~Pollutant,
+              scales="free", 
+             labeller = "label_both"
+              ) +
+  labs(y = "PLS Score",
+       title = "Distribution of TVC emission PLS scores"
+       )
+
+
+```
+
+
+```{r}
+# score_comp %>%
+#   filter(grepl("ec", TVC, ignore.case = T),
+#          Year >=1995
+#          ) %>%
+#   ggplot(data=., aes(x=value,
+#                      fill=Year,
+#              #col=Location
+#              )
+#          ) +
+#   geom_density(
+#     alpha=0.2
+#     ) +
+#   facet_grid(Location~Pollutant,
+#              scales="free"
+#              ) +
+#   scale_x_log10() +
+#   labs(x = "PLS Score",
+#        title = "Distribution of EC Emissions PLS scores at the mobile monitoring locations used to build the models and GRID/COHORT locations where predictions are made"
+#        )
+
+
+# #pop
+# score_comp %>%
+#   filter(grepl("pop", TVC, ignore.case = T)) %>%
+#   ggplot(data=., aes(x=value,
+#                      fill=Year,
+#              )
+#          ) +
+#   geom_density(
+#     alpha=0.2
+#     ) +
+#   facet_grid(Location~Pollutant,
+#              scales="free"
+#              ) +
+#   scale_x_log10() +
+#   labs(x = "PLS Score",
+#        title = "Distribution of population density PLS scores at the mobile monitoring locations used to build the models and GRID/COHORT locations where predictions are made"
+#        )
+
+
+# #ndvi
+# score_comp %>%
+#   filter(grepl("ndvi", TVC, ignore.case = T)) %>%
+#   ggplot(data=., aes(x=value,
+#                      fill=Year,
+#              )
+#          ) +
+#   geom_density(
+#     alpha=0.2
+#     ) +
+#   facet_grid(Location~Pollutant,
+#              scales="free"
+#              ) +
+#   scale_x_log10() +
+#   labs(x = "PLS Score",
+#        title = "Distribution of NDVI PLS scores at the mobile monitoring locations used to build the models and GRID/COHORT locations where predictions are made"
+#        )
+  
+  
+
+```
+
+
+
+
 
 * the best fit line is not parallel to the 1-1 line. In general, higher density areas had a greater increase in population density over time than lower density areas.
 * Some sites deviate from the general trend more than others.    
@@ -1251,6 +1525,13 @@ map0 +
 
 ```
 
+### --> Show how TVCs have changed over time
+
+```{r}
+
+```
+
+
 ## Inter- and intra-polation of PLS scores over time
 
 Use linear inter- and intra-pollation to estimate PLS scores for otherwise unavailable years: 
@@ -1268,6 +1549,7 @@ Use linear inter- and intra-pollation to estimate PLS scores for otherwise unava
 
 - Population density
 
+### --> ? issue: adding ~ 2%/yr increase after 2010, but PLS scores close to 0 are not changing much 
 
 ```{r}
 # returns pop interpollated values for unavailable years 
@@ -1281,7 +1563,7 @@ interpolate_pop <- function(dt) {
       pop2000_2010_slope = (pop2010 - pop2000)/10
     ) #%>% cbind(interpolated_df0)
   
-  # use 1990-2000 individual-level fit to interpollate 
+  # use 1991-1999 individual-level fit to interpollate 
   for(i in 1:9){
     #i=1
     yr <- 1990+i
@@ -1290,7 +1572,7 @@ interpolate_pop <- function(dt) {
     dt[var] <- dt$pop1990 + dt$pop1990_2000_slope*i
   }
   
-  # use 2000-2010 individual-level fit to interpollate  
+  # use 2001-2009 individual-level fit to interpollate  
   for(i in c(1:9)){
     #i=1
     yr <- 2000+i
@@ -1299,7 +1581,7 @@ interpolate_pop <- function(dt) {
     dt[var] <- dt$pop2000 + dt$pop2000_2010_slope*i
   }
   
-  # use 2000-2018 metro area-level fit to inter- and intra-pollate 
+  # use 2001-2019 metro area-level fit to inter- and intra-pollate 
   for(i in c(1:9)){
     #i=1
     yr <- 2010+i
@@ -1307,7 +1589,7 @@ interpolate_pop <- function(dt) {
     var <- paste0("pop", yr)
     # add the same percent annual increase as the Sea-tac-bell area
                             # convert from proportion change/yr to linear combination units. since the proportion slope is positive, make sure the linear combination units being added also are
-    dt[var] <- dt$pop2010 + (abs(dt$pop2010)* pop_2010_2018_prop*i)
+    dt[var] <- dt$pop2010 + (abs(dt$pop2010* pop_2010_2018_prop*i))
   }
   
   return(dt)
@@ -1407,45 +1689,7 @@ interpolate_ec <- function(dt) {
       var <- paste0("ec", yr)
       dt[var] <- dt[yr_start_var] + dt[slope_var]*i
     }
-  
   }
-  
-  
-  
-  
-  
-  # # interpolate using 5 yr slopes
-  # for(i in 1:4){
-  #   yr <- 1990+i
-  #   var <- paste0("ec", yr)
-  #   dt[var] <- dt$ec1990 + dt$ec1990_1995_slope*i
-  # }
-  # 
-  # for(i in 1:4){
-  #   yr <- 1995+i
-  #   var <- paste0("ec", yr)
-  #   dt[var] <- dt$ec1995 + dt$ec1995_2000_slope*i
-  # }
-  #  
-  # for(i in 1:4){
-  #   yr <- 2000+i
-  #   var <- paste0("ec", yr)
-  #   dt[var] <- dt$ec2000 + dt$ec2000_2005_slope*i
-  # }
-  # 
-  # for(i in 1:4){
-  #   yr <- 2005+i
-  #   var <- paste0("ec", yr)
-  #   dt[var] <- dt$ec2005 + dt$ec2005_2010_slope*i
-  # }
-  # 
-  # for(i in 1:4){
-  #   yr <- 2010+i
-  #   var <- paste0("ec", yr)
-  #   dt[var] <- dt$ec2010 + dt$ec2010_2015_slope*i
-  # }
-  
-  
   
   #last years have a shorter interval
   for(i in 1:3){
@@ -1483,6 +1727,98 @@ ufp_aqs_scores1 <- interpolate_ec(dt = ufp_aqs_scores)
 
 ```
 
+```{r}
+# NOX
+
+## rename "nox" as "ec" so we can use the same fn
+
+# BC
+bc_mm_scores1 <- bc_mm_scores1 %>%
+  select(-contains("ec")) %>%
+  #rename "nox" to "ec" so fn works
+  rename_all(~gsub("nox", "ec", .) ) %>%
+  ##also works
+  #rename_at(vars(contains("nox")), ~gsub("nox", "ec", .) ) %>%
+  interpolate_ec(dt = .) %>%
+  #rename "ec" back to nox
+  rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) ) %>%
+  # add to other interpolated scores
+  right_join(bc_mm_scores1)  
+
+  
+
+### --> UPDATE when get cohort covars. replace next line w/ one below it
+bc_cohort_scores1 <- bc_cohort_scores
+# bc_cohort_scores1 <- bc_cohort_scores1  %>%
+#   select(-contains("ec")) %>%
+#   #rename "nox" to "ec" so fn works
+#   rename_all(~gsub("nox", "ec", .) ) %>%
+#   interpolate_ec(dt = .) %>%
+#   #rename "ec" back to nox
+#   rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) ) %>%
+#   # add to other interpolated scores
+#   right_join(bc_cohort_scores1)  
+
+
+bc_grid_scores1 <- bc_grid_scores1 %>%
+  select(-contains("ec")) %>%
+  #rename "nox" to "ec" so fn works
+  rename_all(~gsub("nox", "ec", .) ) %>%
+  interpolate_ec(dt = .) %>%
+  #rename "ec" back to nox
+  rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) ) %>%
+  right_join(bc_grid_scores1)
+
+bc_aqs_scores1 <- bc_aqs_scores1 %>%
+  select(-contains("ec")) %>%
+  #rename "nox" to "ec" so fn works
+  rename_all(~gsub("nox", "ec", .) ) %>%
+  interpolate_ec(dt = .) %>%
+  #rename "ec" back to nox
+  rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) )  %>%
+  right_join(bc_aqs_scores1)
+
+# UFP
+ufp_mm_scores1 <- ufp_mm_scores1 %>%
+  select(-contains("ec")) %>%
+  #rename "nox" to "ec" so fn works
+  rename_all(~gsub("nox", "ec", .) ) %>%
+  interpolate_ec(dt = .) %>%
+  #rename "ec" back to nox
+  rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) )  %>%
+  right_join(ufp_mm_scores1)
+
+### --> UPDATE when get cohort covars. replace next line w/ one below it
+ufp_cohort_scores1 <- ufp_cohort_scores
+# ufp_cohort_scores1 <- ufp_cohort_scores1 %>%
+#   select(-contains("ec")) %>%
+#   #rename "nox" to "ec" so fn works
+#   rename_all(~gsub("nox", "ec", .) ) %>%
+#   interpolate_ec(dt = .) %>%
+#   #rename "ec" back to nox
+#   rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) ) %>%
+#   right_join(ufp_cohort_scores1)
+
+ufp_grid_scores1 <- ufp_grid_scores1 %>%
+  select(-contains("ec")) %>%
+  #rename "nox" to "ec" so fn works
+  rename_all(~gsub("nox", "ec", .) ) %>%
+  interpolate_ec(dt = .) %>%
+  #rename "ec" back to nox
+  rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) )  %>%
+  right_join(ufp_grid_scores1)
+
+ufp_aqs_scores1 <- ufp_aqs_scores1 %>%
+  select(-contains("ec")) %>%
+  #rename "nox" to "ec" so fn works
+  rename_all(~gsub("nox", "ec", .) ) %>%
+  interpolate_ec(dt = .) %>%
+  #rename "ec" back to nox
+  rename_at(vars(starts_with("ec")), ~gsub("ec", "nox", .) ) %>%
+  right_join(ufp_aqs_scores1)
+
+
+```
 
 
 - NDVI
@@ -1537,7 +1873,56 @@ grid_scores %>%
   
 ```
 
+```{r}
+# nox
+
+grid_scores %>%
+  gather("TVC", "value", c(paste0("ec", emissions_data_yrs),
+                           paste0("nox", emissions_data_yrs),
+                           ) 
+         ) %>%
+  separate(col = TVC, 
+           into = c("TVC", "Year"), 
+           sep = "(?<=[A-Za-z])(?=[0-9])" 
+           ) %>%
+  mutate(TVC = toupper(TVC)) %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
+  group_by(Pollutant, TVC, Year) %>%
+  distribution.table(var.string = "value", round.int = 1) %>%
+  kable(caption = "Distribution of emission PLS scores for the GRID, by pollutant and TVC") %>%
+  kable_styling()
+
+```
+
 -plot 
+
+
+
+```{r}
+# # ### --> FIX? pop boxplots form 2010-2019 should be all generally increasing. They look strage at the Q0.75 & 1.5*IQR & outliers to the right
+# # ? Are PLS scores increasing and moving from e.g., 75th quantile to the line above the 75th quantile and from the 1.5*IQR becoming outliers? since IQR is becoming narrower - not sure why Q75 isn't going up as much - is there a jump in concentrations?
+# 
+# 
+# adj <- 0.02
+# 
+# set.seed(2)
+# 
+# a <- data.frame(
+#   y1.0 = rnorm(1000),
+#   y1.1 = x + abs(x*adj*1),
+#   y1.5 = x + abs(x*adj*5),
+#   y1.8 = x + abs(x*adj*8)
+#   #y2 = x*(1+adj)
+# ) %>%
+#   gather()
+# 
+# a %>%
+#   ggplot(aes(x=key, y=value)) + 
+#   geom_boxplot() + 
+#   labs(title = "Example of rnorm(0,1) increased by X%")
+
+```
+
 
 ```{r}
 grid_scores %>%
@@ -1548,36 +1933,153 @@ grid_scores %>%
            sep = "(?<=[A-Za-z])(?=[0-9])" ) %>%
   mutate(
     Year = as.numeric(Year),
-    estimate_type = ifelse((Year %in% c(census_data_yrs, last_acs_yr) & grepl("pop", tvc) ) |
+    Interpolated = ifelse((Year %in% c(census_data_yrs, last_acs_yr) & grepl("pop", tvc) ) |
       (Year %in% ndvi_data_yrs & grepl("ndvi", tvc)) | 
         (Year %in% emissions_data_yrs & grepl("ec", tvc)),
-      "observed", "interpolated"),
-    Pollutant = toupper(Pollutant)
+      #"observed", "interpolated"
+      "FALSE", "TRUE"
+      ),
+    Pollutant = toupper(Pollutant),
+    tvc = toupper(tvc)
   ) %>%
 ggplot(aes(x=Year, y=value, )) + 
-  geom_boxplot(aes(fill=estimate_type, group=Year), alpha=0.8) + 
+  geom_boxplot(aes(#fill=Interpolated,
+    col=Interpolated,
+    group=Year), alpha=0.3) + 
   geom_smooth(se=F) +
-  facet_grid(Pollutant~tvc, scales="free") + 
+  facet_grid(tvc~Pollutant, scales="free") + 
   labs(
     title = "Distribution of observed and interpolated TVC PLS scores for the GRID"
-  ) + 
-  coord_flip()
+    #fill = "Estimate\nType"
+  )  
   
+ 
+ 
+```
+
+```{r}
+#nox
+nox_p_interpolated <- grid_scores %>%
+  gather("tvc", "value", contains(c("nox", "ec")), -contains("slope")) %>%
+  separate(col = tvc, 
+           into = c("tvc", "Year"), 
+           #separate text from numbers: position following letters; 
+           sep = "(?<=[A-Za-z])(?=[0-9])" ) %>%
+  mutate(
+    Year = as.numeric(Year),
+    Interpolated = ifelse((Year %in% c(census_data_yrs, last_acs_yr) & grepl("pop", tvc) ) |
+      (Year %in% ndvi_data_yrs & grepl("ndvi", tvc)) | 
+        (Year %in% emissions_data_yrs & grepl("ec|nox", tvc)),
+      #"observed", "interpolated"
+      "FALSE", "TRUE"
+      ),
+    Pollutant = toupper(Pollutant),
+    tvc = toupper(tvc)
+  ) %>%
+ggplot(aes(x=Year, y=value, )) + 
+  geom_boxplot(aes(#fill=Interpolated, 
+    col=Interpolated,
+    group=Year), alpha=0.3) + 
+  geom_smooth(se=F) +
+  facet_grid(tvc~Pollutant, scales="free") +
+  
+  labs(
+    title = "Distribution of observed and interpolated emission TVC PLS scores for the GRID"
+    #fill = "Estimate\nType"
+  )  
+
+nox_p_interpolated
+
+# same as above but on log scale - warning: drops values < 0
+nox_p_interpolated + 
+  scale_y_log10()  + 
+  labs(subtitle = "y axis is on log10 scale; values < 0 dropped")
+
+```
+
+
+```{r}
+# table
+grid_scores %>%
+  gather("tvc", "value", contains(c("pop", "ndvi", "ec")), -contains("slope")) %>%
+  separate(col = tvc, 
+           into = c("tvc", "Year"), 
+           #separate text from numbers: position following letters; 
+           sep = "(?<=[A-Za-z])(?=[0-9])" ) %>%
+  mutate(
+    Pollutant = toupper(Pollutant),
+    tvc = toupper(tvc)
+  ) %>%
+  group_by(Pollutant, tvc, Year) %>%
+  summarize(
+    N = n(),
+    Min = min(value),
+    Q25 = quantile(value, 0.25),
+    Median = median(value),
+    Q75 = quantile(value, 0.75),
+    Max = max(value)
+  ) %>%
+  
+  #distribution.table(var.string = "value", round.int = 1) %>%
+  kable(caption = "Distribution of TVC PLS scores for the GRID", 
+        digits = 2
+        ) %>%
+  kable_styling()
   
 ```
 
 ```{r}
+# table - nox
+grid_scores %>%
+  gather("tvc", "value", contains(c("nox" #"ec"
+                                    )), -contains("slope")) %>%
+  separate(col = tvc, 
+           into = c("tvc", "Year"), 
+           #separate text from numbers: position following letters; 
+           sep = "(?<=[A-Za-z])(?=[0-9])" ) %>%
+  mutate(
+    Pollutant = toupper(Pollutant),
+    tvc = toupper(tvc)
+  ) %>%
+  group_by(Pollutant, tvc, Year) %>%
+  summarize(
+    N = n(),
+    Min = min(value),
+    Q25 = quantile(value, 0.25),
+    Median = median(value),
+    Q75 = quantile(value, 0.75),
+    Max = max(value)
+  ) %>%
+  
+  #distribution.table(var.string = "value", round.int = 1) %>%
+  kable(caption = "Distribution of emission TVC PLS scores for the GRID", 
+        digits = 2
+        ) %>%
+  kable_styling()
+
+```
+
+
+### --> update to cohort dt w/ other TVCs
+
+* TVC values change over time to different degrees at different locations 
+
+```{r}
 site_sample_n <- 150
 
-cohort_scores %>%
-  gather("Year", "Value", paste0("pop", c(census_data_yrs, last_acs_yr))
-         
-         #contains("pop")
+#cohort_scores
+grid_scores %>%
+  gather("Year", "Value", c(paste0("pop", c(census_data_yrs, last_acs_yr)),
+                            paste0("ec", c(seq(1995, 2015, 5), 2019)),
+                            paste0("ndvi", ndvi_data_yrs)
+                            )
          
          ) %>%
   mutate(
+    TVC = str_extract(Year, "[a-z]{0,}"),
+    TVC = toupper(TVC),
     Year = as.numeric(str_extract(Year, "\\d{4}")),
-        Pollutant = toupper(Pollutant)
+    Pollutant = toupper(Pollutant)
   ) %>%
   #only plot a subsample of sites
   filter(site_id %in% sample(site_id, size = site_sample_n, replace = F)) %>%
@@ -1587,10 +2089,12 @@ cohort_scores %>%
   geom_point(alpha=0.2) + 
   geom_line(alpha=0.2) + 
   
-  facet_wrap(~Pollutant) + 
+  facet_grid(TVC~Pollutant,
+             scales= "free"
+             ) + 
   scale_x_continuous(breaks = c(census_data_yrs, last_acs_yr)) +
   labs(
-    title = paste0("Population density PLS scores over time for a sample of cohort sites ", "(n = ",site_sample_n, ")"),
+    title = paste0("Population density PLS scores over time \nfor a random sample of sites ", "(n = ",site_sample_n, ")"),
     y = "PLS Score"
   )  
 
@@ -1605,7 +2109,8 @@ Map TVC Surfaces
 
 ```
 
-```{r, fig.height=8}
+
+```{r}
 # FN returns list of mapped PLS scores for particular TVC variables & years
 
 # dt <- grid_scores
@@ -1619,7 +2124,10 @@ map_scores <- function(
   yrs,
   #PLS variables to plot
   vars, 
-  legend_title = ""
+  legend_title = "",
+  map_title = "",
+  low_col = "yellow",
+  high_col = "red"
   ) {
   
   vars <- paste0(vars,  yrs)
@@ -1628,6 +2136,7 @@ map_scores <- function(
   if(legend_title == "") {
     legend_title <- "PLS\nScore"
   }
+  
   
   #range of the years we're plotting
   plot_range <- data.frame(
@@ -1640,6 +2149,10 @@ map_scores <- function(
   for(i in seq_along(yrs)) {
     #i=1
   
+    if(map_title == "") {
+    map_title <- paste0(yrs[i])
+    }
+    
     df <- dt %>%  
     #select that yrs variable
     rename(new_var = vars[i])  
@@ -1648,11 +2161,11 @@ map_scores <- function(
       geom_point(data = df, aes(x=longitude, y=latitude, col = new_var),
                  alpha=0.5
                  ) +
-      scale_color_gradient(low = "yellow", high = "red",
+      scale_color_gradient(low = low_col, high = high_col,
                           #make all legends have the same range
                           limits = c(plot_range$min, plot_range$max)) +
     labs(
-       title = paste0(yrs[i]),  
+       title = map_title,
       col = legend_title  
       ) 
    
@@ -1666,13 +2179,132 @@ map_scores <- function(
 
 ```
 
+### --> quantify chaning TVCs over time. e.g. (EC/Pop 2019-1995) ~ geocovariates. what are the drivers of change over time?    
+ 
+Scatterplot comparing first & last perdiction year scores 
+
+```{r}
+#grid_scores
+scores_first_last_yr <- grid_scores %>%
+  select_at(vars(Pollutant, site_id, latitude, longitude,
+                 ends_with(c("1995", "2019"))
+                 )   
+            ) %>%
+  gather("TVC", "value", ends_with(c("1995", "2019"))) %>%
+  mutate(
+    Year = str_extract(TVC, "\\d{4}" ),
+    Year = as.numeric(Year),
+    TVC =  str_extract(TVC, "\\D{0,}" ),
+    TVC = toupper(TVC),
+    Pollutant = toupper(Pollutant)
+    
+  ) %>%
+  spread("Year", "value") %>%
+  rename(y1995 = "1995",
+         y2019 = "2019"
+         )  
+  #View()
+
+range1 <- scores_first_last_yr %>%
+  select(y1995, y2019) %>%
+  summarize(
+    min = min(.),
+    max = max(.)
+  )
+  
+  scores_first_last_yr %>%
+    ggplot(aes(x=y1995, y=y2019,
+             #group=site_id
+             )) + 
+    geom_point(alpha=0.3) + 
+    # lims(x=c(range1$min, range1$max),
+    #      y=c(range1$min, range1$max)
+    #      ) +
+    geom_abline(slope = 1, intercept = 0) +
+    facet_grid(Pollutant~TVC, scales = "free") + 
+    labs(
+      x = 1995,
+      y = 2019
+    )
+
+
+```
+
+Quantify TVCs over time
+
+```{r}
+scores_first_last_yr %>%
+  mutate(
+    diff = y2019 - y1995
+  ) %>%
+  ggplot(aes(y = diff,
+             x = TVC
+             )) + 
+  geom_boxplot() + 
+  facet_wrap(~Pollutant, scales="free") + 
+  labs(title = "Change in PLS score from 1995-2019",
+       y = "Change in PLS Score"
+       )
+  
+```
+
+
+```{r}
+
+scores_first_last_yr %>%
+  # ? don't include NOX for now?
+  filter(TVC != "NOX") %>%
+  group_by(Pollutant, TVC) %>%
+  summarize(
+    sd_1995 = sd(y1995),
+    sd_2019 = sd(y2019),
+    sd_ratio = sd_2019/sd_1995
+  )  %>%
+  kable(caption = "Change in variability of time-varying covariates between 1995 and 2019.", 
+        col.names = c("Pollutant Model", "TVC", "SD 1995", "SD 2019", "SD Ratio"), 
+        digits = 2
+        ) %>%
+  kable_styling()
+
+  
+```
+
+change map 
+
+```{r}
+tvcs <- c("NOX", "POP", "EC" #"NDVI"
+           )
+
+for(i in seq_along(tvcs)) {
+  #i=2
+
+p <- scores_first_last_yr %>%
+    filter(Pollutant == "BC",
+           TVC == tvcs[i]
+           ) %>%
+mutate(diff2019 = y2019 - y1995) %>%
+  map_scores(yrs = "2019", vars = "diff", 
+             legend_title = "PLS\nScore\nDifference", 
+             map_title = paste0("Change in ", tvcs[i], " TVC (BC model) from 1995-2019")   ,
+             low_col = "darkblue", high_col = "lightblue"
+              
+             )
+  print(p)
+}
+  
+```
+
+
 PLS score maps.
+
 
 Note: PLS scores are composed of both small and large population buffers, thus these are indicative of population nearby. 
 
 Not plotting these maps for smaller buffers alone since these are only available for specific years (e.g., 1990, 2000, 2010 population Census)
 
 Higher PLS scores are indicative of higher population densities (population density is positively associated with TRAP).
+
+### --> fix title, all maps say ~ 1995? 
 
 ```{r}
 # Pop
@@ -1711,8 +2343,32 @@ map_scores(dt = grid_scores,
 
 ```
 
+```{r}
+# nox
+map_scores(dt = grid_scores, 
+           yrs = mapping_yrs, 
+           vars = "nox") %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "NOx" ) 
+
+# later years only so we can see spatial contrast better
+map_scores(dt = grid_scores, 
+           yrs = c(2010, 2019), 
+           vars = "nox") %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "NOx - later years only" ) 
+
+```
+
 
 Higher NDVI PLS scores are indicative of lower raw NDVI values (NDVI is negatively associated with TRAP). We see the highest NDVI PLS scores (lowest raw NDVI values) near seattle, and lower PLS scores east of Seattle and I-5.
+
+* Individuals residing at locations with very high EC in earlier years (e.g., 1995) would have had very diff exposures relative to individuals residing away from major roads where changes have beem more subtle. Individuals residing near major roads could thus have higher degrees of exposure misclassification.    
+  - AKA - spatial patterns have changed over time
 
 ```{r}
 
@@ -1734,6 +2390,7 @@ PLS score differences maps.
 * most areas have seen a similar change in population density over time.   
 * Some areas have seen greater changes in population density than others. The Seattle area, for example, has seen larger increases in population density than other surrounding places. These are the places that will benefit from using time-varying covariates rather than just using a trend adjustment.   
 
+### --> change differences colors to ?blue/black??
 
 ```{r}
 # pop
@@ -1749,9 +2406,12 @@ grid_scores %>%
 
 ```
 
-### --> is the largest decrease in EC near hwys an artifact of how we calculated EC concentrations? Locations away from hwys had many 0 estimates within buffers and thus small PLS scores to begin with
 
-Over time, locations near major highways have seen the most drastic decrease in EC concentrations.
+* We see a space-time interaction occurring when we look at the change in EC  emissions over time:   
+  - Over time, locations near major highways have seen the most drastic decrease in EC concentrations    
+  - Locations away from hwys have seen the least change over time, since many had 0 or low EC estimates to begin with 
+    + The 0s away from major roads is OK since we will never fit a model with EC alone
+
 
 ```{r}
 # EC
@@ -1768,10 +2428,182 @@ grid_scores %>%
 ```
 
 ```{r}
+# nox
+grid_scores %>%
+  mutate(nox_diff1995_2019 = nox2019 - nox1995) %>%
+  map_scores(dt = ., yrs = c("1995_2019"), vars = "nox_diff", 
+             legend_title = paste0("PLS Score\nDifference")
+             ) %>%
+  ggarrange(plotlist = .,
+          nrow = 1,
+          common.legend = T, legend = "right") %>%
+  annotate_figure(top = "Change in NOx over time") 
+
+```
+
+```{r}
 # NDVI
 
 ```
 
+# Linear regression to explore the variability explained by each PLS component 
+
+### --> change ndvi2006 to ndvi2019 when get new covariates in following models
+
+### --> in lm, should ec2019 be positive & ndvi2006 be negative?
+
+* all covariate predictors are centered and scaled such that each coefficient estimate is for 1 SD difference.
+
+* space-varying covariates are msot predi 
+
+* in univariate BC models, space-varying covariates explain most of the variability (R2) in BC, with each time-varying covariate (pop, ec, ndvi) explaining a smaller proportion
+
+* multilinear models that build on the space-varying covariates add very little to the model in terms of how much additional variability in BC they are able to explain   
+  - but EC and NDVI are still significant predictors
+  - Pop is not a significant predictor
+
+* new TV geocovariates may not add much value for 2019, but their spatial structure does change over time & they are significant, such that they will influence historical predictions
+  
+
+* results are similar for UFP
+
+**BC**
+
+```{r}
+
+lm_df <- mm %>%
+  select(site_id, bc) %>%
+  left_join(bc_scores_mm0) %>%
+  mutate_at(str_subset(names(.), "space|pop|ec|ndvi"), ~ scale(.))
+
+r2_df <- data.frame(
+  Predictors = c("space",
+            "pop",
+            "ec",
+            "ndvi",
+            "space + pop", 
+            "space + pop + ec", 
+            "space + pop + ec + ndvi"),
+  R2 = NA
+)
+
+# linear regression
+(r2_space <- lm(data = lm_df, bc ~ space1 + space2) %>% 
+  summary() 
+  )
+
+(r2_pop <- lm(data = lm_df, bc ~ pop2010) %>% 
+  summary()
+)
+
+(r2_ndvi <- lm(data = lm_df, bc ~ ndvi2006) %>% 
+  summary()
+  )
+
+(r2_ec <- lm(data = lm_df, bc ~ ec2019) %>% 
+  summary() 
+  )
+
+
+(r2_m2 <- update(object = r2_space, ~ . + pop2010) %>% 
+  summary()  
+)
+
+
+(r2_m3 <- update(object = r2_m2, ~ . + ec2019) %>% 
+  summary()  
+) 
+
+(r2_m4 <- update(object = r2_m3, ~ . + ndvi2006) %>% 
+  summary() 
+)
+
+
+r2_df$R2[r2_df$Predictors == "space"] <- r2_space$r.squared
+r2_df$R2[r2_df$Predictors == "pop"] <- r2_pop$r.squared
+r2_df$R2[r2_df$Predictors == "ec"] <- r2_ec$r.squared
+r2_df$R2[r2_df$Predictors == "ndvi"] <- r2_ndvi$r.squared
+
+r2_df$R2[r2_df$Predictors == "space + pop"] <- r2_m2$r.squared
+r2_df$R2[r2_df$Predictors == "space + pop + ec"] <- r2_m3$r.squared
+r2_df$R2[r2_df$Predictors == "space + pop + ec + ndvi"] <- r2_m4$r.squared
+
+r2_df %>%
+  kable(caption = "Variability explained by BC models with an increasing number of PLS component predictors",
+        digits = 2
+        ) %>%
+  kable_styling()
+
+ 
+```
+
+**UFP**
+
+```{r}
+lm_df <- mm %>%
+  select(site_id, ufp) %>%
+  left_join(ufp_scores_mm0) %>%
+  mutate_at(str_subset(names(.), "space|pop|ec|ndvi"), ~ scale(.))
+
+r2_df <- data.frame(
+  Predictors = c("space",
+            "pop",
+            "ec",
+            "ndvi",
+            "space + pop", 
+            "space + pop + ec", 
+            "space + pop + ec + ndvi"),
+  R2 = NA
+)
+
+# linear regression
+(r2_space <- lm(data = lm_df, ufp ~ space1 + space2) %>% 
+  summary() 
+  )
+
+(r2_pop <- lm(data = lm_df, ufp ~ pop2010) %>% 
+  summary()
+)
+
+(r2_ndvi <- lm(data = lm_df, ufp ~ ndvi2006) %>% 
+  summary()
+  )
+
+(r2_ec <- lm(data = lm_df, ufp ~ ec2019) %>% 
+  summary() 
+  )
+
+
+(r2_m2 <- update(object = r2_space, ~ . + pop2010) %>% 
+  summary()  
+)
+
+
+(r2_m3 <- update(object = r2_m2, ~ . + ec2019) %>% 
+  summary()  
+) 
+
+(r2_m4 <- update(object = r2_m3, ~ . + ndvi2006) %>% 
+  summary() 
+)
+
+
+r2_df$R2[r2_df$Predictors == "space"] <- r2_space$r.squared
+r2_df$R2[r2_df$Predictors == "pop"] <- r2_pop$r.squared
+r2_df$R2[r2_df$Predictors == "ec"] <- r2_ec$r.squared
+r2_df$R2[r2_df$Predictors == "ndvi"] <- r2_ndvi$r.squared
+
+r2_df$R2[r2_df$Predictors == "space + pop"] <- r2_m2$r.squared
+r2_df$R2[r2_df$Predictors == "space + pop + ec"] <- r2_m3$r.squared
+r2_df$R2[r2_df$Predictors == "space + pop + ec + ndvi"] <- r2_m4$r.squared
+
+r2_df %>%
+  kable(caption = "Variability explained by UFP models with an increasing number of PLS component predictors",
+        digits = 2
+        ) %>%
+  kable_styling()
+
+```
 
 
 # UK Models
@@ -1875,7 +2707,10 @@ Map of where high residuals are found.
 * When we map the low residuals (higher BC levels than expected), most are near rialroad tracks 
   - Tim Gould: some are near rail yards
 
-### --> ? add railroad (only include lines in study area before uploading to R?)
+```{r}
+#### --> ? add railroad (only include lines in study area before uploading to R?)
+
+```
 
 ```{r}
 ufp_bc_lm_high_residuals <- mm %>%
@@ -1932,14 +2767,16 @@ map0 +
 # ufp_aqs_scores
 ```
 
-## CV RMSE and R2 for the 2019 surface
 
-### --> ? parallel code? 
+
+## CV RMSE and R2 for the 2019 surface
 
 ```{r}
 
 uk_predictors. <- c(paste0("space", c(1:n_components)), "pop", "ndvi", "ec"
                                                   )
+
+uk_predictors_nox <- gsub("ec", "nox", uk_predictors.)
 
 # FN returns CV predictions from fitting a UK model. This fn is similar to pls_uk_cv_predictions() in A2.0.1_Var&Fns.R, but it does not fit PLS since we have already determined these parameters in Aim 2. It can be used to predict within the same dataset (10 FCV - generates training/test sets) or to predict at new locations (uses MM stops IDs to find the training dataset).
 
@@ -2111,7 +2948,10 @@ mm_scores_2019 <- mm_scores %>%
          #select TVCs for modeling
          pop = pop2019,
          ndvi = ndvi2006,
-         ec = ec2019
+         ec = ec2019,
+         
+         #sensitivity
+         nox = nox2019
          )
 
 cv_results <- data.frame(
@@ -2191,6 +3031,9 @@ predict_over_time <- function(
            #rename TVCs
            pop = paste0("pop", prediction_yrs[y]),
            ec = paste0("ec", prediction_yrs[y]),
+           
+           #sensitivity
+           nox = paste0("nox", prediction_yrs[y]),
            
            ### --> update these when get new covarites
            ndvi = paste0("ndvi", "2006")
@@ -2280,7 +3123,7 @@ predict_over_time <- function(
 
 #### --> UPDATE aqs sites
 
-### --> uncomment cohort_predictions... once get new covariates 
+### --> uncomment cohort_predictions... once get new covariates. add nox model
 
 ```{r, results="hide"}
 # use UK to make perdictions
@@ -2289,13 +3132,22 @@ predict_over_time <- function(
 
 # cohort_predictions <- predict_over_time(dt_for_prediction = cohort_scores,
 #                                         dt_mm2019 = mm_scores_2019,
-#                                         prediction_yrs = mapping_yrs 
+#                                         prediction_yrs = mapping_yrs
 #                                         )
 
 grid_predictions <- predict_over_time(dt_for_prediction = grid_scores,
                                         dt_mm2019 = mm_scores_2019,
-                                      prediction_yrs = mapping_yrs 
+                                      prediction_yrs = seq(first_p_yr, last_p_yr) #mapping_yrs 
                                         )
+
+## sensitivity - nox
+
+grid_predictions_nox <- predict_over_time(dt_for_prediction = grid_scores,
+                                        dt_mm2019 = mm_scores_2019,
+                                      prediction_yrs = seq(first_p_yr, last_p_yr), 
+                                      uk_predictors.. =  uk_predictors_nox
+                                        )
+
 #for validation
 aqs_predictions <- predict_over_time(dt_for_prediction = aqs_scores, 
                     dt_mm2019 = mm_scores_2019,
@@ -2303,6 +3155,13 @@ aqs_predictions <- predict_over_time(dt_for_prediction = aqs_scores,
                     prediction_yrs = sort(unique(c(ufp_validation$Year, bc_validation$Year)))
                     )
 
+## nox
+aqs_predictions_nox <- predict_over_time(dt_for_prediction = aqs_scores, 
+                    dt_mm2019 = mm_scores_2019, 
+                    uk_predictors.. = uk_predictors_nox,
+                    #only need to predict when AQS sites start measuring UFP, BC (2001, 2003+)
+                    prediction_yrs = sort(unique(c(ufp_validation$Year, bc_validation$Year)))
+                    )
 ```
 
 Variogram plots
@@ -2376,6 +3235,22 @@ Conducting a multiplicative (rather than an additive) trend adjustment since EC,
 #     #adjust UK predictions using trend
 #     uk_trend_p = uk_p*ratio_adjustment
 #   )
+#
+# cohort_uk_trend_predictions_nox <- cohort_predictions_nox$dt %>%
+#   #rename_at(vars(contains("uk_")), ~str_replace(., "uk_", "uk_trend_")) %>%
+#   gather(Year, uk_p, contains("uk")) %>%
+#   mutate(Year = as.numeric(str_extract(Year, "\\d{4}"))) %>%
+#   #merge w/ trend adjustment
+#   left_join(trend_adjustment) %>%
+#   mutate(
+#     #adjust UK predictions using trend
+#     uk_trend_p = uk_p*ratio_adjustment
+#   ) %>%
+  # #for differentiting later
+  # rename(uk_trend_p_nox = uk_trend_p)  %>%
+  # #don't need this
+  # select(-uk_p)
+
 
 
 #grid
@@ -2389,6 +3264,21 @@ grid_uk_trend_predictions <- grid_predictions$dt %>%
     uk_trend_p = uk_p*ratio_adjustment
   )
 
+## nox
+grid_uk_trend_predictions_nox <- grid_predictions_nox$dt %>%
+  gather(Year, uk_p, contains("uk")) %>%
+  mutate(Year = as.numeric(str_extract(Year, "\\d{4}"))) %>%
+  #merge w/ trend adjustment
+  left_join(trend_adjustment) %>%
+  mutate(
+    #adjust UK predictions using trend
+    uk_trend_p = uk_p*ratio_adjustment
+  ) %>%
+  #for differentiting later
+  rename(uk_trend_p_nox = uk_trend_p) %>%
+  #don't need this
+  select(-uk_p)
+
 #aqs sites
 aqs_uk_trend_predictions <- aqs_predictions$dt %>%
   gather(Year, uk_p, contains("uk")) %>%
@@ -2399,6 +3289,22 @@ aqs_uk_trend_predictions <- aqs_predictions$dt %>%
     #adjust UK predictions using trend
     uk_trend_p = uk_p*ratio_adjustment
   )
+
+aqs_uk_trend_predictions_nox <- aqs_predictions_nox$dt %>%
+  gather(Year, uk_p, contains("uk")) %>%
+  mutate(Year = as.numeric(str_extract(Year, "\\d{4}"))) %>%
+  #merge w/ trend adjustment
+  left_join(trend_adjustment) %>%
+  mutate(
+    #adjust UK predictions using trend
+    uk_trend_p = uk_p*ratio_adjustment
+  ) %>%
+  #for differentiting later
+  rename(uk_trend_p_nox = uk_trend_p) %>%
+  select(-uk_p)
+
+
+
 ```
 
 Plots comparing predictions before and after the trend adjustment.
@@ -2417,13 +3323,121 @@ grid_uk_trend_predictions %>%
   mutate(Trend = ifelse(str_detect(trend, "trend"), "Trend", "No Trend")) %>%
     label_pollutant(var = "Pollutant", label = "pollutant") %>%
   ggplot(aes(x=prediction, fill=Year, group=Year)) + 
-  geom_density(alpha=0.3) + 
-  facet_wrap(Trend~Pollutant, scales="free") +
+  geom_density(alpha=0.1) + 
+  facet_grid(Trend~Pollutant, scales="free") +
   labs(
     title = "UFP and BC predictions before and after applying a trend adjustment",
     subtitle = "GRID"
   )
 ```
+
+just the trend predictions (primary analysis)
+
+```{r}
+grid_uk_trend_predictions %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
+  #present BC first
+  mutate(Pollutant =relevel(factor(Pollutant), ref = "BC (ng/m3)"))%>%
+  ggplot(aes(y=uk_trend_p, 
+             #fill=Year, 
+             x=Year,
+             group=Year
+             )) + 
+  geom_boxplot() +
+  #geom_density(alpha=0.5) + 
+  facet_wrap(~Pollutant, scales="free") +
+  labs(
+    title = "UFP and BC predictions after applying a trend adjustment",
+    y = "Predicted Exposure",
+    subtitle = "GRID"
+  )
+
+```
+
+-table
+
+### --> change grid_uk_trend_predictions to cohort_uk_trend_predictions when get covariates
+
+```{r}
+#stratified by yr
+predictions_t1 <- grid_uk_trend_predictions %>%
+  drop_na(uk_trend_p) %>%
+  # gather("Trend", "prediction", contains("uk")) %>%
+  # mutate(Trend = ifelse(str_detect(Trend, "trend"), "Yes", "No")) %>%
+  # mutate(Year = as.factor(Year)) %>%
+  
+  #only keep some years to summarize
+  filter(Year %in% c(seq(first_p_yr, last_p_yr, 5), 2019)) %>%
+  # don't want commas between 1,000's
+  mutate(Year = as.factor(Year)) %>%
+  
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
+  group_by(#Trend, 
+           Pollutant, Year) %>%
+  distribution.table(var.string = "uk_trend_p")
+  
+# add overall
+predictions_t2 <- grid_uk_trend_predictions %>%
+  drop_na(uk_trend_p) %>%
+  label_pollutant(var = "Pollutant", label = "pollutant") %>%
+  group_by(Pollutant, Year = "Overall") %>%
+  distribution.table(var.string = "uk_trend_p")  %>%
+  
+  rbind(predictions_t1) %>%
+  mutate(Year = relevel(factor(Year), ref = "Overall"  )) %>%
+  
+  ungroup() %>%
+  arrange(Pollutant, Year) 
+
+#one pollutant at a time
+
+## BC
+predictions_t2 %>%
+  filter(grepl("BC", Pollutant)) %>%
+  select(-Pollutant) %>%
+  kable(caption = "BC predictions over time at cohort locations, adjusted for a trend") %>%
+  kable_styling()
+
+## UFP
+predictions_t2 %>%
+  filter(grepl("UFP", Pollutant)) %>%
+  select(-Pollutant) %>%
+  kable(caption = "UFP predictions over time at cohort locations, adjusted for a trend") %>%
+  kable_styling()
+
+
+```
+
+**NOx vs EC model predictions**
+
+Predictions from the primary and NOx predictor model
+
+```{r}
+#bc
+grid_uk_trend_predictions %>%
+  left_join(grid_uk_trend_predictions_nox) %>%
+  filter(Pollutant == "bc") %>%
+   colo.plot(x.variable = "uk_trend_p", x.label = "Primary Model", 
+             y.variable = "uk_trend_p_nox", y.label = "NOx Predictor Model", 
+             mytitle = "Comparison of BC predictions from the \nprimary and NOx predictor model", 
+             int_digits = 1, slope_digits = 2,
+             r2.digits = 2, #rmse.digits = 1
+               )
+
+#ufp
+grid_uk_trend_predictions %>%
+  left_join(grid_uk_trend_predictions_nox) %>%
+  filter(Pollutant == "ufp") %>%
+   colo.plot(x.variable = "uk_trend_p", x.label = "Primary Model", 
+             y.variable = "uk_trend_p_nox", y.label = "NOx Predictor Model", 
+             mytitle = "Comparison of UFP predictions from the \nprimary and NOx predictor model", 
+             int_digits = 1, slope_digits = 2, 
+             r2.digits = 2, #rmse.digits = 1
+               )
+
+```
+
+
 
 scatterplot.
 
@@ -2449,22 +3463,17 @@ grid_uk_trend_predictions %>%
 
 ```
 
--table
+# How does the rank order of the predictions over time?
 
-### --> chnage grid_uk_trend_predictions to cohort_uk_trend_predictions when get covariates
+### --> compare rank order 1995 vs 2019? 
 
 ```{r}
-grid_uk_trend_predictions %>%
-  drop_na(uk_trend_p) %>%
-  gather("Trend", "prediction", contains("uk")) %>%
-  mutate(Trend = ifelse(str_detect(Trend, "trend"), "Yes", "No")) %>%
-  mutate(Year = as.factor(Year)) %>%
-  label_pollutant(var = "Pollutant", label = "pollutant") %>%
-  group_by(Pollutant, Year, Trend) %>%
-  distribution.table(var.string = "prediction") %>%
-  kable(caption = "Pollutant predictions over time at cohort locations, adjusted and not adjusted for a trend") %>%
-  kable_styling()
 
+```
+
+### --> ? Lasso: what are the largest predictors of what sites saw the largest changes? 
+
+```{r}
 
 ```
 
@@ -2486,20 +3495,29 @@ grid_uk_trend_predictions %>%
 bc_valid_p <- bc_validation %>%
   #only keep predictions for site-years w/ AQS estimates
   left_join(aqs_uk_trend_predictions) %>%
+  left_join(aqs_uk_trend_predictions_nox) %>%
+  
   #drop sites w/o geocovariates...or UK predictions
-  drop_na()
+  drop_na() %>%
+  filter(!grepl("Duwamish", Site))
 
 ufp_valid_p <- ufp_validation %>%
-  left_join(aqs_uk_trend_predictions)
+  left_join(aqs_uk_trend_predictions) %>%
+  left_join(aqs_uk_trend_predictions_nox)
 
 ```
 
-Site-years available for validation
+## BC 
+
+Site-years available for BC validation
+
+### -> need to add other AQS sites 
 
 ```{r}
 bc_valid_p %>%
   ggplot(aes(x=Year, y=Site, fill=Site)) + 
   stat_bin2d() + 
+  theme(legend.position = "none") +
   labs(
     title = "Site-years available to validate BC model"
   )
@@ -2521,20 +3539,13 @@ plot_range <- bc_valid_p %>%
     min_val = min(c(mean_ng_m3, uk_trend_p)),
     max_val = max(c(mean_ng_m3, uk_trend_p))
     )
-  
-## NO DUWAMISH
-plot_range_short <- bc_valid_p %>%
-  filter(str_detect(Site, "Duwamish", negate = T)) %>%
-  dplyr::summarize(
-    min_val = min(c(mean_ng_m3, uk_trend_p)),
-    max_val = max(c(mean_ng_m3, uk_trend_p))
-    )
-
 
 ```
 
 ```{r}
+
 bc_valid_p %>%
+  #filter(str_detect(Site, "Duwamish", negate = T)) %>%
   ggplot(aes(x = mean_ng_m3, y = uk_trend_p, 
              col=Year,
              shape=Site,
@@ -2551,43 +3562,43 @@ bc_valid_p %>%
   labs(x= "Observed", 
        y= "Predicted",
        title = "Scatterplot of observed vs predicted BC concentration (ng/m3)"
-       )
-
-## NO DUWAMISH
-bc_valid_p %>%
-  filter(str_detect(Site, "Duwamish", negate = T)) %>%
-  ggplot(aes(x = mean_ng_m3, y = uk_trend_p, 
-             col=Year,
-             shape=Site,
-             )) + 
-  geom_point() + 
-  geom_smooth(se=F, span=1,
-              #if want to draw lowess lines for years instead of sites
-              #aes(group=Year)
-              ) +
-  geom_abline(aes(slope = 1, intercept = 0, linetype="1-1")) + 
-  #make square plot
-  lims(x=c(plot_range_short$min_val, plot_range_short$max_val),
-       y=c(plot_range_short$min_val, plot_range_short$max_val)) +
-  labs(x= "Observed", 
-       y= "Predicted",
-       title = "Scatterplot of observed vs predicted BC concentration (ng/m3)",
-       subtitle = "NO DUWAMISH"
+       #subtitle = "NO DUWAMISH"
        )
 
   
 ```
+
+* BC model model wtih NOx predictor looks almost identical to EC model predictions
+
+```{r}
+#nox
+bc_valid_p %>%
+  ggplot(aes(x = mean_ng_m3, y = uk_trend_p_nox, 
+             col=Year,
+             shape=Site,
+             )) + 
+  geom_point() + 
+  geom_smooth(se=F, span=1) +
+  geom_abline(aes(slope = 1, intercept = 0, linetype="1-1")) + 
+  #make square plot
+  lims(x=c(plot_range$min_val, plot_range$max_val),
+       y=c(plot_range$min_val, plot_range$max_val)) +
+  labs(x= "Observed", 
+       y= "Predicted",
+       title = "Scatterplot of observed vs predicted BC concentration (ng/m3)",
+       subtitle = "NOx predictor"
+       )
+```
+
 
 -overall 
 
 * The BC model generally has poor precision (R2) and tends to be bias (high RMSE)
 
 ```{r}
-## ?? why do I have to reenter this here? relabel rmse fn?
-#source("0.Global_Fns.R")
 
-#calculate RMSE and R2 (MSE-based) around the 1-1 line
 bc_valid_overall <- bc_valid_p %>%
+   #filter(str_detect(Site, "Duwamish", negate = T)) %>%
   dplyr::summarize(
     N = n(), #all site-years
     Years = paste(unique(Year), collapse = ", ")      ,
@@ -2596,34 +3607,99 @@ bc_valid_overall <- bc_valid_p %>%
     R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
   ) 
 
-# short dataset w/ fewer sies
-bc_valid_overall_short <- bc_valid_p %>%
-  # ? drop Duwamish?
-  filter(str_detect(Site, "Duwamish", negate = T)) %>%
+#nox
+bc_valid_overall_nox <- bc_valid_p %>%
+   #filter(str_detect(Site, "Duwamish", negate = T)) %>%
   dplyr::summarize(
     N = n(), #all site-years
     Years = paste(unique(Year), collapse = ", ")      ,
     Sites = paste(unique(Site), collapse = ", ")      ,
-    RMSE = round(rmse_fn(obs = mean_ng_m3, pred = uk_trend_p)),
-    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
+    RMSE = round(rmse_fn(obs = mean_ng_m3, pred = uk_trend_p_nox)),
+    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p_nox)
   ) 
-
 ```
 
 ```{r}
+ 
 bc_valid_overall %>%
   kable(digits = 2, 
-        caption = "Out-of-sample validation for all AQS sites and years with BC observations (ng/m3). N is the number of site-years. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
-          ) %>%
-  kable_styling()
-
-bc_valid_overall_short %>%
-  kable(digits = 2, 
-        caption = "NO DUWAMISH. Out-of-sample validation for all AQS sites and years with BC observations (ng/m3). RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+        caption = "Out-of-sample validation for all AQS sites and years with BC observations (ng/m3). RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
           ) %>%
   kable_styling()
 
 ```
+
+* NOx results look the same 
+
+```{r}
+bc_valid_overall_nox %>%
+  kable(digits = 2, 
+        caption = "NOx predictor model. Out-of-sample validation for all AQS sites and years with BC observations (ng/m3). RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
+```
+
+
+**How much lower are predictions than observations?**
+
+Predicted vs observed proporiton
+
+```{r}
+bc_valid_p %>%
+  mutate(prop = uk_trend_p/mean_ng_m3,
+         mean_prop = mean(prop)
+         ) %>%
+  {
+  ggplot(., aes(y=prop, x=Year,
+             shape = Site,
+             col = Site,
+             group=Site
+             )) + 
+  geom_point() + 
+  geom_hline(yintercept = .$mean_prop[1], linetype=2,
+             aes(fill = "Mean Proportion")
+             )
+  }
+  
+```
+
+```{r}
+# table
+ 
+## by site
+prop_t1 <- bc_valid_p %>%
+  mutate(prop = uk_trend_p/mean_ng_m3) %>%
+  group_by(Site) %>%
+  distribution.table(var.string = "prop", round.int = 2) 
+
+## by year 
+prop_t2 <- bc_valid_p %>%
+  mutate(Year = as.factor(Year),
+         prop = uk_trend_p/mean_ng_m3) %>%
+  group_by(Year) %>%
+  distribution.table(var.string = "prop", round.int = 2)  
+
+## by site
+bc_valid_p %>%
+  mutate(prop = uk_trend_p/mean_ng_m3) %>%
+  group_by(Site = "All") %>%
+  distribution.table(var.string = "prop", round.int = 2) %>%
+  rbind(prop_t1) %>%
+  kable(caption = "Predictions as proportions of observed concentrations, by site. N = number of years.") %>%
+  kable_styling()
+
+## by year
+bc_valid_p %>%
+  mutate(prop = uk_trend_p/mean_ng_m3) %>%
+  group_by(Year = "All") %>%
+  distribution.table(var.string = "prop", round.int = 2) %>%
+  rbind(prop_t2) %>%
+  kable(caption = "Predictions as proportions of observed concentrations, by year N = number of sites") %>%
+  kable_styling()
+
+
+```
+
 
 -by site
 
@@ -2640,33 +3716,20 @@ bc_valid_by_site <- bc_valid_p %>%
     R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
   ) 
 
-# # NO DUWAMISH
-# bc_valid_by_site_short <- bc_valid_p %>%
-#   filter(str_detect(Site, "Duwamish", negate = T)) %>%
-#   group_by(Site) %>%
-#   dplyr::summarize(
-#     N = n(),  
-#     Years = paste(unique(Year), collapse = ", ")      ,
-#     RMSE = round(rmse_fn(obs = mean_ng_m3, pred = uk_trend_p)),
-#     R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
-#   ) 
-
 ```
 
 ```{r}
-
-bc_valid_by_site %>%
-  kable(digits = 2, 
-        caption = "Out-of-sample validation results for the BC model (ng/m3) by AQS site. N is the number of years avaialble for that site. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
-          ) %>%
-  kable_styling()
-
-# bc_valid_by_site_short %>%
-#   kable(digits = 2, 
-#         caption = "NO DUWAMISH. Out-of-sample validation results for the BC model (ng/m3) by AQS site. N is the number of years avaialble for that site. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
-#           ) %>%
-#   kable_styling()
+# nox
+bc_valid_by_site_nox <- bc_valid_p %>%
+  group_by(Site) %>%
+  dplyr::summarize(
+    N = n(),  
+    Years = paste(unique(Year), collapse = ", ")      ,
+    RMSE = round(rmse_fn(obs = mean_ng_m3, pred = uk_trend_p_nox)),
+    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p_nox)
+  ) 
 ```
+
 
 ```{r}
 scale_val <- 600
@@ -2679,41 +3742,43 @@ bc_valid_by_site %>%
   gather(key = Measure, value = value, RMSE, R2) %>%
   ggplot(aes(x=Site, y=value, shape=Measure, col=N )) + 
   geom_point() +
-  geom_hline(aes(yintercept = bc_valid_overall$RMSE, linetype="RMSE")) +
-  geom_hline(aes(yintercept = bc_valid_overall$R2*scale_val, linetype="R2")) +
+  # geom_hline(aes(yintercept = bc_valid_overall$RMSE, linetype="RMSE")) +
+  # geom_hline(aes(yintercept = bc_valid_overall$R2*scale_val, linetype="R2")) +
   # NO DUWAMISH
-  geom_hline(aes(yintercept = bc_valid_overall_short$RMSE, linetype="RMSE No Duwamish")) +
-    geom_hline(aes(yintercept = bc_valid_overall_short$R2*scale_val, linetype="R2 No Duwamish")) +
+  geom_hline(aes(yintercept = bc_valid_overall$RMSE, linetype="RMSE")) +
+    geom_hline(aes(yintercept = bc_valid_overall$R2*scale_val, linetype="R2")) +
 
   
   scale_y_continuous(sec.axis = sec_axis(~./scale_val, name = "R2")) + 
   labs(y = "RMSE (ng/m3)",
-       title = "Out-of-sample validation results for the BC model by AQS site",
-       linetype = "Overall",
-       shape="Site",
+       title = "Out-of-sample validation results for the BC model by site",
+       linetype = "All Site-Years",
+       shape="Site-Specific",
        col = "No. Years"
        )
   
-# ## NO DUWAMISH 
-# bc_valid_by_site_short %>%
-#   mutate(R2 = R2*scale_val,
-#          #sorten site names
-#          Site = str_remove(Site, "Seattle ")
-#          ) %>%
-#   gather(key = Measure, value = value, RMSE, R2) %>%
-#   ggplot(aes(x=Site, y=value, shape=Measure, col=N )) + 
-#   geom_point() +
-#   geom_hline(aes(yintercept = bc_valid_overall_short$RMSE, linetype="RMSE")) +
-#   geom_hline(aes(yintercept = bc_valid_overall_short$R2*scale_val, linetype="R2")) +
-#   
-#   scale_y_continuous(sec.axis = sec_axis(~./scale_val, name = "R2")) + 
-#   labs(y = "RMSE (ng/m3)",
-#        title = "Out-of-sample validation results for the BC model by AQS site",
-#        subtitle = "NO DUWAMISH",
-#        linetype = "Overall",
-#        shape="Site",
-#        col = "No. Years"
-#        )
+ 
+```
+
+```{r}
+
+bc_valid_by_site %>%
+  kable(digits = 2, 
+        caption = "Out-of-sample validation results for the BC model (ng/m3) by AQS site. N is the number of years avaialble for that site. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
+
+```
+
+```{r}
+#nox
+
+bc_valid_by_site_nox %>%
+  kable(digits = 2, 
+        caption = "NOx predictor model. Out-of-sample validation results for the BC model (ng/m3) by AQS site. N is the number of years avaialble for that site. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
+
 ```
 
 -by year
@@ -2721,17 +3786,8 @@ bc_valid_by_site %>%
 * the BC model generally performs better (lower RMSE) during more recent years 
 
 ```{r}
-bc_valid_by_yr <- bc_valid_p %>%
-  group_by(Year) %>%
-  dplyr::summarize(
-    N = n(),  
-    Sites = paste(unique(Site), collapse = ", ")      ,
-    RMSE = round(rmse_fn(obs = mean_ng_m3, pred = uk_trend_p)),
-    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p)
-  ) 
 
-## NO DUWAMISH
-bc_valid_by_yr_short <- bc_valid_p %>%
+bc_valid_by_yr <- bc_valid_p %>%
   filter(str_detect(Site, "Duwamish", negate = T)) %>%
   group_by(Year) %>%
   dplyr::summarize(
@@ -2742,20 +3798,17 @@ bc_valid_by_yr_short <- bc_valid_p %>%
   ) 
 ```
 
-```{R}
-# #with duwamish
-# bc_valid_by_yr %>%
-#   kable(digits = 2, 
-#         caption = "Out-of-sample validation by year. N is the number of sites avaialble for that year. N is the number of sites avaialble for that year. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
-#           ) %>%
-#   kable_styling()
-
-bc_valid_by_yr_short %>%
-  kable(digits = 2, 
-        caption = "NO DUWAMISH. Out-of-sample validation by year. N is the number of sites avaialble for that year. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
-          ) %>%
-  kable_styling()
-
+```{r}
+#nox
+bc_valid_by_yr_nox <- bc_valid_p %>%
+  filter(str_detect(Site, "Duwamish", negate = T)) %>%
+  group_by(Year) %>%
+  dplyr::summarize(
+    N = n(),  
+    Sites = paste(unique(Site), collapse = ", ")      ,
+    RMSE = round(rmse_fn(obs = mean_ng_m3, pred = uk_trend_p_nox)),
+    R2 = r2_mse_based(obs = mean_ng_m3, pred = uk_trend_p_nox)
+  ) 
 ```
 
 * note, RMSE pattern is the opposite over time (RMSE increases) when Duwamish is dropped 
@@ -2763,42 +3816,165 @@ bc_valid_by_yr_short %>%
 ```{r}
 scale_val <- 1e3
 
-# # with duwamish
-# bc_valid_by_yr %>%
-#   mutate(R2 = R2*scale_val) %>%
-#   gather(key = Measure, value = value, RMSE, R2) %>%
-#   ggplot(aes(x=Year, y=value, shape=Measure, col=N)) + 
-#   geom_point() + 
-#   geom_smooth(se=F) +
-#   geom_hline(aes(yintercept = bc_valid_overall$RMSE, linetype="RMSE")) +
-#   geom_hline(aes(yintercept = bc_valid_overall$R2*scale_val, linetype="R2")) +
-#   scale_y_continuous(sec.axis = sec_axis(~./scale_val, name = "R2")) + 
-#   labs(y = "RMSE (ng/m3)",
-#        title = "Out-of-sample validation results for the BC model by year",
-#        linetype = "Overall",
-#        shape="Site",
-#        col = "No. Sites"
-#        )
-
-## NO DUWAMISH
-bc_valid_by_yr_short %>%
-  mutate(R2 = R2*scale_val) %>%
+bc_valid_by_yr %>%
+  mutate(R2 = R2*scale_val,
+         ) %>%
   gather(key = Measure, value = value, RMSE, R2) %>%
   ggplot(aes(x=Year, y=value, shape=Measure, col=N)) + 
   geom_point() + 
   geom_smooth(se=F) +
-  geom_hline(aes(yintercept = bc_valid_overall_short$RMSE, linetype="RMSE")) +
-  geom_hline(aes(yintercept = bc_valid_overall_short$R2*scale_val, linetype="R2")) +
+  geom_hline(aes(yintercept = bc_valid_overall$RMSE, linetype="RMSE")) +
+  geom_hline(aes(yintercept = bc_valid_overall$R2*scale_val, linetype="R2")) +
   scale_y_continuous(sec.axis = sec_axis(~./scale_val, name = "R2")) + 
+  
+  #only include whole #s in legend. setting 20 as the upper limit, which is never reached
+  scale_color_gradient(breaks=c(seq(1,20))) +
+  
   labs(y = "RMSE (ng/m3)",
        title = "Out-of-sample validation results for the BC model by year",
-       subtitle = "NO DUWAMISH",
-       linetype = "Overall",
-       shape="Site",
+       #subtitle = "NO DUWAMISH",
+       linetype = "All Site-Years", #"Overall",
+       shape="Year-Specific",
        col = "No. Sites"
        )
 ```
 
+```{r}
+
+bc_valid_by_yr %>%
+  kable(digits = 2, 
+        caption = "NO DUWAMISH. Out-of-sample validation by year. N is the number of sites avaialble for that year. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
+
+```
+
+```{r}
+#NOX
+bc_valid_by_yr_nox %>%
+  kable(digits = 2, 
+        caption = "NOx predictor model. NO DUWAMISH. Out-of-sample validation by year. N is the number of sites avaialble for that year. RMSE and R2 (MSE-based) are calculated around the 1-1 line.", 
+          ) %>%
+  kable_styling()
+
+```
+
+
+## UFP
+
+```{r}
+#plot 
+ufp_valid_p %>%
+  ggplot(aes()) + 
+  geom_point(aes(x=Year, y=uk_trend_p,
+                 col = "Predicted"
+                 )) + 
+  geom_rect(aes(
+    #xmin = 0, xmax=4000,
+    xmin = 2000, xmax=2002,
+    ymin = ufp_valid_p$pt_cm3_upper_bin,
+    ymax = ufp_valid_p$pt_cm3_lower_bin,
+   fill = "Observed" #"Kim et al. (2004)" 
+  ),
+  alpha=0.3
+  ) +
+  scale_y_continuous(sec.axis = sec_axis(~./ufp_valid_p$pt_cm3_upper_bin,
+                                         name = "Proportion of Lower Observed", 
+                                         breaks = c(#seq(0.4, 2, .2),
+                                                    round(ufp_valid_p$uk_trend_p/ufp_valid_p$pt_cm3_upper_bin,2),
+                                                    1,
+                                                    round(ufp_valid_p$pt_cm3_lower_bin/ufp_valid_p$pt_cm3_upper_bin, 2)
+                                                    )
+                                         ),
+                     labels = scales::comma, #function(x) format(x, scientific = FALSE),
+                     breaks = c(#seq(4e4,3e5, 2e4),
+                                ufp_valid_p$uk_trend_p,
+                                ufp_valid_p$pt_cm3_upper_bin,
+                                ufp_valid_p$pt_cm3_lower_bin
+                                )
+                     ) +
+  scale_x_continuous(breaks = 2001) +
+  labs(y = "UFP (pt/cm3)",
+       fill = "",
+       col = "",
+       title = "Observed (Kim et al., 2004) and predicted UFP concentration for Beacon Hill"
+       )
+ 
+```
+
+```{r}
+ufp_valid_p %>%
+  ggplot(aes()) + 
+  geom_point(aes(x=Year, y=uk_trend_p_nox,
+                 col = "Predicted"
+                 )) + 
+  geom_rect(aes(
+    #xmin = 0, xmax=4000,
+    xmin = 2000, xmax=2002,
+    ymin = ufp_valid_p$pt_cm3_upper_bin,
+    ymax = ufp_valid_p$pt_cm3_lower_bin,
+   fill = "Observed" #"Kim et al. (2004)" 
+  ),
+  alpha=0.3
+  ) +
+  scale_y_continuous(sec.axis = sec_axis(~./ufp_valid_p$pt_cm3_upper_bin,
+                                         name = "Proportion of Lower Observed", 
+                                         breaks = c(#seq(0.4, 2, .2),
+                                                    round(ufp_valid_p$uk_trend_p/ufp_valid_p$pt_cm3_upper_bin,2),
+                                                    1,
+                                                    round(ufp_valid_p$pt_cm3_lower_bin/ufp_valid_p$pt_cm3_upper_bin, 2)
+                                                    )
+                                         ),
+                     labels = scales::comma,  
+                     breaks = c(#seq(4e4,3e5, 2e4),
+                                ufp_valid_p$uk_trend_p,
+                                ufp_valid_p$pt_cm3_upper_bin,
+                                ufp_valid_p$pt_cm3_lower_bin
+                                )
+                     ) +
+  scale_x_continuous(breaks = 2001) +
+  labs(y = "UFP (pt/cm3)",
+       fill = "",
+       col = "",
+       title = "NOx predictor model. Observed (Kim et al., 2004) and predicted UFP concentration for Beacon Hill"
+       )
+
+```
+
+
+
+RMSE here is also just the error since there is only one value.
+
+```{r}
+# table
+ufp_valid_p %>%
+  dplyr::summarize(
+    N = n(),  
+    Years = paste(unique(Year), collapse = ", ")      ,
+    RMSE = round(rmse_fn(obs = pt_cm3_upper_bin, pred = uk_trend_p)),
+    R2 = r2_mse_based(obs = pt_cm3_upper_bin, pred = uk_trend_p)
+  ) %>%
+  kable(caption = "UFP model out-of-sample performance") %>%
+  kable_styling()
+
+```
+
+* NOx model performs nearly the same
+
+```{r}
+#nox
+ufp_valid_p %>%
+  dplyr::summarize(
+    N = n(),  
+    Years = paste(unique(Year), collapse = ", ")      ,
+    RMSE = round(rmse_fn(obs = pt_cm3_upper_bin, pred = uk_trend_p_nox)),
+    R2 = r2_mse_based(obs = pt_cm3_upper_bin, pred = uk_trend_p_nox)
+  )%>%
+  kable(caption = "NOx predictor UFP model out-of-sample performance") %>%
+  kable_styling()
+
+
+```
 
 
 
@@ -2927,10 +4103,18 @@ diff_plots %>%
 ```
 
 
+# Possible Additional Analyses
+
+??? could do sensitivity analysis similar to A1 w/ & w/o temporally-adjusted predictions
+
+```{r}
+
+```
+
 
 \newpage
 # Code
 
-```{r,ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=60), include=T}
+```{r,ref.label=knitr::all_labels(),echo=TRUE,eval=FALSE, tidy=TRUE, tidy.opts=list(width.cutoff=60), include=F}
 ```
  

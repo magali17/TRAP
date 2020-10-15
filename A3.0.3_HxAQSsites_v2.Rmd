@@ -50,7 +50,7 @@ We will use daily EC and BC data rather than annual estimates to ensure that eac
 
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = F, cache=T, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE 
+knitr::opts_chunk$set(echo = F, cache=F, cache.comments = F, message = F, warning = F, tidy.opts=list(width.cutoff=60), tidy=TRUE 
                       #fig.height = 8
                       )  
 
@@ -251,24 +251,26 @@ map0 <- map_base(dt=study_area, latitude_name = "lat", longitude_name = "long")
 map0 +
   geom_polygon(data = study_area, 
                 aes(x = long, y = lat, group = group, 
-                    fill = "Study"),
+                    fill = "Study\nArea"
+                    ),
                 alpha = 0.3,
                 size = 0.5) +
-  geom_polygon(data = monitoring_area, 
-                aes(x = long, y = lat, group = group, 
-                    fill = "Monitoring"),
-                alpha = 0.3,
-                size = 0.5) +
+  # geom_polygon(data = monitoring_area, 
+  #               aes(x = long, y = lat, group = group, 
+  #                   fill = "Monitoring"),
+  #               alpha = 0.3,
+  #               size = 0.5) +
       geom_point(data = aqs_monitors,
                  aes(x = Longitude, y = Latitude, 
-                     col = "AQS Site"), col= "black",
+                     #col = "AQS Site"
+                     ), #col= "black",
                  ) + 
   ggrepel::geom_text_repel(data = aqs_monitors, aes(x = Longitude, y = Latitude, label = Local.Site.Name), 
             # nudge_x = c(0.13),
             # nudge_y = c(0.009)
             )  +
   labs(
-    title = "AQS sites with historical BC measurements \nin and near the study area",
+    title = "AQS sites with historical BC and EC measurements \nin and near the study area",
     fill = "",
     col = ""
     ) 
@@ -447,12 +449,20 @@ Note that this method includes EC from the 1st temperature fraction
 ```{r}
 epa_daily %>%
   ggplot(aes(x=Year, fill=month_type)) + 
-  geom_bar(aes(alpha=meets_criteria)) + 
-  scale_alpha_discrete( range = c(0.4, 1)) + 
+  geom_bar(data=subset(epa_daily, meets_criteria == TRUE)) +
+  geom_bar(data=subset(epa_daily, meets_criteria == FALSE), 
+           alpha=0.3,
+           show.legend = F) + 
+  #scale_alpha_discrete( range = c(0.4, 1)) + 
+  geom_hline(yintercept = min_day_criteria, linetype = 2, alpha=0.5) +
+  scale_y_continuous(breaks = c(seq(0, 125, 25),  min_day_criteria)) +
+  #theme(legend.position = "bottom") +
   labs(
+    y = "Count",
     title = "Number of EC samples collected",
     subtitle = paste0("Source: EPA daily files for method ", unique(epa_daily$Method.Name)),
-    alpha = "Meets Criteria" 
+    #alpha = "Meets Criteria",
+    fill = "Month Type"
   ) 
   
   
@@ -551,17 +561,21 @@ aqs_trend <- data.frame(Year =c(1995:last_prediction_yr)) %>%
 #don't use bad years in prediction
 
 # for a natural cubic spline, df = knots +1 (for  a cubic spline, df=knots+3). Knots are placed accordingly at quantiles of Year.
+
+#lm1 <- bc_ec %>% lm(formula = mean~splines::ns(Year, knots = c(2005, 2010), Boundary.knots = c(bk1, bk2) ), data = .)
+
 spline_fit <- "mean ~ splines::ns(Year, df = 3)"
 #spline_fit <- "log(mean) ~ splines::ns(Year, df = 3)"
 
 m1 <- aqs_trend %>%
   #otherwise, the boundary knots are placed at first/last prediction year (1995, 2019)
   drop_na(mean) %>%
+  # splines::ns(Year, knots = c(2005, 2012), Boundary.knots = c(1997, 2018))
   lm(as.formula(spline_fit), data = .)
   
 aqs_trend$yhat <- predict(m1, newdata = aqs_trend) #%>% exp()
 
-#calculate the relative difference between EC for any given year, relative to 2018 (latest year), on an additive and multiplicative scale
+#calculate the relative difference between EC for any given year, relative to the reference year (~latest year), on an additive and multiplicative scale
 trend_ref <- 2019
 ref_2019 <- aqs_trend$yhat[aqs_trend$Year==trend_ref]
 
@@ -599,16 +613,25 @@ aqs_trend %>%
 
 ```{r}
 
+#just plot the ratio
 aqs_trend %>%
-  gather("method", "value", difference:ratio) %>%
-  mutate(year_type = ifelse(Year ==trend_ref, "reference", 
-                            ifelse(Year %in% seq(min(epa_yearly_mean$Year), max(epa_yearly_mean$Year)), "within range", "extrapolation"))) %>%
-  ggplot(aes(x=Year, y = value, col=method, shape = year_type)) + 
+  #gather("method", "value", difference:ratio) %>%
+  mutate(year_type = ifelse(Year ==trend_ref, "Reference", "Adjusted"
+  #                           ifelse(Year %in% seq(min(epa_yearly_mean$Year), max(epa_yearly_mean$Year)), "within range", "extrapolation")
+  )
+  ) %>%
+  ggplot(aes(x=Year, y = ratio, 
+             #col=method, 
+             shape = year_type
+             )) + 
   geom_point() + 
+  geom_hline(yintercept = 1, linetype=2, alpha=0.5) +
+  scale_y_continuous(breaks = c(seq(0,2.4, 0.2))) +
   labs(
-    title = "2019 Model prediction adjustment factors based on EC (ug/m3) trend at Beacon Hill",
+    title = "Annual adjustment factors based on the EC trend at Beacon Hill",
     subtitle = paste0(unique(epa_daily_join$Parameter.Name), " data available between ", paste0(range(epa_yearly_mean$Year), collapse = "-")), 
-    shape = "Year Type"
+    y = "Ratio",
+    shape = "Year"
     )
 
 ```
@@ -837,7 +860,8 @@ pscaa %>%
   geom_hline(yintercept = min_day_criteria, linetype = "dashed") +
 
   labs(
-    title = "Number of daily avearge site-year readings"
+    title = "Number of daily average readings per year and site",
+    y = "Count"
   ) +
 scale_shape_manual(values = 1:length(unique(pscaa$Site))) +
   scale_y_continuous(breaks= c(seq(0, 400, 100), min_day_criteria, 365))
@@ -851,6 +875,12 @@ scale_shape_manual(values = 1:length(unique(pscaa$Site))) +
 unique_yr_site <- pscaa %>%
   select(Year, Site) %>%
   unique()
+
+```
+
+Unique site-years in original dataset (includes Duwamish & all years): `r nrow(unique_yr_site)`
+
+```{r}
 
 results <- data.frame()
 
@@ -899,11 +929,13 @@ pscaa_yearly <- left_join(results_summary, pscaa) %>%
 
 ```{r}
 pscaa_yearly  %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
   ggplot(aes(x=Year, y=mean, col=Site, shape=Site)) + 
   geom_point() + 
   geom_line(aes(linetype=location)) +
   scale_shape_manual(values = 1:length(unique((pscaa_yearly$Site)))) + 
-  labs(y = "BC (ug/m3)",
+  labs(y = "BC (ng/m3)",
        title = "Annual averages calculated for sites that meet data criteria",
        subtitle = "source: pscaa_yearly Daily files"
        )  + 
@@ -917,23 +949,173 @@ Validation set with trend overlay showing that trend adjutment may capture chang
 The trend in BC at Duwamish, 10th & Weller & Tacoma tideflats sites may be “different” than the other sites since these are near heavy car/truck/ship traffic, and may reflect the steep decline in vehicle emissions over time.
 
 ```{r}
+pscaa_yearly %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  ggplot(aes(x=Year, y=mean, col = Site, shape=Site)) + 
+  geom_point() + 
+  geom_line() +
+  scale_shape_manual(values =  seq_along(unique(pscaa_yearly$Site)) ) + 
+
+  labs(title = "BC readings (ng/m3) used for validation",
+       y = "BC (ng/m3)"
+       )  
+
+```
+
+
+with the trend adjustment 
+
+```{r}
 aqs_trend %>%
-  gather("method", "value", difference:ratio) %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
+  gather("method", "value", ratio #difference:ratio
+         ) %>%
   ggplot(aes(x=Year, y = value)) + 
   geom_point(alpha=0.4) + 
   geom_line(aes(group=method, linetype=method), alpha=0.4) +
-  
-  geom_point(data=pscaa_yearly, aes(y=mean, col = Site, shape=Site)) + 
-  geom_line(data=pscaa_yearly, aes(y=mean, col = Site)) +
+  #don't include duwamish
+  geom_point(data=subset(pscaa_yearly, !grepl("Duwamish", Site)), 
+             aes(y=mean, col = Site, shape=Site)) + 
+  geom_line(data=subset(pscaa_yearly, !grepl("Duwamish", Site)), 
+            aes(y=mean, col = Site)) +
   scale_shape_manual(values =  seq_along(unique(pscaa_yearly$Site)) ) + 
 
   labs(
-    title = "BC readings (ug/m3) to be used for validation \nand temporal trend adjustment factors"
-    ) #+ 
-  #scale_colour_brewer(palette = plot_palette) 
-
+    title = "BC readings (ug/m3) used for validation \nand temporal trend adjustment factors",
+    linetype = "Trend\nAdjustment\nMethod"
+    )  
  
 ```
+
+alternative - 2D hist of available data 
+
+```{r}
+pscaa_yearly %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  ggplot(aes(x=Year, y=Site, fill=mean)) + 
+  geom_tile() +
+  #stat_bin2d() + 
+  #theme(legend.position = "none")
+  labs(
+    title = "Site-years available to validate BC model",
+    fill = "BC (ng/m3)"
+  )
+
+```
+
+
+-by year 
+
+```{r, fig.width=7}
+#plot
+pscaa_yearly %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000,
+         Year = factor(Year)
+         ) %>%
+  ggplot(aes(y=mean, x=Year)) + 
+  geom_boxplot() + 
+  geom_point(aes(shape=Site,
+                 col = Site
+                 ),
+             alpha=0.8
+             ) +
+    scale_shape_manual(values =  seq_along(unique(pscaa_yearly$Site)) ) + 
+
+  labs(title = "Annual Averages by year",
+       y = "BC (ng/m3)"
+       
+       )
+
+```
+
+```{r}
+#table  
+aqs_p1 <- pscaa_yearly %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000,
+         Year = factor(Year)
+         ) %>%
+  group_by(Year) %>%
+  distribution.table(var.string = "mean",  
+                     ) 
+
+pscaa_yearly %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
+  group_by(Year = "Overall") %>%
+  distribution.table(var.string = "mean") %>%
+  rbind(aqs_p1) %>%
+  
+  kable(caption = "Distribution of annual averages (ng/m3) for each year with observationss. N = number of AQS sites.") %>%
+  kable_styling()
+```
+
+
+-by site 
+
+```{r}
+#plot 
+pscaa_yearly %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
+  ggplot(aes(x=Site, y=mean)) + 
+  geom_boxplot() + 
+  geom_point(aes(col=Year),
+             alpha=0.8
+             ) +
+  
+  #avoid overlapping x-axis labels
+  scale_x_discrete(guide = guide_axis(n.dodge = 2))+
+  
+  labs(title = "Annual Averages by site",
+       y = "BC (ng/m3)"
+       
+       )
+  
+```
+
+```{r}
+
+#table 
+aqs_p0 <- pscaa_yearly %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
+  group_by(Site) %>%
+  distribution.table(var.string = "mean") 
+
+
+pscaa_yearly %>%
+  #don't include duwamish
+  filter(!grepl("Duwamish", Site)) %>%
+  #convert from ug/m3 to ng/m3
+  mutate(mean = mean*1000) %>%
+  group_by(Site = "Overall") %>%
+  distribution.table(var.string = "mean")  %>%
+  rbind(aqs_p0) %>%
+  kable(caption = "Distribution of annual averages (ng/m3) for each AQS site. N = number of annual averages available for that site.") %>%
+  kable_styling()
+
+
+```
+
 
 ```{r}
 #max_0_threshold <- 20 #days 
@@ -1072,7 +1254,8 @@ Final dataset to be used for validation.
 pscaa_yearly_short <- pscaa_yearly[str_detect(pscaa_yearly$Site, "Duwamish", negate = T),]
 
 aqs_trend %>%
-  gather("method", "value", difference:ratio) %>%
+  gather("method", "value", ratio #difference:ratio
+         ) %>%
   ggplot(aes(x=Year, y = value)) + 
   geom_point(alpha=0.4) + 
   geom_line(aes(group=method, linetype=method), alpha=0.4) +

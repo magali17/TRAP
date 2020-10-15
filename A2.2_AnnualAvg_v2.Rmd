@@ -58,7 +58,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
-                      cache=T, cache.comments = F, 
+                      cache=F, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE,
                       fig.height = 6, fig.width = 11
@@ -91,7 +91,7 @@ source("0.Global_Fns.R")
 source("A2.0.1_Var&Fns.R")
 
 #load data
-stops0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-03-17.rda")) 
+stops0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-10-02.rda")) 
 
 site_locations <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_log_scale_preprocessed.rda")) %>% 
   select(site_id, latitude, longitude)
@@ -162,6 +162,16 @@ n.months.sampled <- length(unique(stops$month))
 n.seasons.sampled <- length(unique(stops$season))
 
 ```
+
+Geocovariates. Need??
+```{r}
+cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda")) %>%
+  # drop time-varying pop density, NDVI, emissions 
+  select(-contains(c("pop90_", "pop_"))) %>%
+  #drop Roosevelt garage & stop w/ 1 obeservation that was replaced by MS0601
+  filter(!site_id %in% c("MS0000", "MS0398"))
+```
+
 
 # Sample Size - All stops
 
@@ -510,6 +520,25 @@ stops_l %>%
     facet_wrap(~ Pollutant,scales="free", ncol=1)  
 
 ```
+
+2D histogram
+
+```{r}
+stops_l %>%
+  mutate(site_no = factor(site_no, levels =  sort(unique(stops_l$site_no))),
+         hour = factor(hour, levels =  sort(unique(stops_l$hour)))) %>%
+  ungroup() %>%
+    label_pollutant(var = "Pollutant", label = "pollutant") %>%
+  ggplot(aes(y=hour, x=site_no)) + 
+  stat_bin2d() + 
+  facet_wrap(~Pollutant, ncol=1) + 
+  labs(title = "Number of samples per site-hour",
+       x = "Site",
+       y = "Hour"
+       )
+  
+```
+
 
 ## over time
 
@@ -907,9 +936,8 @@ stops_l <- stops_l %>%
 
 # Regression  
 
-### --> add others:
-### --> month, day, hour regression? 
 ### --> interaction regressions: create site type: based on rd proximity, airport prox, pop, ndvi? interact: site_type*TOD, site_type*TOW
+-harder to do b/c will have to e.g., weigh each category of e.g., road proximity differently, based on what data are available for calcualting annual averages
 ### ? are interactions significant? how do the annual averages compare? 
 
 ### also? use PLS, divide high vs low scores to create site_type A vs B
@@ -923,7 +951,9 @@ data.frame(
                "s_tow2",
                "s_tow2_tod2",
                "s_tow2_tod5",
-               "s_day_tod5"),
+               "s_tow7_tod5"
+             
+             ),
   Description = c("unweighted annual average",
                   "season-adjusted annual average",
                   "season- and time-of-week- (weekend vs weekday) adjusted annual average",
@@ -987,7 +1017,8 @@ preds_s_tow2_tod5_ufp0 <- stops %>% ungroup() %>%
          wt = season_wt*tow2_wt*tod5_wt)
 preds_s_tow2_tod5_bc0 <- preds_s_tow2_tod5_ufp0
 
-preds_s_day_tod5_ufp0 <- stops %>% ungroup() %>%
+#season-day-tod5
+preds_s_tow7_tod5_ufp0 <- stops %>% ungroup() %>%
   tidyr::expand(site_id, season, day, tod5) %>%
   mutate(season_wt = 1/n.seasons.sampled,
          day_wt = 1/7,
@@ -998,7 +1029,18 @@ preds_s_day_tod5_ufp0 <- stops %>% ungroup() %>%
                           "16_20" = 5,
                           "21_2" = 6)/24,
          wt = season_wt*day_wt*tod5_wt)
-preds_s_day_tod5_bc0 <- preds_s_day_tod5_ufp0
+preds_s_tow7_tod5_bc0 <- preds_s_tow7_tod5_ufp0
+
+#season-day-hr
+preds_s_tow7_tod21_ufp0 <- stops %>% ungroup() %>%
+  tidyr::expand(site_id, season, day, hour) %>%
+  mutate(season_wt = 1/n.seasons.sampled,
+         day_wt = 1/7,
+         tod21_wt = ifelse(test= hour %in% c(23, 0,4,5), 
+                           yes =  1.75/24, 
+                           no= 1/24),
+         wt = season_wt*day_wt*tod21_wt)
+preds_s_tow7_tod21_bc0 <- preds_s_tow7_tod21_ufp0
 
 ```
 
@@ -1017,8 +1059,11 @@ fit_s_tow2_tod2_bc <- update(fit_s_tow2_tod2_ufp, subset = (Pollutant =="bc_ng_m
 fit_s_tow2_tod5_ufp <- update(fit_s_tow2_ufp, ~. + tod5)
 fit_s_tow2_tod5_bc <- update(fit_s_tow2_tod5_ufp,  subset = (Pollutant =="bc_ng_m3"))
 
-fit_s_day_tod5_ufp <- update(fit_s_tow2_tod5_ufp, ~. -time_of_week + factor(day, ordered = F))
-fit_s_day_tod5_bc <- update(fit_s_day_tod5_ufp, subset = (Pollutant =="bc_ng_m3"))
+fit_s_tow7_tod5_ufp <- update(fit_s_tow2_tod5_ufp, ~. -time_of_week + factor(day, ordered = F))
+fit_s_tow7_tod5_bc <- update(fit_s_tow7_tod5_ufp, subset = (Pollutant =="bc_ng_m3"))
+
+fit_s_tow7_tod21_ufp <- update(fit_s_ufp, ~. + factor(day, ordered = F) + factor(hour))
+fit_s_tow7_tod21_bc <- update(fit_s_tow7_tod21_ufp, subset = (Pollutant =="bc_ng_m3"))
 
 ```
 
@@ -1110,29 +1155,52 @@ preds_s_tow2_tod5 <- rbind(preds_s_tow2_tod5_ufp, preds_s_tow2_tod5_bc) %>%
 
 ```{r}
 # season-day-TOD5
-preds_s_day_tod5_ufp <- preds_s_day_tod5_ufp0 %>%
-  mutate(yhat = predict(object = fit_s_day_tod5_ufp, newdata = .),
+preds_s_tow7_tod5_ufp <- preds_s_tow7_tod5_ufp0 %>%
+  mutate(yhat = predict(object = fit_s_tow7_tod5_ufp, newdata = .),
          yhat_wt = yhat*wt) %>%
   group_by(site_id) %>%
   dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
   mutate(Pollutant = "ufp_pt_cm3")
 
-preds_s_day_tod5_bc <- preds_s_day_tod5_bc0 %>%
-  mutate(yhat = predict(object = fit_s_day_tod5_bc, newdata = .),
+preds_s_tow7_tod5_bc <- preds_s_tow7_tod5_bc0 %>%
+  mutate(yhat = predict(object = fit_s_tow7_tod5_bc, newdata = .),
          yhat_wt = yhat*wt) %>%
   group_by(site_id) %>%
   dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
   mutate(Pollutant = "bc_ng_m3")
 
-preds_s_day_tod5 <- rbind(preds_s_day_tod5_ufp, preds_s_day_tod5_bc) %>%
-  rename(regression_s_day_tod5 = sum_yhat_wt)
+preds_s_tow7_tod5 <- rbind(preds_s_tow7_tod5_ufp, preds_s_tow7_tod5_bc) %>%
+  rename(regression_s_tow7_tod5 = sum_yhat_wt)
 
 ```
 
 ```{r}
+# season-tow7-TOD21
+preds_s_tow7_tod21_ufp <- preds_s_tow7_tod21_ufp0 %>%
+  mutate(yhat = predict(object = fit_s_tow7_tod21_ufp, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "ufp_pt_cm3")
+
+preds_s_tow7_tod21_bc <- preds_s_tow7_tod21_bc0 %>%
+  mutate(yhat = predict(object = fit_s_tow7_tod21_bc, newdata = .),
+         yhat_wt = yhat*wt) %>%
+  group_by(site_id) %>%
+  dplyr::summarize(sum_yhat_wt = sum(yhat_wt)) %>%
+  mutate(Pollutant = "bc_ng_m3")
+
+preds_s_tow7_tod21 <- rbind(preds_s_tow7_tod21_ufp, preds_s_tow7_tod21_bc) %>%
+  rename(regression_s_tow7_tod21 = sum_yhat_wt)
+
+```
+
+
+```{r}
  # merge regression predictions
 stops_l <- stops_l %>%
-  left_join(preds_s_day_tod5) %>%
+  left_join(preds_s_tow7_tod21) %>%
+  left_join(preds_s_tow7_tod5) %>%
   left_join(preds_s_tow2_tod5) %>%
   left_join(preds_s_tow2_tod2) %>%
   left_join(preds_s_tow2) %>%
@@ -1147,7 +1215,7 @@ method_names_all <- stops_l %>% ungroup() %>%
   names()
 
 #drop estimate/s that can only be calculated w/ regression
-method_names <- setdiff(method_names_all, c("yhat_s_tow2_tod5", "regression_s_day_tod5"))
+method_names <- setdiff(method_names_all, c("regression_s_tow2_tod5", "regression_s_tow7_tod5", "regression_s_tow7_tod21"))
 
 annual <- stops_l %>% ungroup() %>%
   select(site_no, site_id, Pollutant,
@@ -1159,7 +1227,7 @@ annual.l <- annual %>%
   mutate(
     method = ifelse(grepl("site_only", method_weight), "site only", "regression"),
     weight = ifelse(grepl("site_only", method_weight), substr(method_weight, 11, nchar(method_weight)), substr(method_weight, 12, nchar(method_weight))),
-    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2", "s_tow2_tod5", "s_day_tod5"))
+    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2", "s_tow2_tod5", "s_tow7_tod5", "s_tow7_tod21"))
   ) %>%
   drop_na(value)
 
@@ -1294,13 +1362,17 @@ p4 <- annual %>%
 
 ```{r}
 annual_subset_tod2 <- annual %>%
-  select(-c(regression_s_day_tod5, regression_s_tow2_tod5)) %>%
-  drop_na(site_only_s_tow2, site_only_s_tow2_tod2) %>%
+  select(-contains(c("tow7", "tod5"))) %>%
+  #select(-c(regression_s_tow7_tod5, regression_s_tow2_tod5)) %>%
+  drop_na(
+    ## "site_only_s_tow2 not found" knit error??
+    site_only_s_tow2, 
+    site_only_s_tow2_tod2) %>%
   gather(method_weight, value, contains(c("site_only", "regression"))) %>%
   mutate(
     method = ifelse(grepl("site_only", method_weight), "site only", "regression"),
     weight = ifelse(grepl("site_only", method_weight), substr(method_weight, 11, nchar(method_weight)), substr(method_weight, 12, nchar(method_weight))),
-    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2" #"s_tow2_tod5", "s_day_tod5"
+    weight = factor(weight, levels = c("uw", "s", "s_tow2", "s_tow2_tod2" #"s_tow2_tod5", "s_tow7_tod5"
                                        )))
 
 tod2_no_sites <- length(unique(annual_subset_tod2$site_id))
@@ -1334,14 +1406,18 @@ annual_subset_tod2 %>%
 ```{r}
 annual_subset_tow2 <- annual %>%
       label_pollutant(var = "Pollutant", label = "pollutant") %>%
-  select(-c(site_only_s_tow2_tod2,
-            regression_s_day_tod5, regression_s_tow2_tod5, regression_s_tow2_tod2)) %>%
+  select(-contains(c("tod"))) %>%
+  # select(-c(site_only_s_tow2_tod2,
+  #           regression_s_tow7_tod5, regression_s_tow2_tod5, regression_s_tow2_tod2)) %>%
+  
+  ## "site_only_s_tow2 not found" knit error??
   drop_na(site_only_s_tow2) %>%
+  
   gather(method_weight, value, contains(c("site_only", "regression"))) %>%
   mutate(
     method = ifelse(grepl("site_only", method_weight), "site only", "regression"),
     weight = ifelse(grepl("site_only", method_weight), substr(method_weight, 11, nchar(method_weight)), substr(method_weight, 12, nchar(method_weight))),
-    weight = factor(weight, levels = c("uw", "s", "s_tow2" #"s_tow2_tod2", "s_tow2_tod5", "s_day_tod5"
+    weight = factor(weight, levels = c("uw", "s", "s_tow2" #"s_tow2_tod2", "s_tow2_tod5", "s_tow7_tod5"
                                        )))
 
 tow2_no_sites <- length(unique(annual_subset_tow2$site_id))
@@ -1467,12 +1543,14 @@ b) weighting time-specific results appropriately to estimate annual average
 
 ```{r}
 data.frame(
-  Analysis =  c("primary", "stop_means", "trim10", "windsorize", "uw")) %>%
+  Analysis =  c("primary", "stop_means", "trim10", "windsorize", "uw", "tow7_tod21")) %>%
   cbind(Description = c("Using stop medians; trimming 5% of each site's highest and lowest stop concentrations; using regression to estimate season-, TOW2- and TOD5-adjusted annual avg concentrations; modeling log-transformed concentrations and proximity covariates",
              "Like Primary analysis, but using stop means (vs medians) to estimate annual averages",
              "Like Primary analysis, but trimming 10% of each site's highest and lowest stop concentrations (vs 5%) before estimating annual averages",
              "Like Primary analysis, but Windsorizing each site's highest and lowest 5% stop concentrations (vs trimming) before estimating annual averages",
-             "Like Primary analysis, but calculating unweighted annual averages for each site (vs regression estimates adjusted for season-, time-of-week- and time-of-day)"
+             "Like Primary analysis, but calculating unweighted annual averages for each site (vs regression estimates adjusted for season-, time-of-week- and time-of-day)",
+             "Like Primary analysis, but using finer regression adjustment for day - TOW7 (vs TOW2) and hour - TOD21 (vs TOD5)"
+             
              )) %>%
   kable(., caption = "Description of primary and sensitivity analyses") %>%
   kable_styling()
@@ -1502,7 +1580,10 @@ annual_ufp <- estimate_annual_avg(dt = stops, lm_x_names = predictors,
                                        var = "ptrak_median_windsorize", estimate_label = "ufp_windsorize")) %>%
   # unweighted annual averages
   left_join(estimate_annual_avg(dt = stops, lm_x_names = "site_id",
-                                       var = "ufp_pt_cm3", estimate_label = "ufp_uw"))
+                                       var = "ufp_pt_cm3", estimate_label = "ufp_uw")) %>%
+# finer temporal adjustment: day (7) & hour (21/24)
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = c("site_id", "season", "day", "hour"),
+                                       var = "ufp_pt_cm3", estimate_label = "ufp_tow7_tod21"))
  
 ```
 
@@ -1523,7 +1604,10 @@ annual_bc <- estimate_annual_avg(dt = stops, lm_x_names = predictors,
                                        var = "bc_median_windsorize", estimate_label = "bc_windsorize")) %>%
   # unweighted annual averages
   left_join(estimate_annual_avg(dt = stops, lm_x_names = "site_id",
-                                       var = "bc_ng_m3", estimate_label = "bc_uw"))
+                                       var = "bc_ng_m3", estimate_label = "bc_uw")) %>%
+# finer temporal adjustment: day (7) & hour (21/24)
+  left_join(estimate_annual_avg(dt = stops, lm_x_names = c("site_id", "season", "day", "hour"),
+                                       var = "bc_ng_m3", estimate_label = "bc_tow7_tod21"))
 
 ```
 
@@ -1535,10 +1619,7 @@ annual_bc_names <- names(annual)[grepl("bc", names(annual))]
 
 annual_l <- annual %>% gather("pollutant_analysis", "prediction", contains(c("ufp", "bc"))) %>%
   label_analysis(var = "pollutant_analysis")
-  # mutate(
-  #   pollutant = ifelse(grepl("ufp", pollutant_analysis), "UFP (pt/cm3)", "BC (ng/m3)"),
-  #   analysis = ifelse(grepl("ufp", pollutant_analysis), substr(pollutant_analysis, 5, nchar(pollutant_analysis)), substr(pollutant_analysis, 4, nchar(pollutant_analysis))),
-  #   analysis = relevel(factor(analysis), ref = "primary")) 
+  
                                         
 ```
 
@@ -1622,44 +1703,91 @@ annual_lat_long <- annual %>%
   # site MS601 has no lat/long
   drop_na()
 
+# long format
+annual_lat_long_l <- annual_lat_long %>%
+  gather("Analysis", "value", contains(c("ufp", "bc"))) %>%
+  label_analysis(var="Analysis")
 ```
 
 - UFP 
 
 ```{r, fig.height=10}
-# dot map
-#list to store maps
-annual_maps_ufp <-list()
-annual_names <- annual_ufp_names #update for BC
-
-# min and max difference of all estimates
-plot_range <- annual %>%
-  select(annual_names) %>%
-  dplyr::summarize(min = min(.),
-                   max = max(.)) %>%
-  round()
-
-for(i in seq_along(annual_names)) {
-  #i=1
-  mymap <- suppressMessages(
-     annual_lat_long %>% map_fn(color_by = annual_names[i], outline_points = F,
-                                   map_title = annual_names[i]) +
-    scale_color_gradient(name = "UFP (pt/cm3)", 
-                        low = "yellow", high = "red",
-                        #ensure that all plots on same scale
-                        limits = c(plot_range$min, plot_range$max))
-    )
-
-  annual_maps_ufp[i] <- list(mymap)
-  names(annual_maps_ufp)[i] <- substr(annual_names[i], 5, nchar(annual_names[i]))
-}
+# # dot map
+# #list to store maps
+# annual_maps_ufp <-list()
+# annual_names <- annual_ufp_names #update for BC
+# 
+# # min and max difference of all estimates
+# plot_range <- annual %>%
+#   select(annual_names) %>%
+#   dplyr::summarize(min = min(.),
+#                    max = max(.)) %>%
+#   round()
+# 
+# for(i in seq_along(annual_names)) {
+#   #i=1
+#   mymap <- suppressMessages(
+#      annual_lat_long %>% map_fn(color_by = annual_names[i], outline_points = F,
+#                                    map_title = annual_names[i]) +
+#     scale_color_gradient(name = "UFP (pt/cm3)", 
+#                         low = "yellow", high = "red",
+#                         #ensure that all plots on same scale
+#                         limits = c(plot_range$min, plot_range$max))
+#     )
+# 
+#   annual_maps_ufp[i] <- list(mymap)
+#   names(annual_maps_ufp)[i] <- substr(annual_names[i], 5, nchar(annual_names[i]))
+# }
 
 ```
+
+
+```{r}
+# background map
+   
+# dimensions of data 
+height <- max(annual_lat_long_l$latitude) - min(annual_lat_long_l$latitude)
+width <- max(annual_lat_long_l$longitude) - min(annual_lat_long_l$longitude)
+
+# make map boundaries little larger than data dimensions
+bbox <- c(
+  min(annual_lat_long_l$longitude) - 0.5*width,
+  min(annual_lat_long_l$latitude) - 0.1*height,
+  max(annual_lat_long_l$longitude) + 0.5*width,
+  max(annual_lat_long_l$latitude) + 0.1*height
+)
+
+names(bbox) <- c("left", "bottom", "right", "top")
+
+# Make a map base layer of "Stamen" tiles
+map <- suppressMessages(get_stamenmap(bbox = bbox, zoom = 11,
+                                      maptype = "terrain"))
+
+# Make basic map image from the tiles
+map0 <- ggmap(ggmap = map, darken = c(0.5, "white")) + theme_void()
+
+```
+
 
 Map of UFP predictions from primary analysis
 
 ```{r}
-annual_maps_ufp$primary
+# UFP
+
+map0 +
+  geom_point(data = subset(annual_lat_long_l, 
+                           subset = grepl("UFP", Pollutant) & 
+                             Analysis == "Primary"
+                           ),
+             aes(x = longitude, y = latitude, col = value),
+             alpha = 0.8,
+             ) +
+  scale_color_gradient(name = "pt/cm3", 
+                       low = "yellow", 
+                       high = "red") +
+  theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0))  + 
+  labs(title = "UFP Primary Analysis"
+       )
 
 ```
 
@@ -1667,49 +1795,43 @@ Comparison maps of UFP predictions from primary and sensitivity analysis
 
 ```{r, fig.height=15}
 
-ggarrange(plotlist = annual_maps_ufp,
-          ncol = 3, nrow = 2,
-          common.legend = T, legend = "right") %>%
-  annotate_figure(top = "Annual average UFP estimates from different methods" ) 
+# UFP
+map0 +
+  geom_point(data = subset(annual_lat_long_l, subset = grepl("UFP", Pollutant)),
+             aes(x = longitude, y = latitude, col = value),
+             alpha = 0.8,
+             ) +
+  scale_color_gradient(name = "pt/cm3", 
+                       low = "yellow", 
+                       high = "red") +
+  facet_wrap(~Analysis, labeller = "label_both") + 
+  theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0))  + 
+  labs(title = "UFP Annual Averages for Sensitivit Analyses"
+         
+         )
    
 ```
 
-- BC 
+-BC 
 
-```{r, fig.height=10}
-# dot map
-#list to store maps
-annual_maps_bc <-list()
-annual_names <- annual_bc_names 
-
-# min and max difference of all estimates
-plot_range <- annual %>%
-  select(annual_names) %>%
-  dplyr::summarize(min = min(.),
-                   max = max(.)) %>%
-  round()
-
-for(i in seq_along(annual_names)) {
-  #i=1
-  mymap <- suppressMessages(
-     annual_lat_long %>% map_fn(color_by = annual_names[i], outline_points = F,
-                                   map_title = annual_names[i]) +
-    scale_color_gradient(name = "BC (ng/m3)", 
-                        low = "yellow", high = "red",
-                        #ensure that all plots on same scale
-                        limits = c(plot_range$min, plot_range$max))
-    )
-
-  annual_maps_bc[i] <- list(mymap)
-  names(annual_maps_bc)[i] <- substr(annual_names[i], 4, nchar(annual_names[i])) 
-}
-
-```
-
-Map of BC predictions from primary analysis  
+Map of BC predictions from primary analysis
 
 ```{r}
-annual_maps_bc$primary 
+# BC
+
+map0 +
+  geom_point(data = subset(annual_lat_long_l, 
+                           subset = grepl("BC", Pollutant) & 
+                             Analysis == "Primary"),
+             aes(x = longitude, y = latitude, col = value),
+             alpha = 0.8,
+             ) +
+  scale_color_gradient(name = "ng/m3", 
+                       low = "yellow", 
+                       high = "red") +
+  theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0))  + 
+  labs(title = "BC Primary Analysis"
+       )
 
 ```
 
@@ -1717,28 +1839,38 @@ Comparison maps of BC predictions from primary and sensitivity analysis
 
 ```{r, fig.height=15}
 
-ggarrange(plotlist = annual_maps_bc,
-          ncol = 3, nrow = 2,
-          common.legend = T, legend = "right") %>%
-  annotate_figure(top = "Annual average BC estimates from different methods" ) 
+# UFP
+map0 +
+  geom_point(data = subset(annual_lat_long_l, 
+                           subset = grepl("BC", Pollutant)),
+             aes(x = longitude, y = latitude, col = value),
+             alpha = 0.8,
+             ) +
+  scale_color_gradient(name = "ng/m3", 
+                       low = "yellow", 
+                       high = "red") +
+  facet_wrap(~Analysis, labeller = "label_both") + 
+  theme(legend.position = c(0.98, 0.01), legend.justification = c(1,0))  + 
+  labs(title = "BC Annual Averages for Sensitivit Analyses"
+         
+         )
    
 ```
 
 
 
 
-
 ```{r}
-# save datasets.
-## annual estimates from primary and sensitivity analyses
-# saveRDS(annual, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda"))
-
+### save datasets.
+# annual estimates from primary and sensitivity analyses
+# saveRDS(annual, file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-10-02.rda"))
+# 
 # # short dataset for GIS
 # stops %>%
 #   select(site_id, latitude = site_lat, longitude = site_long, route) %>%
 #   unique() %>%
 #   right_join(annual) %>%
-#   write.csv(., file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17_loc&avg.csv"))
+#   write.csv(., file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-10-02_loc&avg.csv"))
  
 ```
  

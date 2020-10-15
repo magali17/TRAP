@@ -626,10 +626,16 @@ names(missing_df) <- c("Covariate", "N")
 
 missing_df %>%
   filter(N >0)  %>%
-  mutate(Proportion = N/nrow(fixed.covariates)) %>%
-  arrange(desc(N)) %>%
+  mutate(Percent = N/nrow(fixed.covariates)*100,
+         #TOTAL_MISSING = sum(Percent)
+         ) %>%
+  rbind(c("TOTAL" ,sum(.$N), sum(.$Percent))) %>%
+  mutate(Percent = round(as.numeric(Percent), 2)) %>%
+  
+  arrange(desc(Percent)) %>%
   kable(caption = "Number and proportion of total of missing observations by covariate", 
-        digits = 3) %>%
+        #digits = 2
+        ) %>%
   kable_styling()
 
 ```
@@ -826,6 +832,59 @@ fixed.covariates %>%
 
 ```
 
+Dementia onset age
+
+```{r}
+
+# count
+p1 <- fixed.covariates %>%
+  mutate(
+    age_last_visit2 = round(age_last_visit/5)*5,
+    anydementia = ifelse(anydementia ==1, "Dementia", "No Dementia"),
+    anydementia = relevel(factor(anydementia), ref = "No Dementia")
+  ) %>%
+  ggplot(aes(x=age_last_visit2, fill=anydementia)) + 
+  geom_bar() + 
+  theme(legend.position = "bottom") +
+  labs(x = "", # "Age of Last Visit",
+       y = "Count",
+       #title = "All-cause dementia diagnosis by last visit",
+       fill = ""
+       )
+
+
+#proportion 
+p2 <- fixed.covariates %>%
+  mutate(
+    age_last_visit2 = round(age_last_visit/5)*5,
+    anydementia = ifelse(anydementia ==1, "Dementia", "No Dementia"),
+    anydementia = relevel(factor(anydementia), ref = "No Dementia")
+  ) %>%
+  ggplot(aes(x=age_last_visit2, fill=anydementia)) + 
+  geom_bar(position = "fill") + 
+  theme(legend.position = "bottom") +
+  labs(x = "", #"Age of Last Visit",
+       y = "Proportion",
+       #title = "All-cause dementia diagnosis by last visit",
+       fill = ""
+       )
+
+ 
+
+ggarrange(p1, p2, 
+          ncol=1,   
+          common.legend = T, legend = "bottom", 
+          label.x = "Age",
+          heights = c(1,1) 
+          #labels = "All-cause dementia diagnosis by last visit"
+          ) %>%
+  annotate_figure(top = "All-cause dementia diagnosis by last visit", 
+                  bottom = "Age of Last Visit"
+                  )
+
+```
+
+
 ## Age variables 
 
 ```{r}
@@ -901,6 +960,39 @@ ad_counts %>%
 
 ```
 
+## Event ties
+
+```{r}
+dem.w %>%
+  filter(dementia_now==1) %>%
+  #for cases, age of last visit (primary analysis)
+  ggplot(aes(x=age_end_exposure)) +
+  geom_bar() + 
+    
+    labs(title = "Number of events by age (time axis)",
+         x = "Age",
+         y = "Number of Events"
+         )
+  
+  
+```
+
+119 event ties? 
+
+```{r}
+dem.w %>%
+  filter(dementia_now==1) %>%
+  group_by(age_end_exposure) %>%
+  mutate(N = n()) %>%
+  # ties
+  filter(N >1) %>%
+  select(age_end_exposure) %>%
+  unique() %>% 
+  nrow()
+  
+   
+  
+```
 
 ## Summary of location & prediction quality variables
 
@@ -984,55 +1076,57 @@ t1_tot <- dem.w %>%
 
 ## Replace NAs w/ ""
 t1_tot$Total_b[is.na(t1_tot$Total_b)] <- ""
- 
-# dementia 
-t1_dem <- dem.w %>%
-  # only keep individuals included in Model 2
-  drop_na(m2_all_vars) %>%
-  #1st year of enrollment (baseline)
-  filter(enrollment_yr == 1) %>%
-  group_by(anydementia) %>%
-  t1.fn() %>%
-  separate(col = V1, into = c("NoDementia_a", "NoDementia_b"), sep = " ", fill = "right")  %>%
-  separate(col = V2, into = c("Dementia_a", "Dementia_b"), sep = " ", fill = "right")  %>%
-  #replace "NaN" estimates for APOE w/ "NA"
-  mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA")) %>%
-  #remove grouping rows
-  slice(-c(1)) %>%
-  select(Variable, starts_with("Dementia"), starts_with("NoDementia"))
 
-## Replace NAs w/ ""
-t1_dem$NoDementia_b[is.na(t1_dem$NoDementia_b)] <- ""
-t1_dem$Dementia_b[is.na(t1_dem$Dementia_b)] <- "" 
-
-
-# AD 
-t1_ad <- dem.w %>%
-  drop_na(m2_all_vars) %>%
-  filter(enrollment_yr == 1) %>%
-  group_by(ad_nincds) %>%
-  t1.fn() %>%
-  #separate N & %s
- separate(col = V1, into = c("NoAD_a", "NoAD_b"), sep = " ", fill = "right")  %>%
-  separate(col = V2, into = c("AD_a", "AD_b"), sep = " ", fill = "right")  %>%
-  #replace "NaN" estimates for APOE w/ "NA"
-  mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA")) %>%
-  #remove grouping rows
-  slice(-c(1)) %>%
-  select(Variable, starts_with("AD"), starts_with("No"))
-
-## Replace NAs w/ ""
-t1_ad$NoAD_b[is.na(t1_ad$NoAD_b)] <- ""
-t1_ad$AD_b[is.na(t1_ad$AD_b)] <- "" 
+## # not stratifying table by outcome (Marco's suggestion) 
+# # dementia 
+# t1_dem <- dem.w %>%
+#   # only keep individuals included in Model 2
+#   drop_na(m2_all_vars) %>%
+#   #1st year of enrollment (baseline)
+#   filter(enrollment_yr == 1) %>%
+#   group_by(anydementia) %>%
+#   t1.fn() %>%
+#   separate(col = V1, into = c("NoDementia_a", "NoDementia_b"), sep = " ", fill = "right")  %>%
+#   separate(col = V2, into = c("Dementia_a", "Dementia_b"), sep = " ", fill = "right")  %>%
+#   #replace "NaN" estimates for APOE w/ "NA"
+#   mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA")) %>%
+#   #remove grouping rows
+#   slice(-c(1)) %>%
+#   select(Variable, starts_with("Dementia"), starts_with("NoDementia"))
+# 
+# ## Replace NAs w/ ""
+# t1_dem$NoDementia_b[is.na(t1_dem$NoDementia_b)] <- ""
+# t1_dem$Dementia_b[is.na(t1_dem$Dementia_b)] <- "" 
+# 
+# 
+# # AD 
+# t1_ad <- dem.w %>%
+#   drop_na(m2_all_vars) %>%
+#   filter(enrollment_yr == 1) %>%
+#   group_by(ad_nincds) %>%
+#   t1.fn() %>%
+#   #separate N & %s
+#  separate(col = V1, into = c("NoAD_a", "NoAD_b"), sep = " ", fill = "right")  %>%
+#   separate(col = V2, into = c("AD_a", "AD_b"), sep = " ", fill = "right")  %>%
+#   #replace "NaN" estimates for APOE w/ "NA"
+#   mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA")) %>%
+#   #remove grouping rows
+#   slice(-c(1)) %>%
+#   select(Variable, starts_with("AD"), starts_with("No"))
+# 
+# ## Replace NAs w/ ""
+# t1_ad$NoAD_b[is.na(t1_ad$NoAD_b)] <- ""
+# t1_ad$AD_b[is.na(t1_ad$AD_b)] <- "" 
 
 
 t1_tot %>%
-  left_join(t1_dem) %>%
-left_join(t1_ad)  %>%
+#   left_join(t1_dem) %>%
+# left_join(t1_ad)  %>%
   column_to_rownames(var = "Variable") %>%
-  kable(caption = "Cohort characteristics by all-cause dementia and Alzheimer's Disease incidence", 
+  kable(caption = "Cohort characteristics", 
         col.names = c(#"Variable", 
-                      "Total", " ", "Dementia", " ", "No Dementia", "", "AD", "", "No AD", ""), 
+                       "Total", " "#, "Dementia", " ", "No Dementia", "", "AD", "", "No AD", ""
+          ), 
         align = "r"
         ) %>%
   add_indent(c(5:11,15:20,22:25, 27:29, 32:35, 37:39, 44:46)) %>%
@@ -1099,6 +1193,20 @@ no2_all %>%
   kable(caption = "Annual average NO2 (ppb) exposure predictions for person-years in the primary analysis") %>%
   kable_styling()
 ```
+
+-more specific, by the year 
+
+```{r}
+dem.w %>%
+  drop_na(m2_vars,
+          no2_1yr) %>%
+  group_by(exposure_year) %>%
+    distribution.table(var.string = "no2_1yr") %>%
+  kable(caption = "Annual average NO2 (ppb) exposure predictions for person-years in the primary analysis") %>%
+  kable_styling()
+
+```
+
 
 No2 exposure by participant age and birth cohort. 
 
@@ -1402,7 +1510,8 @@ Dementia
 
 dem_10yr <- dem.w %>%
   models.fn(.,
-                models = paste0("m", c(1, 2, "3a", "3b",  "4a", "4b", 5, 6)),  
+                models = paste0("m", c(1, 2, "3a", "3b",  "4a", #"4b", 
+                                       5, 6)),  
                 surv.time2 = "age_end_exposure", 
                 surv.event = "dementia_now", 
                 no2.var = "no2_10yr",
@@ -1412,26 +1521,32 @@ dem_10yr <- dem.w %>%
 #dem_10yr$raw_model_output
 #dem_10yr$hrs
 
+# test <- dem_10yr$raw_model_output$m2
+#summary(test)
+
+
+
 dem_10yr_hrs <- dem_10yr$hrs %>%
   mutate(
     Model = c("1",
            "2", 
            "3a", 
            "3b", 
-           "4a", 
-           "4b", 
-           "5", 
-           "5", 
+           "4", 
+           #"4b", 
+           #renaming M5 b/c M5 will now be full stratification
+           "Interaction", #"5"
+           "Interaction", #"5"
            "6"),
-    Description = c("Reduced",
-           "Primary", 
-           "Extended", 
-           "Extended, ACT Cohort", 
-           "Extended & Mediation", 
-           "Extended & Mediation, CASI Score", 
+    Description = c(" (M1) Reduced",
+           " (M2) Primary", 
+           " (M3a) Extended", 
+           " (M3b) Extended, ACT Cohort", 
+           " (M4) Extended & Mediation", 
+           #"Extended & Mediation, CASI Score", 
            "Interaction, no APOE", 
            "Interaction, APOE", 
-           "PM2.5 Adjusted")
+           " (M5) PM2.5 Adjusted")
     )
 
  
@@ -1467,12 +1582,33 @@ dem_hrs <- rbind(dem_10yr_hrs, dem_other_yrs) %>%
 
 ```
 
+-all-cause dementia & APOE interaction p-value: 
+
+```{r}
+#dem_10yr$raw_model_output$m5
+
+dem.w %>%
+apoe_model(.,
+           surv.time2 = "age_end_exposure",
+           surv.event = "dementia_now",
+           no2.var = "no2_10yr",
+           pm25.var = "pm25_10yr"
+           ) %>%
+broom::tidy() %>%
+filter(term=="apoe:no2") %>%
+select(p.value) %>%
+round(2) %>%
+pull()
+
+```
+
 
 AD 
 
 ```{r, fig.height=8}
 ad_10yr <- models.fn(mydata = dem.w,
-                models = paste0("m", c(1, 2, "3a", "3b",  "4a", "4b", 5, 6)),  
+                models = paste0("m", c(1, 2, "3a", "3b", "4a", #"4b", 
+                                       5, 6)),  
                 surv.time2 = "age_end_exposure", 
                 surv.event = "ad_now", 
                 no2.var = "no2_10yr",
@@ -1483,22 +1619,23 @@ ad_10yr_hrs <- ad_10yr$hrs %>%
     Model = c("1",
            "2", 
            "3a", 
-           "3b", 
-           "4a", 
-           "4b", 
-           "5", 
-           "5", 
+           "3b",
+           "4",  #"4a", 
+           #"4b", 
+           "Interaction", #"5"
+           "Interaction", #"5"
            "6"),
-    Description = c("Reduced",
-           "Primary", 
-           "Extended", 
-           "Extended, ACT Cohort", 
-           "Extended & Mediation", 
-           "Extended & Mediation, CASI Score", 
+    Description = c(" (M1) Reduced",
+           " (M2) Primary", 
+           " (M3a) Extended", 
+           " (M3b) Extended, ACT Cohort", 
+           " (M4) Extended & Mediation", 
+           #"Extended & Mediation, CASI Score", 
            "Interaction, no APOE", 
            "Interaction, APOE", 
-           "PM2.5 Adjusted")
+           " (M5) PM2.5 Adjusted")
     )
+    
 
 #m2 for other exposure years
 ad_other_yrs <- data.frame()
@@ -1528,6 +1665,25 @@ ad_hrs <- rbind(ad_10yr_hrs, ad_other_yrs) %>%
   mutate(Exposure = factor(Exposure, levels = c("1yr", "5yr", "10yr", "20yr", "10yr10yrlag", "10yr05yrlag")))  
 
 ```
+
+-AD & APOE interaction p-value
+
+```{r}
+dem.w %>%
+apoe_model(.,
+           surv.time2 = "age_end_exposure",
+           surv.event = "ad_now",
+           no2.var = "no2_10yr",
+           pm25.var = "pm25_10yr"
+           ) %>%
+broom::tidy() %>%
+filter(term=="apoe:no2") %>%
+select(p.value) %>%
+round(2) %>%
+pull()
+
+```
+
 
 ## M2 using age at ACT onset diagnosis (cases) or last visit (noncases) 
 
@@ -1807,7 +1963,7 @@ ad_age_65_hrs <- ad_age_65$hrs %>%
 
 ```
 
-### Fixed AP at study entry
+## Fixed AP at study entry
 
 Dementia 
 
@@ -1852,7 +2008,7 @@ ad_age_entry_hrs <- ad_age_entry$hrs %>%
 
 
 
-### Finer Adjustment for Calendar time
+## Finer Adjustment for Calendar time
 
 Goal is not prediction here. Want to estimate fewer parameters than when we categorize this variable. Shoudd look at whether the NO2 HR estimates change when we adjust for calendar time more/less finely (e.g., different spline parameters).
 
@@ -1920,11 +2076,16 @@ s.ad <- Surv(
   time2 = mydata$age_end_exposure, 
   event = mydata$ad_now)
 
-# need??
+# calendar time axis
 s.dem_calendar <- Surv(
   time = mydata$exposure_year-1,
   time2 = mydata$exposure_year,
   event = mydata$dementia_now)
+
+s.ad_calendar <- Surv(
+  time = mydata$exposure_year-1,
+  time2 = mydata$exposure_year,
+  event = mydata$ad_now)
 
 ```
 
@@ -1998,31 +2159,19 @@ lines(survfit(s.dem~1, subset = dem.w$exposure_year[dem.w$exposure_year %in% c(2
 #        )
 ```
 
-#### Year-specific categories (calendar year) 
+### Year-specific categories (calendar year) 
 
 to address the AP trends and the fact that the AP changes more coarsely on a calendar year basis
  
 
 ```{r}
-# primary analysis HR is: 1.04 (0.82, 1.33)
-round_year <- 1
+ # 5 yr adjustment (similar to birth cohort)
+round_year <- 5
 
-dem_cal_time_hrs <-
-  mydata %>%
-  mutate(
-    # adjust for birth cohort  
-    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year"))))
-    year_cohort = factor(round(exposure_year/round_year)*round_year)
-  ) %>%
-                
+dem_cal_time_hrs1 <- mydata %>%
+  mutate(year_cohort = factor(round(exposure_year/round_year)*round_year),) %>%
   coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  
-        #birth_cohort #+
-          year_cohort
-              #smoke + exercise_reg #+
-              #Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi #+
-              #casi_irt +
-        #no2
-        , 
+          year_cohort, 
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2031,18 +2180,70 @@ dem_cal_time_hrs <-
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Calendar Year Bin Instead of Birth Cohort") 
+    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
+
+
+# 2 yr adjustment
+round_year <- 2
+
+dem_cal_time_hrs2 <-
+  mydata %>%
+  mutate(
+    # using floor instead of round() to match Rachel's 2 yr categories, which start in 1994 (e.g., 1994-1995). rachel binned 2016-2018
+    exposure_year = ifelse(exposure_year == 2018, 2017, exposure_year),
+    year_cohort = factor(floor(exposure_year/round_year)*round_year),
+  ) %>%
+  coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  
+          year_cohort, 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
+
+## combine both year bins
+dem_cal_time_hrs <- rbind(
+  dem_cal_time_hrs1, 
+  dem_cal_time_hrs2
+)
 
 ```
 
 AD
 
 ```{r}
-ad_cal_time_hrs <- mydata %>%
+# 5 yr calendar time
+round_year <- 5
+
+ad_cal_time_hrs1 <- mydata %>%
+  mutate(year_cohort = factor(round(exposure_year/round_year)*round_year)) %>%
+                #pm25
+  coxph(s.ad ~ no2 + strata(apoe) + male + race_white + income + edu +  
+        year_cohort, 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
   mutate(
-    # adjust for birth cohort  
-    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year"))))
-    year_cohort = factor(round(exposure_year/round_year)*round_year)
+    Exposure = "10yr",
+    Model = "2",
+    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
+
+
+# 2 yr calendar time
+round_year <- 2
+
+ad_cal_time_hrs2 <- mydata %>%
+  mutate(
+    # using floor instead of round() to match Rachel's 2 yr categories, which start in 1994 (e.g., 1994-1995)
+    # rachel binned 2016-2018
+    exposure_year = ifelse(exposure_year == 2018, 2017, exposure_year),
+    year_cohort = factor(floor(exposure_year/round_year)*round_year),
   ) %>%
                 #pm25
   coxph(s.ad ~ no2 + strata(apoe) + male + race_white + income + edu +  
@@ -2055,11 +2256,15 @@ ad_cal_time_hrs <- mydata %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = paste0("Categorical Calendar Yr (", round_year, " yr) Instead of Birth Cohort"))
+    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
 
+ad_cal_time_hrs <- rbind(
+  ad_cal_time_hrs1,
+  ad_cal_time_hrs2
+)
 ```
 
-#### Spline adjustment 
+### Spline adjustment 
 
 to account for trends in the outcome, using continuous time (meaning calendar time on the day scale) 
 
@@ -2105,6 +2310,73 @@ ad_spline_cal_time_hrs <- mydata %>%
 
 ```
 
+## Calendar time as time axis, adjusted for age?
+
+Dementia
+
+```{r}
+round_year <- 5
+
+dem_cal_time_axis_hrs <-
+  mydata %>%
+  mutate(
+    # adjust for birth cohort  
+    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year")))),
+    birth_cohort_5yr = factor(birth_cohort_5yr),
+    #year_cohort = factor(round(exposure_year/round_year)*round_year)
+    
+  ) %>%
+                
+  coxph(s.dem_calendar ~ no2 + strata(apoe) + male + race_white + income + edu +  
+        birth_cohort_5yr #what primary model is using
+          #year_cohort
+        , 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = "Calendar Time Axis")  #adjusted for [5 yr] Birth Cohort 
+
+
+#dem_cal_time_axis_hrs
+
+```
+
+AD
+```{r}
+ad_cal_time_axis_hrs <-
+  mydata %>%
+  mutate(
+    # adjust for birth cohort  
+    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year")))),
+    birth_cohort_5yr = factor(birth_cohort_5yr),
+    #year_cohort = factor(round(exposure_year/round_year)*round_year)
+    
+  ) %>%
+                
+  coxph(s.ad_calendar ~ no2 + strata(apoe) + male + race_white + income + edu +  
+        birth_cohort_5yr #what primary model is using
+          #year_cohort
+        , 
+        data=., 
+        cluster = study_id,
+        weights = model_wt) %>% 
+  summary() %>%
+  hr.output.fn(model.s = .) %>%
+  mutate(
+    Exposure = "10yr",
+    Model = "2",
+    Description = "Calendar Time Axis") 
+
+
+#ad_cal_time_axis_hrs
+```
+
+
 ## Road Proximity exposure
 
 * advantages of using time-varying road proximity 
@@ -2142,13 +2414,28 @@ dem_near_road_cat_proximity_hrs <- mydata %>%
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
-  summary() %>%
+  summary() 
+
+dem_near_road_cat_proximity_hrs1 <- dem_near_road_cat_proximity_hrs %>%
     hr.output.fn(., no2.coef = "near_rd_catNear (A-D)") %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("near major road (categorical avg proximity)")
+      Description = paste0("major road proximity: near (vs far)")
     )
+
+dem_near_road_cat_proximity_hrs2 <- dem_near_road_cat_proximity_hrs %>%
+    hr.output.fn(., no2.coef = "near_rd_catMid (E)") %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "2",
+      Description = paste0("major road proximity: midway (vs far)")
+    )
+
+dem_near_road_cat_proximity_hrs <- rbind(
+  dem_near_road_cat_proximity_hrs1,
+  dem_near_road_cat_proximity_hrs2
+)
 
 ```
 
@@ -2162,13 +2449,27 @@ ad_near_road_cat_proximity_hrs <- mydata %>%
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
-  summary() %>%
+  summary() 
+
+ad_near_road_cat_proximity_hrs1 <- ad_near_road_cat_proximity_hrs %>%
     hr.output.fn(., no2.coef = "near_rd_catNear (A-D)") %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("near major road (categorical avg proximity)")
+      Description = paste0("major road proximity: near (vs far)")
     )
+ad_near_road_cat_proximity_hrs2 <- ad_near_road_cat_proximity_hrs %>%
+    hr.output.fn(., no2.coef = "near_rd_catMid (E)") %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "2",
+      Description = paste0("major road proximity: midway (vs far)")
+    )
+
+ad_near_road_cat_proximity_hrs <- rbind(
+  ad_near_road_cat_proximity_hrs1,
+  ad_near_road_cat_proximity_hrs2
+)
 
 #ad_near_road_binary_hrs
 
@@ -2353,8 +2654,8 @@ dem_stratification_hrs <- mydata %>%
   hr.output.fn(model.s = .) %>%
   mutate(
     Exposure = "10yr",
-    Model = "2",
-    Description = "Full Confounder Stratification") 
+    Model = "5",
+    Description = "(M6) Full Confounder Stratification") 
 
 ```
 
@@ -2370,8 +2671,8 @@ ad_stratification_hrs <- mydata %>%
   hr.output.fn(model.s = .) %>%
   mutate(
     Exposure = "10yr",
-    Model = "2",
-    Description = "Full Confounder Stratification")
+    Model = "5",
+    Description = "(M6) Full Confounder Stratification")
 ```
 
 
@@ -2396,19 +2697,22 @@ dem_all_hrs <- rbind(
   dem_highest_qual_hrs,
   dem_high_quality_hrs,
   
-  dem_never_movers_hrs,
+  #dem_never_movers_hrs,
   
-  # using fixed exposure at age 65
-  dem_age_65_hrs,
+  # using fixed exposure at age 65 - Rachel dropped. low N?
+  #dem_age_65_hrs,
   # using fixed exposure at entry
-  dem_age_entry_hrs,
+  #dem_age_entry_hrs,
   # road proximity
   dem_near_road_cat_proximity_hrs,
   dem_time_near_road,
   
+  #using calendar time as the time axis
+  dem_cal_time_axis_hrs,
+  
   # adjusting for birth cohort/calendar time more finely
   dem_cal_time_hrs,
-  dem_spline_cal_time_hrs,
+  #dem_spline_cal_time_hrs,
   # stratifying by all confounders
   dem_stratification_hrs
   ) %>%
@@ -2423,31 +2727,161 @@ dem_all_hrs <- rbind(
                               "10yr10yrlag" = "10 yr 10 yr lag",
                               "10yr05yrlag" = "10 yr 5 yr lag"
                               ),
-    Description = factor(Description, levels = Description)
+    Exposure = factor(Exposure,
+                      levels = c("10 yr",
+                                 "1 yr",
+                                 "5 yr",
+                                 "20 yr",
+                                 "10 yr 5 yr lag",
+                                 "10 yr 10 yr lag")
+                      ),
+    Description = factor(Description, levels = Description),
+    Type =case_when(
+    grepl("Primary", Description) ~ "Primary",
+    #!grepl("Primary", Description) ~ "Sensitivity",
+    grepl("Reduced|PM2.5|Extended|Stratification", Description) ~ "Confounding & Mediation",
+    grepl("address", Description) ~ "Address Quality",
+    grepl("Calendar|Onset", Description) ~ "Time Variants",
+    #TRUE ~ "Other",
+    
+    #secondary
+    grepl("Exposure", Description) ~ "Exposure Period",
+    grepl("road", Description) ~ "Major Road Exposure",
+    grepl("Interaction", Description) ~ "APOE Interaction",
+    TRUE ~ "Other"
+    
+    ),
+    Type = factor(Type, levels = c("Primary",
+                                   "Confounding & Mediation",
+                                   "Time Variants",
+                                   "Address Quality",
+                                   
+                                   "Exposure Period",
+                                   "Major Road Exposure",
+                                   "APOE Interaction",
+                                   
+                                   "Other"
+                                   )
+                  )
     )  
 
+```
 
+```{r}
 # table
-dem_all_hrs %>%
+dem_results_table <- dem_all_hrs %>%
   select(
     Model, Description, Exposure,
     hr_ci,
-    n, number_events
+    n, number_events,
+    Type
     ) %>%
   rename(
     "Model Covariates" = Model,
     "HR (95% CI)" = hr_ci,
     "N" = n,
     "No. events" = number_events,
-    ) %>%
-  kable(caption = "Dementia hazard ratios for a 10 ppb increase in NO2 exposure", 
+    ) 
+
+```
+
+primary & sensitivity analyses
+
+```{r}
+ 
+dem_all_hrs %>% 
+  filter(!grepl("Exposure|road|Interaction", Description)) %>%
+  mutate(
+    # Type =case_when(
+    # grepl("Primary", Description) ~ "Primary",
+    # #!grepl("Primary", Description) ~ "Sensitivity",
+    # grepl("Reduced|PM2.5|Extended|Stratification", Description) ~ "Confounding & Mediation",
+    # grepl("address", Description) ~ "Address Quality",
+    # grepl("Calendar|Onset Age", Description) ~ "Time Variants",
+    # TRUE ~ "Other"
+    # ),
+    # Type = factor(Type, levels = c("Primary",
+    #                                "Confounding & Mediation",
+    #                                "Time Variants",
+    #                                "Address Quality",
+    #                                "Other"
+    #                                )
+    #               ),
+  Description = gsub("Primary", "Primary Analysis", Description) 
+  ) %>%
+  hr.plot(., outcome_var = "dementia",
+          title_pollutant = "Primary & sensitivity analyses for NO2 (10 ppb)\n") +
+  facet_grid(vars(Type),  
+             scales = "free_y", 
+             space = "free_y", 
+             switch = "y"
+             )
+
+dem_results_table %>%
+    filter(!grepl("Exposure|road|Interaction", Description)) %>%
+   mutate(
+  #    Type =case_when(
+  #   grepl("Primary", Description) ~ "Primary",
+  #   !grepl("Primary", Description) ~ "Sensitivity",
+  # ),
+  Description = gsub("Primary", "Primary Analysis", Description) 
+  ) %>%
+    select(`Model Covariates`, Type, everything()) %>%
+  arrange(Type) %>%
+  kable(caption = "Primary & sensitivity analyses: Dementia hazard ratios for a 10 ppb increase in NO2 exposure", 
         align = "l") %>%
   kable_styling() %>%
   add_footnote("'N' is person-years for time-varying analyses and persons for fixed exposure analyses")
 
+```
+
+
+secondary analyses
+
+```{r} 
  
-#plot HRs
-dem_all_hrs %>% hr.plot(., outcome_var = "dementia")
+## secondary analyses 
+dem_all_hrs %>% 
+  filter(grepl("Exposure|road|Interaction", Description)) %>%
+  mutate(
+    #Type =case_when(
+    # grepl("Exposure", Description) ~ "Exposure Period",
+    # grepl("road", Description) ~ "Major Road Exposure",
+    # grepl("Interaction", Description) ~ "APOE Interaction"
+  #),
+  Description = gsub("Interaction, | Exposure", "", Description),
+  # Exposure = factor(Exposure, 
+  #                   levels = c("10 yr",
+  #                              "1 yr",
+  #                              "5 yr",
+  #                              "20 yr",
+  #                              "10 yr 5 yr lag",
+  #                              "10 yr 10 yr lag")
+  #                   )
+  
+) %>%
+  hr.plot(., outcome_var = "dementia", 
+          title_pollutant = "Secondary analyses for NO2 (10 ppb)\n") +
+  facet_grid(vars(Type),  
+             scales = "free_y", 
+             space = "free_y", 
+             switch = "y"
+             )
+
+dem_results_table %>%
+    filter(grepl("Exposure|road|Interaction", Description)) %>%
+    mutate(Type =case_when(
+    grepl("Exposure", Description) ~ "Exposure Period",
+    grepl("road", Description) ~ "Major Road Exposure",
+    grepl("Interaction", Description) ~ "APOE Interaction"
+  ),
+  Description = gsub("Interaction, | Exposure", "", Description) 
+  ) %>%
+  select(`Model Covariates`, Type, everything()) %>%
+  kable(caption = "Secondary analyses: Dementia hazard ratios for a 10 ppb increase in NO2 exposure", 
+        align = "l") %>%
+  kable_styling() %>%
+  add_footnote("'N' is person-years for time-varying analyses and persons for fixed exposure analyses")
 
 ```
 
@@ -2467,20 +2901,23 @@ ad_all_hrs <- rbind(
   ad_highest_qual_hrs,
   ad_high_quality_hrs,
   
-  ### --> add
-  ad_never_movers_hrs,
+  # if include never movers, look into who these individuals are.  Do they tend to be younger?  Or be in a different ACT cohort?
+  #ad_never_movers_hrs,
   
   # using fixed exposure at age 65
-  ad_age_65_hrs,
+  #ad_age_65_hrs,
   # using fixed exposure at entry
-  ad_age_entry_hrs,
+  #ad_age_entry_hrs,
   # road proximity
-  dem_near_road_cat_proximity_hrs,
+  ad_near_road_cat_proximity_hrs,
   ad_time_near_road,
+  
+  #using calendar time as the time axi
+  ad_cal_time_axis_hrs,
   
   # adjusting for calendar time more finely
   ad_cal_time_hrs,
-  ad_spline_cal_time_hrs,
+  #ad_spline_cal_time_hrs,
   # stratifying by all confounders
   ad_stratification_hrs
 ) %>%
@@ -2495,29 +2932,156 @@ ad_all_hrs <- rbind(
                               "10yr10yrlag" = "10 yr 10 yr lag",
                               "10yr05yrlag" = "10 yr 5 yr lag"
                               ),
-    Description = factor(Description, levels = Description)
+    Description = factor(Description, levels = Description),
+    Type =case_when(
+    grepl("Primary", Description) ~ "Primary",
+    #!grepl("Primary", Description) ~ "Sensitivity",
+    grepl("Reduced|PM2.5|Extended|Stratification", Description) ~ "Confounding & Mediation",
+    grepl("address", Description) ~ "Address Quality",
+    grepl("Calendar|Onset", Description) ~ "Time Variants",
+    #TRUE ~ "Other",
+    
+    #secondary
+    grepl("Exposure", Description) ~ "Exposure Period",
+    grepl("road", Description) ~ "Major Road Exposure",
+    grepl("Interaction", Description) ~ "APOE Interaction",
+    TRUE ~ "Other"
+    
+    ),
+    Type = factor(Type, levels = c("Primary",
+                                   "Confounding & Mediation",
+                                   "Time Variants",
+                                   "Address Quality",
+                                   
+                                   "Exposure Period",
+                                   "Major Road Exposure",
+                                   "APOE Interaction",
+                                   
+                                   "Other"
+                                   )
+                  )
   )
 
+```
+
+```{r}
 # table
-ad_all_hrs %>%
+ad_results_table <- ad_all_hrs %>%
   select(
     Model, Description, Exposure,
     hr_ci,
-    n, number_events
+    n, number_events,
+    Type
     ) %>%
   rename(
+    "Model Covariates" = Model,
     "HR (95% CI)" = hr_ci,
     "N" = n,
     "No. events" = number_events,
-    ) %>%
-  kable(caption = "AD hazard ratios for a 10 ppb increase in NO2 exposure", 
-        align = "l") %>%
-  kable_styling()%>%
-  add_footnote("'N' is person-years for time-varying analyses and persons for fixed exposure analyses")
-
-ad_all_hrs %>% hr.plot(., outcome_var = "AD")
+    ) 
 
 ```
+
+primary & sensitivity analyses
+
+```{r}
+ 
+# plot
+ad_all_hrs %>%  
+  filter(!grepl("Exposure|road|Interaction", Description)) %>%
+  mutate(
+    # Type =case_when(
+    # grepl("Primary", Description) ~ "Primary",
+    # #!grepl("Primary", Description) ~ "Sensitivity",
+    # grepl("Reduced|PM2.5|Extended|Stratification", Description) ~ "Confounding & Mediation",
+    # grepl("address", Description) ~ "Address Quality",
+    # grepl("Calendar|Onset Age", Description) ~ "Time Variants",
+    # TRUE ~ "Other"
+    # ),
+    # Type = factor(Type, levels = c("Primary",
+    #                                "Confounding & Mediation",
+    #                                "Time Variants",
+    #                                "Address Quality",
+    #                                "Other"
+    #                                )
+    #               ),
+  Description = gsub("Primary", "Primary Analysis", Description) 
+  ) %>%
+  hr.plot(., outcome_var = "AD",
+          title_pollutant = "Primary & sensitivity analyses for NO2 (10 ppb)\n") +
+  facet_grid(vars(Type),  
+             scales = "free_y", 
+             space = "free_y", 
+             switch = "y"
+             )
+
+#table
+ad_results_table %>%
+    filter(!grepl("Exposure|road|Interaction", Description)) %>%
+   mutate(
+    #  Type =case_when(
+    # grepl("Primary", Description) ~ "Primary",
+    # !grepl("Primary", Description) ~ "Sensitivity",
+  #),
+  Description = gsub("Primary", "Primary Analysis", Description) 
+  ) %>%
+    select(`Model Covariates`, Type, everything()) %>%
+  arrange(Type) %>%
+  kable(caption = "Primary & sensitivity analyses: AD hazard ratios for a 10 ppb increase in NO2 exposure", 
+        align = "l") %>%
+  kable_styling() %>%
+  add_footnote("'N' is person-years for time-varying analyses and persons for fixed exposure analyses")
+```
+
+secondary analyses
+
+```{r}
+# plot
+ad_all_hrs %>%
+ filter(grepl("Exposure|road|Interaction", Description)) %>%
+  mutate(Type =case_when(
+    grepl("Exposure", Description) ~ "Exposure Period",
+    grepl("road", Description) ~ "Major Road Exposure",
+    grepl("Interaction", Description) ~ "APOE Interaction"
+  ),
+  Description = gsub("Interaction, | Exposure", "", Description),
+  Exposure = factor(Exposure, 
+                    levels = c("10 yr",
+                               "1 yr",
+                               "5 yr",
+                               "20 yr",
+                               "10 yr 5 yr lag",
+                               "10 yr 10 yr lag"
+                               )
+                    )
+  ) %>%
+  hr.plot(., outcome_var = "dementia", 
+          title_pollutant = "Secondary analyses for NO2 (10 ppb)\n") +
+  facet_grid(vars(Type),  
+             scales = "free_y", 
+             space = "free_y", 
+             switch = "y"
+             )
+
+#table
+ad_results_table %>%
+    filter(grepl("Exposure|road|Interaction", Description)) %>%
+    mutate(Type =case_when(
+    grepl("Exposure", Description) ~ "Exposure Period",
+    grepl("road", Description) ~ "Major Road Exposure",
+    grepl("Interaction", Description) ~ "APOE Interaction"
+  ),
+  Description = gsub("Interaction, | Exposure", "", Description) 
+  ) %>%
+  select(`Model Covariates`, Type, everything()) %>%
+  kable(caption = "Secondary analyses: AD hazard ratios for a 10 ppb increase in NO2 exposure", 
+        align = "l") %>%
+  kable_styling() %>%
+  add_footnote("'N' is person-years for time-varying analyses and persons for fixed exposure analyses")
+
+ 
+```
+
 
 # Running models for PM2.5 as the primary exposure (Rachel's analysis)
 

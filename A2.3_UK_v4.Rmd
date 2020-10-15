@@ -24,7 +24,7 @@ editor_options:
   # on lapply(): https://rpubs.com/drquan/lapply_vs_docall 
 
 
-### -->use latest pop, NDVI variables
+### -->use latest NDVI variables
 # ? --> switch from geoR to ___ 
 
 ```
@@ -54,11 +54,9 @@ editor_options:
 
 # Analyses  
 
-### --> update covariates; drop time-varying covariates; 
-
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F, 
-                      cache=T, cache.comments = F, 
+                      cache=F, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE,
                       fig.height = 5, fig.width = 8
@@ -80,7 +78,11 @@ pacman::p_load(knitr, kableExtra,
                akima, # interp() - interpolate predictions on map
                ggpubr, tidyverse,
                
-               parallel  # mclapply() for parallized processing;  detectCores()
+               parallel,  # mclapply() for parallized processing;  detectCores()
+               
+               # for kaya - mapping
+               ggmap, sf, #mapping
+               ggspatial #mapping, adding scales, N arrows...
                )    
 #Himsc: describe(); EnvStats: summaryFull(); ggpubr: ggarrange()
 
@@ -94,21 +96,19 @@ source("A2.0.1_Var&Fns.R")
 cov_act <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
 
 # all annual estimates
-annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda")) #%>%
-  # filter for now since don't have covariates for this site yet
-  #filter(site_id != "MS0601")
-
+annual0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-10-02.rda"))  
+  
 #covariates
 
-### --> DROP OTHER TIME-VARYING COVARIATES?
-
 cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda")) %>%
-  # drop time-varying pop density, NDVI, emissions 
+  # drop pop90, pop_ ( & ??NDVI)
   select(-contains(c("pop90_", "pop_"))) %>%
   #drop Roosevelt garage & stop w/ 1 obeservation that was replaced by MS0601
   filter(!site_id %in% c("MS0000", "MS0398"))
 
-site_loc_vars <- cov_mm %>%select(site_id:lambert_y) %>% names()
+site_loc_vars <- cov_mm %>%
+  select(native_id, site_id, latitude, longitude, lambert_x, lambert_y) %>%
+  names()
 
 #variable names in log and native scale
 non_proximity_vars <- names(cov_mm)[!grepl("m_to_", names(cov_mm)) & !names(cov_mm) %in% site_loc_vars]
@@ -142,15 +142,15 @@ proximity_vars_native_act <- cov_act %>%
   mutate_at(proximity_vars_log, ~exp(.)) %>%
   rename_at(proximity_vars_log, ~sub(x = ., "log_", ""))
 
-cov_act_all <- left_join(cov_act, proximity_vars_native_act)
+cov_act_all <- left_join(cov_act, proximity_vars_native_act)  
 
 # group ACT locations by area
-monitoring_ids <- cov_act_all$site_id[grepl("monitoring", cov_act_all$site_location)] 
+monitoring_ids <- cov_act_all$site_id[grepl("monitoring", cov_act_all$site_location)] %>% as.character() 
 
 ## index for sites outside monitoring area but within: study, ST, US
-outside_monitoring_in_study_ids <- cov_act_all$site_id[grepl("study", cov_act_all$site_location)] 
-outside_monitoring_in_st_ids <- cov_act_all$site_id[grepl("study|st", cov_act_all$site_location)]
-outside_monitoring_ids <-  cov_act_all$site_id[!grepl("monitoring", cov_act_all$site_location)]
+outside_monitoring_in_study_ids <- cov_act_all$site_id[grepl("study", cov_act_all$site_location)] %>% as.character() 
+outside_monitoring_in_st_ids <- cov_act_all$site_id[grepl("study|st", cov_act_all$site_location)]%>% as.character() 
+outside_monitoring_ids <-  cov_act_all$site_id[!grepl("monitoring", cov_act_all$site_location)]%>% as.character() 
 
 study_ids <- append(monitoring_ids, outside_monitoring_in_study_ids)
 st_ids <- append(monitoring_ids, outside_monitoring_in_st_ids)
@@ -165,28 +165,237 @@ cov_act <- cov_act_all %>% filter(site_id %in% study_ids)
 
 ##########################
 # create validation index
+
 validation_idx <- sample(c(TRUE, FALSE), replace = T,  
                          size = nrow(annual), 
                          prob = c(.1, .9))
 
+#TEST new validation set to see if OOS R2/RMSE is still better than CV. # get same results
+# set.seed(2) 
+# validation_idx2 <- sample(c(TRUE, FALSE), replace = T,  
+#                          size = nrow(annual), 
+#                          prob = c(.1, .9))
+
+
 ```
 
-### --> update grid 
+number of unique covariates used in PLS: `r length(cov_names_log)`
 
 ```{r}
-# grid in study area (from GIS) 
-grid_in_study <- read.csv(file.path("..", "GIS", "Shapefiles", "Predictions", "grid", "grid_mm.csv")) %>%
-  filter(study) %>%
-  select(native_id)  
-
-grid_in_study <- grid_in_study$native_id
-
-# grid cov
-grid_covars <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda")) %>%
-  # only keep points in study area-land (grid isn't large enough for st area)
-  filter(site_id %in% grid_in_study)
+grid_covars <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda"))  
   
+project_crs <- 4326
+
+# only keep points in study area & not on water
+## study area
+study_area_shp <- read_sf(file.path("..", "GIS", "Shapefiles", "Study area", "oval_around_monitoring_area.shp")) %>%
+  st_transform(project_crs)
+
+## water
+water_shp <- read_sf(file.path("..", "GIS", "Shapefiles", "Other features", "Water", "DNR_Hydrography__Water_Bodies", "DNR_Hydrography__Water_Bodies.shp")) %>%
+  st_transform(project_crs)
+
+
+#create sf object from grid
+grid_covars_shp <- grid_covars %>%
+  st_as_sf(., coords=c("longitude","latitude"), remove=F,
+           crs=project_crs)
+
+# intersection
+grid_covars_shp$in_study_area <- st_intersects(grid_covars_shp, study_area_shp, sparse = F) %>%
+  apply(., 1, any)
+
+#points not in water
+grid_covars_shp$not_in_water <- !st_intersects(grid_covars_shp, water_shp, sparse = F) %>%
+  apply(., 1, any)
+
+
+#convert back to df
+grid_covars <- grid_covars_shp %>%
+  st_drop_geometry() %>% 
+  #only need these points
+  filter(in_study_area == TRUE,
+         not_in_water == TRUE
+         )
+
 ```
+
+
+```{r}
+# create background map for grid/mapping
+bbox <- st_bbox(grid_covars_shp)
+names(bbox) <- c("left", "bottom", "right", "top")
+
+# make a bit wider
+wider <- (max(grid_covars_shp$longitude) - min(grid_covars_shp$longitude))*0.3
+bbox[1] <- bbox[1] - wider
+#this side is wider for some reason
+bbox[3] <- bbox[3] + wider*.6
+
+
+# background map
+map0 <- suppressMessages(get_stamenmap(bbox = bbox, 
+                                      zoom = 11,
+                                      #maptype = "toner" #"toner-lite"
+                                      maptype = "terrain" 
+                                      )
+                         ) %>%
+  # Make basic map image from the tiles
+  ggmap(ggmap = ., darken = c(0.5, "white")) + theme_void()
+
+## usage example: 
+# map0 + geom_point()
+
+```
+
+```{r, eval=F}
+#test code to see if map range looks OK
+map0 +
+  geom_point(data = subset(grid_covars_l,
+                           subset = grepl("BC", Pollutant) &
+                             grepl("Primary", Analysis)
+                             ),
+             aes(x=longitude, y=latitude, col=Prediction),
+             alpha=a,
+             size=pt_size
+             ) +
+  scale_color_gradient(name = "BC (ng/m3)",
+                        low = "yellow", high = "red",
+                        ) +
+  # add scale & N arrow to top left
+  geom_sf(data = grid_covars_shp, inherit.aes = FALSE,
+          #don't actually show dots
+          alpha=0
+          ) +
+    annotation_scale(data = grid_covars_shp, location = "tr") +
+    annotation_north_arrow(location = "tr",
+                           #point towards North Pole
+                           which_north = "true",
+                           pad_y = unit(0.5, "in"),
+                           style = north_arrow_fancy_orienteering
+                           ) +
+  #markers
+  geom_point(data = markers, aes(x=x, y=y, shape = marker)) +
+  scale_shape_manual(values=c(12, 1, 2)) +
+  #make longer legend text appear at top
+  guides(col = guide_colorbar(order = 2),
+              shape = guide_legend(order = 1)
+         ) +
+
+  theme_bw() +
+  theme(
+    legend.justification=c(0,1), #legend.justification=c(1,0),
+    legend.position=c(0,1),  #legend.position=c(1,0),
+    legend.background =  element_blank()
+    ) +
+  labs(title = "BC",
+       x = "Longitude",
+       y = "Latitude",
+       shape = ""
+       )
+
+```
+
+
+```{r}
+#other map markers/locations 
+markers <-data.frame(x = c(-122.335, 
+                      -122.343,
+                      #-122.295,
+                      -122.310
+                      ),
+                y = c(47.606,
+                      47.566,
+                      #47.530,
+                      47.454
+                      
+                      ),
+                marker = c("Downtown Seattle", 
+                             "Port of Seattle",
+                            #"Major Truck Route",
+                            "Sea-Tac Airport"
+                             ),
+                #select contrasting symbols
+                point = c(3,
+                          5,
+                          #7,
+                          10
+                  
+                )
+                 
+                )
+
+```
+
+
+Kaya's grid - changed pop to pop10 in order to make model predictions.
+
+```{r, eval=F, Kaya}
+# Kaya's grid
+kaya_grid0 <- readRDS(file = file.path("Data", "Kaya", "kaya_grid_preprocessed.rda")) 
+
+kaya_grid <- kaya_grid0 %>%
+  # artificially change pop_ variable names to pop10_ so model will predict using these variables
+  rename_at(vars(starts_with("pop")), ~gsub("pop_", "pop10_", .) )
+
+
+
+############################################################################
+
+project_crs <- 4326
+#convert grid to shp
+kaya_grid_shp <- st_as_sf(kaya_grid,
+                          coords=c("longitude","latitude"), remove=F, 
+                             crs=project_crs
+                          )
+
+
+# CRS: 4151 lat/long
+study_area_shp <- read_sf(file.path("..", "GIS", "Shapefiles", "Study area", "oval_around_monitoring_area.shp")) %>%
+  st_transform(project_crs)
+
+# CRS: 4269 lat/long
+monitoring_area_shp <- read_sf(file.path("..", "GIS", "Shapefiles", "Study area", "monitoring_area_filled_in.shp")) %>%
+  st_transform(project_crs)
+
+ # # see if counties have points within. results in a matrix
+kaya_grid$in_study_area <- st_intersects(kaya_grid_shp, study_area_shp, sparse = F) %>%
+  apply(., 1, any)
+kaya_grid$in_monitoring_area <- st_intersects(kaya_grid_shp, monitoring_area_shp, sparse = F) %>%
+  apply(., 1, any)
+  
+kaya_grid_shp <- kaya_grid_shp %>%
+  # points within each area
+  mutate(in_study_area = apply(in_study_area,  1, any),
+         in_monitoring_area = apply(in_monitoring_area,  1, any),
+         )
+
+kaya_grid <- left_join(kaya_grid,  
+                       kaya_grid_shp[c("site_id", "in_study_area", "in_monitoring_area")]
+                       )
+ 
+############################################################################
+## Kaya's grid: many prediction sites are outside of the monitoring & study areas
+
+
+ggplot() + 
+  geom_sf(data = kaya_grid_shp, 
+          inherit.aes = FALSE,
+          #size=2,
+          alpha=0.3,
+          aes(col=in_study_area)
+          ) + 
+  geom_sf(data = kaya_grid_shp[kaya_grid_shp$in_monitoring_area==TRUE,], 
+          inherit.aes = FALSE,
+          #size=2,
+          alpha=0.3,
+          ) + 
+  labs(title = "Prediction locations relative to monitoring and study areas", 
+       caption = "black dots = in monitoring area")
+
+```
+
+
 
 Description of analyses 
 
@@ -201,6 +410,9 @@ as.data.frame(
              "Like Primary analysis, but trimming 10% of each site's highest and lowest stop concentrations (vs 5%) before estimating annual averages",
              "Like Primary analysis, but Windsorizing each site's highest and lowest 5% stop concentrations (vs trimming) before estimating annual averages",
              "Like Primary analysis, but calculating unweighted annual averages for each site (vs regression estimates adjusted for season-, time-of-week- and time-of-day)",
+             
+             "Like Primary analysis, but using finer regression adjustment for day - TOW7 (vs TOW2) and hour - TOD21 (vs TOD5)",
+             
              "Like Primary analysis, but modeling annual average concentrations and proximity covariates on the native scale (vs log-transformed)"
              )) %>%
   kable(., caption = "Description of primary and sensitivity analyses") %>%
@@ -211,12 +423,12 @@ as.data.frame(
 Cross-validation parameters considered.
 
 ```{r, echo = T}
-fast <- FALSE
+fast <- F
 
 if (fast == FALSE) {
     k <- 10
-    pls_comps. <- c(1:5)  
-    dist_fract. <- c(0.05, seq(0.1, 0.4, by=0.1))
+    pls_comps. <- c(1:3)  
+    dist_fract. <- c(0.05, seq(0.1, 0.3, by=0.1)) # seq(0.1, 0.4, by=0.1)
   } else {
     k <- 2
     pls_comps. <- c(1:2)
@@ -384,6 +596,9 @@ cv_alt %>%
 calculate the out-of-sample R2 and RMSE for the UK model using the CV-selected parameters.
 
 ```{r, results = "hide"}
+## TEST: see if results are diff w/ diff validation set  
+# validation_idx <- validation_idx2
+
 out_of_sample_valid <- data.frame(Analysis = analysis_names,
                                   RMSE = NA,
                                   R2 = NA, 
@@ -449,19 +664,40 @@ cv_results %>%
   rename(OOS_RMSE = RMSE,
          OOS_R2 = R2) %>%
   label_analysis(var = "Analysis") %>%
+  select(-Pollutant) %>%
+  kable(caption ="UFP and BC PLS components and variogram parameters selected via cross-validation for primary and sensitivity analyses, as well as out-of-sample (OOS) model performances",
+        col.names = c( "Analysis", "PLS Comp", "Variogram Max Dist Fraction", "Variogram Dist (m)", "CV RMSE", "CV R2", "OOS RMSE", "OOS R2"),
+        digits = 2
+        ) %>%
   
-  kable(caption = "PLS components and variogram parameters selected via cross-validation for primary and sensitivity analyses, as well as out-of-sample (OOS) model performances", 
-        col.names = c("Pollutant", "Analysis", "PLS Components", "Variogram Plotting Max Dist Fraction", "Variogram Plotting Dist (m)", "CV RMSE", "CV R2", "OOS RMSE", "OOS R2"),
-        digits = 2) %>%
-    kable_styling() %>%
+  pack_rows("UFP (pt/cm3)", 1, 8) %>%
+  pack_rows("BC (ng/m3)", 9, nrow(cv_results)) %>%
+  kable_styling() %>%
   add_footnote("MSE-based R2") 
 
-
-# out_of_sample_valid %>%
-#   label_analysis(var = "Analysis") %>%
-#   kable(caption = "Out-of-sample RMSE and R2 using model parameters from CV (calculated on validation set).") %>%
-#   kable_styling() %>%
+# ## UFP
+# cv_t %>%
+#   filter(grepl("UFP", Pollutant)) %>%
+#   select(-Pollutant) %>%
+#   kable(caption = "UFP PLS components and variogram parameters selected via cross-validation for primary and sensitivity analyses, as well as out-of-sample (OOS) model performances", 
+#         col.names = c( "Analysis", "PLS Comp", "Variogram Max Dist Fraction", "Variogram Dist (m)", "CV RMSE", "CV R2", "OOS RMSE", "OOS R2"),
+#         digits = 2) %>%
+#     kable_styling() %>%
 #   add_footnote("MSE-based R2") 
+# 
+# ## BC
+# cv_t %>%
+#   filter(grepl("BC", Pollutant)) %>%
+#   select(-Pollutant) %>%
+#   kable(caption = "BC PLS components and variogram parameters selected via cross-validation for primary and sensitivity analyses, as well as out-of-sample (OOS) model performances", 
+#         col.names = c("Analysis", "PLS Comp", "Variogram Max Dist Fraction", "Variogram Dist (m)", "CV RMSE", "CV R2", "OOS RMSE", "OOS R2"),
+#         digits = 2) %>%
+#     kable_styling() %>%
+#   add_footnote("MSE-based R2") 
+
+
+
+
 
 ## save results to compare in A3.1_UK.Rmd
 #saveRDS(cv_results, file = file.path("Output", "Aim 2", "Tables", "3. UK", "cv_results.rda"))
@@ -992,8 +1228,11 @@ Mobile monitoring stops and ACT cohort locations within the study area have simi
 ```{r}
 # for all ACT locations within study area
 pls_in_study_ufp <- compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
-                        new_prediction_sites = cov_act, #cov_act_all[cov_act_all$site_id %in% study_ids,],
-                        my_title = "Cohort locations within the study area") 
+                        #new_prediction_sites = cov_act, 
+                        new_prediction_sites = cov_act_all[cov_act_all$site_id %in% study_ids,], 
+                        my_title = "Cohort locations within the study area", 
+                        #new_site_label = 
+                        ) 
 
 pls_in_study_ufp$plot
 
@@ -1024,6 +1263,16 @@ compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
 
 ```
 
+Outside monitoring, inside ST area 
+
+```{r}
+compare_pls_scores(my_pls_model = pls_models[["ufp_primary_uk"]],
+                        new_prediction_sites = cov_act_all[cov_act_all$site_id %in% outside_monitoring_in_st_ids,], 
+                        my_title = "UFP: Cohort locations outside the monitoring but within the spatiotemporal modeling region")$plot
+
+```
+
+
 Map of PLS component 1 & 3 scores 
 
 Locations with component 1 Scores < 15 are those in the westmost part of the study area. 
@@ -1038,12 +1287,12 @@ pls_locations %>%
                         low = "black", mid= "white", high = "red",
                         midpoint = -16) 
 
-pls_locations %>%
-  map_fn(color_by = "Comp3", 
-         map_title = "PLS Component 3 Scores for UFP Model") +
-       scale_color_gradient2(name = "Score", 
-                        low = "black", mid= "white", high = "red",
-                        midpoint = -9) 
+# pls_locations %>%
+#   map_fn(color_by = "Comp3", 
+#          map_title = "PLS Component 3 Scores for UFP Model") +
+#        scale_color_gradient2(name = "Score", 
+#                         low = "black", mid= "white", high = "red",
+#                         midpoint = -9) 
 
 ```
 
@@ -1083,13 +1332,17 @@ compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
                         new_prediction_sites = cov_act_all[cov_act_all$site_id %in% outside_monitoring_in_study_ids,], 
                         my_title = "Cohort locations outside the monitoring but within the study area")$plot
 
-# # for all ACT locations within study area 
-# compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
-#                         new_prediction_sites = cov_act_all[cov_act_all$site_id %in% study_ids,],
-#                         my_title = "Cohort locations within the study area")$plot
-
-
+ 
 ```
+
+outside monitoring but inside ST area 
+
+```{r}
+compare_pls_scores(my_pls_model = pls_models[["bc_primary_uk"]],
+                        new_prediction_sites = cov_act_all[cov_act_all$site_id %in% outside_monitoring_in_st_ids,], 
+                        my_title = "BC: Cohort locations outside the monitoring but within the spatiotemporal modeling region")$plot
+```
+
 
 ```{r}
 pls_locations <- cbind(cov_act[c("site_id", "latitude", "longitude")], pls_in_study_bc$scores_new_locs)
@@ -1101,12 +1354,12 @@ pls_locations %>%
                         low = "black", mid= "white", high = "red",
                         midpoint = -16) 
 
-pls_locations %>%
-  map_fn(color_by = "Comp3", 
-         map_title = "PLS Component 3 Scores for UFP Model") +
-       scale_color_gradient2(name = "Score", 
-                        low = "black", mid= "white", high = "red",
-                        midpoint = -6) 
+# pls_locations %>%
+#   map_fn(color_by = "Comp3",
+#          map_title = "PLS Component 3 Scores for UFP Model") +
+#        scale_color_gradient2(name = "Score",
+#                         low = "black", mid= "white", high = "red",
+#                         midpoint = -6)
 
 
 ```
@@ -1148,7 +1401,11 @@ plot_variogram <- empirical_variograms[[paste0(plot_pollutant, "_primary_uk")]]
 plot_residual_model <- residual_models[[paste0(plot_pollutant, "_primary_uk")]]
 
 plot(plot_variogram,
-     main = paste0("Binned empirical and modeled variogram for primary ", toupper(plot_pollutant), " analysis"),
+     main = paste0(
+       #"Binned empirical and modeled variogram for primary ", 
+       toupper(plot_pollutant) #, 
+       #" analysis"
+       ),
      xlab = "Distance (m)")
 
 lines(plot_variogram, lty=1)
@@ -1168,7 +1425,11 @@ plot_variogram <- empirical_variograms[[paste0(plot_pollutant, "_primary_uk")]]
 plot_residual_model <- residual_models[[paste0(plot_pollutant, "_primary_uk")]]
 
 plot(plot_variogram,
-     main = paste0("Binned empirical and modeled variogram for primary ", toupper(plot_pollutant), " analysis"),
+     main = paste0(
+       #"Binned empirical and modeled variogram for primary ", 
+       toupper(plot_pollutant) #, 
+       #" analysis"
+       ),
      xlab = "Distance (m)")
 lines(plot_variogram, lty=1)
 lines(plot_residual_model, lty=2, col=2)
@@ -1280,21 +1541,63 @@ Locations near the Port of Seattle and northeast of the airport are krigged the 
 - Higher kriging near the Port of Seattle and the airport indicate that these are locations where the LUR piece of UK is  characterizing concentrations less well (based on geocovariates alone).
 
 ```{r}
-uk_decompose %>%
-  filter(study_area) %>%
-  map_fn(color_by = "krige_and_error", 
-         color_units = "UFP (pt/cm3)",
-         map_title = "Degree of Kriging in the UFP UK Predictions")
+# uk_decompose %>%
+#   filter(study_area) %>%
+#   map_fn(color_by = "krige_and_error", 
+#          color_units = "UFP (pt/cm3)",
+#          map_title = "Degree of Kriging in the UK Predictions\nUFP")
 
 ```
 
 ```{r}
-# # Proportion of UK prediction explained by LUR 
-# uk_decompose %>%
-#   filter(st_area) %>%
-#   #filter(study_area) %>%
-#   dplyr::summarize(var = var(regression_prediction)/var(ufp_primary_uk))
+pt_size <- 2.5
+a <- 0.8
 
+# save & plot together w/ BC later
+ufp_p <- map0 +
+  geom_point(data = subset(uk_decompose, 
+                           subset = study_area == TRUE
+                             ),
+             aes(x=longitude, y=latitude, col=krige_and_error),
+             alpha=a,
+             size=pt_size
+             ) + 
+  scale_color_gradient(name = "Kriging\n(UFP pt/cm3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  # add scale & N arrow to top left
+  geom_sf(data = grid_covars_shp, inherit.aes = FALSE,
+          #don't actually show dots
+          alpha=0
+          ) +
+    annotation_scale(data = grid_covars_shp, location = "tr") +
+    annotation_north_arrow(location = "tr",
+                           #point towards North Pole
+                           which_north = "true",
+                           pad_y = unit(0.5, "in"),
+                           style = north_arrow_fancy_orienteering
+                           ) +
+  #markers
+  geom_point(data = markers, aes(x=x, y=y, shape = marker)) +
+  scale_shape_manual(values=c(12, 1, 2)) +
+  #make longer legend text appear at top
+  guides(col = guide_colorbar(order = 2), 
+              shape = guide_legend(order = 1)
+         ) +
+  #scale_x_continuous( n.breaks = 4) +
+  theme_bw() +
+  theme(
+    legend.justification=c(0,1), #legend.justification=c(1,0), 
+    legend.position=c(0,1),  #legend.position=c(1,0), 
+    legend.background =  element_blank()
+    ) +
+  labs(title = "UFP",
+       x = "Longitude",
+       y = "Latitude",
+       shape = ""
+       )
+
+# ufp_p
 ```
 
 - BC 
@@ -1387,17 +1690,84 @@ Locations near the Port of Seattle and northeast of the airport are krigged the 
 - Higher kriging near the Port of Seattle and I-5 indicate that these are locations where the LUR piece of UK is  characterizing concentrations less well (based on geocovariates alone).
 
 ```{r}
-uk_decompose %>%
-  filter(study_area) %>%
-  map_fn(color_by = "krige_and_error", 
-         color_units = "BC (ng/m3)",
-         map_title = "Degree of Kriging in the BC UK Predictions")
+# uk_decompose %>%
+#   filter(study_area) %>%
+#   map_fn(color_by = "krige_and_error", 
+#          color_units = "BC (ng/m3)",
+#          map_title = "Degree of Kriging in the UK Predictions\nBC")
 
 ```
 
-Compare UFP vs BC predictions in study area.
 
 ```{r}
+
+# save & plot together w/ BC later
+bc_p <- map0 +
+  geom_point(data = subset(uk_decompose, 
+                           subset = study_area == TRUE
+                             ),
+             aes(x=longitude, y=latitude, col=krige_and_error),
+             alpha=a,
+             size=pt_size
+             ) + 
+  scale_color_gradient(name = "Kriging\n(BC ng/m3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  # add scale & N arrow to top left
+  geom_sf(data = grid_covars_shp, inherit.aes = FALSE,
+          #don't actually show dots
+          alpha=0
+          ) +
+    annotation_scale(data = grid_covars_shp, location = "tr") +
+    annotation_north_arrow(location = "tr",
+                           #point towards North Pole
+                           which_north = "true",
+                           pad_y = unit(0.5, "in"),
+                           style = north_arrow_fancy_orienteering
+                           ) +
+  #markers
+  geom_point(data = markers, aes(x=x, y=y, shape = marker)) +
+  scale_shape_manual(values=c(12, 1, 2)) +
+  #make longer legend text appear at top
+  guides(col = guide_colorbar(order = 2), 
+              shape = guide_legend(order = 1)
+         ) +
+
+  theme_bw() +
+  #avoid overlapping x-axis labels
+  #scale_x_continuous( n.breaks = 4) +
+  theme(
+    legend.justification=c(0,1), #legend.justification=c(1,0), 
+    legend.position=c(0,1),  #legend.position=c(1,0), 
+    legend.background =  element_blank()
+    ) +
+  labs(title = "BC",
+       x = "Longitude",
+       y = "Latitude",
+       shape = ""
+       )
+
+# bc_p
+ 
+```
+
+```{r, fig.height=8}
+#plot UFP & BC together
+gridExtra::grid.arrange(ufp_p, bc_p, 
+                        nrow=1,
+                        top = "Degree of Kriging in the UK Predictions"
+                        )
+```
+
+
+
+Scatterplots to compare UFP vs BC predictions in study area.
+
+```{r}
+
+p_study_ufp <- p_study_ufp + labs(title = "")
+p_study_bc <- p_study_bc + labs(title = "")
+
 ggarrange(p_study_ufp, p_study_bc, 
           labels = c("UFP", "BC"), 
           common.legend = T, legend = "bottom") %>%
@@ -1439,12 +1809,36 @@ Predictions are overall similar for primary and sensitivity analyses of both ann
 
 ```{r}
 # table 
-uk_predictions_df_l %>%
+uk_t <- uk_predictions_df_l %>%
   label_analysis(var = "Analysis") %>%
+  
+  #check that this works
+  #mutate(Pollutant = gsub("ug/m3|ng/m3", "", Pollutant)) %>%  
+  
   group_by(Pollutant, Analysis) %>%
   distribution.table(var.string = "prediction") %>%
-  kable(caption = "Distribution of UK predictions for ACT locations from primary and sensitivity analyses") %>%
+  ungroup()
+
+uk_t %>%
+  select(-Pollutant) %>%
+  kable(caption = "UFP (pt/cm3) and BC (ng/m3) UK model predictions for ACT locations from primary and sensitivity analyses") %>%
+  pack_rows("UFP (pt/cm3)", 1, 8) %>%
+  pack_rows("BC (ng/m3)", 9, nrow(uk_t)) %>%
   kable_styling()
+
+# ## UFP
+# uk_t %>%
+#   filter(grepl("UFP", Pollutant)) %>%  
+#   select(-Pollutant) %>%
+#   kable(caption = "UFP (pt/cm3) UK model predictions for ACT locations from primary and sensitivity analyses") %>%
+#   kable_styling()
+# 
+# # BC  
+# uk_t %>%
+#   filter(grepl("BC", Pollutant)) %>%  
+#   select(-Pollutant) %>%
+#   kable(caption = "BC (ng/m3) UK model predictions for ACT locations from primary and sensitivity analyses") %>%
+#   kable_styling()
 
 ```
 
@@ -1498,7 +1892,7 @@ min_ufp_plot <- min(uk_predictions_df_l$prediction[grepl(my_pollutant, uk_predic
   
 uk_predictions_df %>%
    spread(., Analysis, prediction) %>%
-  gather("Analysis", "prediction", contains("ufp"), -contains("primary")) %>%
+  gather("Analysis", "prediction", contains("bc"), -contains("primary")) %>%
     label_analysis(var = "Analysis") %>%
                 # update var for other pollutants here
   ggplot(aes(x = bc_primary, y = prediction, col = Analysis)) + 
@@ -1556,6 +1950,53 @@ for (i in seq_along(analysis_names)) {
 
 ```
 
+```{r, results = "hide", eval=F}
+# predictions for KAYA's grid
+
+# make predictions on the grid from all analyses 
+
+ # empty columns to save predictions
+kaya_grid[,uk_names] <- NA
+ 
+for (i in seq_along(analysis_names)) {
+  #i=1
+  # validation results
+  pls_components <- cv_results$PLS_Components[cv_results$Analysis==analysis_names[i]]
+  pls_variogram_dist <- cv_results$Variogram_Distance_Fraction[cv_results$Analysis==analysis_names[i]]
+  
+  if(!grepl("native_scale", analysis_names[i])) {
+    
+    df <-  uk_predictions(dt = annual,
+                     cov_loc_new = kaya_grid,
+                      y_name = analysis_names[i],
+                      cov_names. = cov_names_log,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist)
+    
+    # save predictions in native scale
+    kaya_grid[uk_names[i]] <- exp(df$dt$uk_pred)
+    }
+
+  #native scale analyses
+    if(grepl("native_scale", analysis_names[i])) {
+      
+      df <-  uk_predictions(dt = annual,
+                     cov_loc_new = kaya_grid,
+                      y_name = analysis_names[i],
+                      cov_names. = cov_names_native,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist)
+      
+      kaya_grid[uk_names[i]] <- df$dt$uk_pred
+    }
+}
+
+
+```
+
+
+
+
 ## Predictions
 
 - UFP 
@@ -1566,7 +2007,268 @@ We see higher predicted UFP concentrations between downtown and the airport as w
 
 * Elevated concentrations between downtoan and northwest of the airport may also be due to predominant winds from the south and southwest as well as airport landing pattern (MOV-UP report Fig 11).
 
-```{r,fig.height=10}
+
+```{r}
+#make long format for plotting
+
+grid_covars_l <- grid_covars %>%
+  # #drop points not in study area
+  # filter(in_study_area == TRUE,
+  #        not_in_water == TRUE
+  #        ) %>%
+  select(native_id, latitude, longitude, contains(c("ufp", "bc"))) %>%
+  gather("Analysis", "Prediction", contains(c("ufp", "bc"))) %>%
+  label_analysis(var="Analysis", end_character = 3) 
+   
+```
+
+Primary UFP & BC predictions  
+
+```{r, fig.height=8}
+pt_size <- 2.5
+a <- 0.8
+
+bc_p <- map0 +
+  geom_point(data = subset(grid_covars_l, 
+                           subset = grepl("BC", Pollutant) &
+                             grepl("Primary", Analysis)
+                             ),
+             aes(x=longitude, y=latitude, col=Prediction),
+             alpha=a,
+             size=pt_size
+             ) + 
+  scale_color_gradient(name = "BC (ng/m3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  # add scale & N arrow to top left
+  geom_sf(data = grid_covars_shp, inherit.aes = FALSE,
+          #don't actually show dots
+          alpha=0
+          ) +
+    annotation_scale(data = grid_covars_shp, location = "tr") +
+    annotation_north_arrow(location = "tr",
+                           #point towards North Pole
+                           which_north = "true",
+                           pad_y = unit(0.5, "in"),
+                           style = north_arrow_fancy_orienteering
+                           ) +
+  #markers
+  geom_point(data = markers, aes(x=x, y=y, shape = marker)) +
+  scale_shape_manual(values=c(12, 1, 2)) +
+  #make longer legend text appear at top
+  guides(col = guide_colorbar(order = 2), 
+              shape = guide_legend(order = 1)
+         ) +
+  #scale_x_continuous(n.breaks = 4) +
+  theme_bw() +
+  theme(
+    legend.justification=c(0,1), #legend.justification=c(1,0), 
+    legend.position=c(0,1),  #legend.position=c(1,0), 
+    legend.background =  element_blank()
+    ) +
+  labs(title = "BC",
+       x = "Longitude",
+       y = "Latitude",
+       shape = ""
+       )
+
+# bc_p
+
+
+ufp_p <- map0 +
+  geom_point(data = subset(grid_covars_l, 
+                           subset = grepl("UFP", Pollutant) &
+                             grepl("Primary", Analysis)
+                             ),
+             aes(x=longitude, y=latitude, col=Prediction),
+             alpha=a,
+             size=pt_size
+             ) + 
+  #make plot same dimensions as BC 
+  geom_sf(data = grid_covars_shp, inherit.aes = FALSE,
+          #don't actually show dots
+          alpha=0
+          ) + 
+  scale_color_gradient(name = "UFP (pt/cm3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  #markers
+  geom_point(data = markers, aes(x=x, y=y, shape = marker)) +
+  scale_shape_manual(values=c(12, 1, 2)) +
+  #make longer legend text appear at top
+  guides(col = guide_colorbar(order = 2), 
+              shape = guide_legend(order = 1)
+         ) +
+  #scale_x_continuous(n.breaks = 4) +
+  theme_bw() +
+  theme(
+    legend.justification=c(0,1), 
+    legend.position=c(0,1), 
+    legend.background =  element_blank()
+    ) +
+  labs(title = "UFP",
+       x = "Longitude",
+       y = "Latitude",
+       shape = ""
+       )
+
+#ufp_p
+ 
+gridExtra::grid.arrange(ufp_p,bc_p, 
+                        nrow=1,
+                        top = "Grid predictions from primary models"
+                        )
+
+```
+
+
+UFP - primary & sensitivity 
+
+```{r, fig.height=10}
+
+map0 +
+  geom_point(data = subset(grid_covars_l, 
+                           subset = grepl("UFP", Pollutant)),
+             aes(x=longitude, y=latitude, col=Prediction),
+             #alpha=1,
+             #size=0.6
+             ) + 
+  scale_color_gradient(name = "UFP\n(pt/cm3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  facet_wrap(~Analysis) +
+  theme(
+    legend.justification=c(1,0), 
+    legend.position=c(1,0.1), 
+    legend.background =  element_blank()
+    ) +
+
+  labs(title = "Annual average UFP grid predictions from different UK models"
+       )
+
+```
+
+
+```{r,delete, fig.height=10}
+# # dot map
+# my_pollutant <- "ufp"
+# pollutant_uk_names <- uk_names[grepl(my_pollutant, uk_names)]
+# # map titles
+# map_titles <- factor(substr(pollutant_uk_names, nchar(my_pollutant)+2, nchar(pollutant_uk_names)-nchar("_uk")))
+# map_titles <- recode_factor(map_titles,
+#                             "stop_means" = "Stop means",
+#                             "trim10" = "10% trimmed mean",
+#                             "windsorize" = "Windsorized mean",
+#                             "uw" = "Unweighted mean",
+#                             "native_scale" = "Native scale modeling")
+# 
+# dot_maps <-list()# min and max difference of all estimates
+# 
+# # min and max difference of all estimates
+# plot_range <- grid_covars %>%
+#   select(pollutant_uk_names) %>%
+#   dplyr::summarize(min = min(.),
+#                    max = max(.)) %>%
+#   round()
+# 
+# for(i in seq_along(pollutant_uk_names)) {
+#   #i=1    #used to be: uk_predictions
+#    mymap <- suppressMessages(
+#      grid_covars %>% map_fn(color_by = pollutant_uk_names[i], outline_points = F,
+#                                    map_title = map_titles[i]) +
+#     scale_color_gradient(name = "UFP (pt/cm3)", 
+#                         low = "yellow", high = "red",
+#                         #ensure that all plots on same scale
+#                         limits = c(plot_range$min, plot_range$max)
+#                         ))
+#    
+#    dot_maps[i] <- list(mymap)
+#    names(dot_maps)[i] <- pollutant_uk_names[i]
+#   }
+# 
+# ggarrange(plotlist = dot_maps,
+#           #ncol = 3, #nrow = 2,
+#           common.legend = T, legend = "right") %>%
+#   annotate_figure(top = "Annual average UFP grid predictions from different UK models" ) 
+   
+```
+
+- BC -  primary & sensitivity 
+
+We see elevated predicted BC concentrations between the Port of Seattle and the SEA-TAC airport as well as along major highways. The contrasts betwen high and low concentration areas appear to be somewhat clearer for BC than for UFP. 
+
+```{r, fig.height=10}
+
+map0 +
+  geom_point(data = subset(grid_covars_l, 
+                           subset = grepl("BC", Pollutant)),
+             aes(x=longitude, y=latitude, col=Prediction),
+             #alpha=1,
+             #size=0.8
+             ) + 
+  scale_color_gradient(name = "BC\n(ng/m3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  facet_wrap(~Analysis) + 
+  theme(
+    legend.justification=c(1,0), 
+    legend.position=c(1,0.1), 
+    legend.background =  element_blank()
+    ) +
+  labs(title = "Annual average BC grid predictions from different UK models"#,
+       )
+```
+
+
+```{r,delete1, fig.height=10}
+# # dot map
+# my_pollutant <- "bc"
+# pollutant_uk_names <- uk_names[grepl(my_pollutant, uk_names)]
+# # map titles
+# map_titles <- factor(substr(pollutant_uk_names, nchar(my_pollutant)+2, nchar(pollutant_uk_names)-nchar("_uk")))
+# map_titles <- recode_factor(map_titles,
+#                             "stop_means" = "Stop means",
+#                             "trim10" = "10% trimmed mean",
+#                             "windsorize" = "Windsorized mean",
+#                             "uw" = "Unweighted mean",
+#                             "native_scale" = "Native scale modeling")
+# 
+# dot_maps <-list()# min and max difference of all estimates
+# 
+# # min and max difference of all estimates
+# plot_range <- grid_covars %>%
+#   select(pollutant_uk_names) %>%
+#   dplyr::summarize(min = min(.),
+#                    max = max(.)) %>%
+#   round()
+# 
+# for(i in seq_along(pollutant_uk_names)) {
+#   #i=1    #used to be: uk_predictions
+#    mymap <- suppressMessages(
+#      grid_covars %>% map_fn(color_by = pollutant_uk_names[i], outline_points = F,
+#                                    map_title = map_titles[i]) +
+#     scale_color_gradient(name = "BC (ng/m3)", 
+#                         low = "yellow", high = "red",
+#                         #ensure that all plots on same scale
+#                         limits = c(plot_range$min, plot_range$max)
+#                         ))
+#    
+#    dot_maps[i] <- list(mymap)
+#    names(dot_maps)[i] <- pollutant_uk_names[i]
+#   }
+# 
+# ggarrange(plotlist = dot_maps,
+#           #ncol = 3, #nrow = 2,
+#           common.legend = T, legend = "right") %>%
+#   annotate_figure(top = "Annual average BC grid predictions from different UK models" ) 
+#    
+```
+
+
+- Kaya's grid (check that looks ok)
+
+```{r, eval=F}
+
 # dot map
 my_pollutant <- "ufp"
 pollutant_uk_names <- uk_names[grepl(my_pollutant, uk_names)]
@@ -1582,7 +2284,7 @@ map_titles <- recode_factor(map_titles,
 dot_maps <-list()# min and max difference of all estimates
 
 # min and max difference of all estimates
-plot_range <- grid_covars %>%
+plot_range <- kaya_grid %>%
   select(pollutant_uk_names) %>%
   dplyr::summarize(min = min(.),
                    max = max(.)) %>%
@@ -1591,7 +2293,7 @@ plot_range <- grid_covars %>%
 for(i in seq_along(pollutant_uk_names)) {
   #i=1    #used to be: uk_predictions
    mymap <- suppressMessages(
-     grid_covars %>% map_fn(color_by = pollutant_uk_names[i], outline_points = F,
+     kaya_grid %>% map_fn(color_by = pollutant_uk_names[i], outline_points = F,
                                    map_title = map_titles[i]) +
     scale_color_gradient(name = "UFP (pt/cm3)", 
                         low = "yellow", high = "red",
@@ -1603,61 +2305,14 @@ for(i in seq_along(pollutant_uk_names)) {
    names(dot_maps)[i] <- pollutant_uk_names[i]
   }
 
-ggarrange(plotlist = dot_maps,
-          ncol = 3, nrow = 2,
-          common.legend = T, legend = "right") %>%
-  annotate_figure(top = "Annual average UFP grid predictions from different UK models" ) 
+dot_maps[1]
+
+# ggarrange(plotlist = dot_maps,
+#           #ncol = 3, #nrow = 2,
+#           common.legend = T, legend = "right") %>%
+#   annotate_figure(top = "Kaya - Annual average UFP grid predictions from different UK models" ) 
    
 ```
-
-- BC 
-
-We see elevated predicted BC concentrations between the Port of Seattle and the SEA-TAC airport as well as along major highways. The contrasts betwen high and low concentration areas appear to be somewhat clearer for BC than for UFP. 
-
-```{r,fig.height=10}
-# dot map
-my_pollutant <- "bc"
-pollutant_uk_names <- uk_names[grepl(my_pollutant, uk_names)]
-# map titles
-map_titles <- factor(substr(pollutant_uk_names, nchar(my_pollutant)+2, nchar(pollutant_uk_names)-nchar("_uk")))
-map_titles <- recode_factor(map_titles,
-                            "stop_means" = "Stop means",
-                            "trim10" = "10% trimmed mean",
-                            "windsorize" = "Windsorized mean",
-                            "uw" = "Unweighted mean",
-                            "native_scale" = "Native scale modeling")
-
-dot_maps <-list()# min and max difference of all estimates
-
-# min and max difference of all estimates
-plot_range <- grid_covars %>%
-  select(pollutant_uk_names) %>%
-  dplyr::summarize(min = min(.),
-                   max = max(.)) %>%
-  round()
-
-for(i in seq_along(pollutant_uk_names)) {
-  #i=1    #used to be: uk_predictions
-   mymap <- suppressMessages(
-     grid_covars %>% map_fn(color_by = pollutant_uk_names[i], outline_points = F,
-                                   map_title = map_titles[i]) +
-    scale_color_gradient(name = "BC (ng/m3)", 
-                        low = "yellow", high = "red",
-                        #ensure that all plots on same scale
-                        limits = c(plot_range$min, plot_range$max)
-                        ))
-   
-   dot_maps[i] <- list(mymap)
-   names(dot_maps)[i] <- pollutant_uk_names[i]
-  }
-
-ggarrange(plotlist = dot_maps,
-          ncol = 3, nrow = 2,
-          common.legend = T, legend = "right") %>%
-  annotate_figure(top = "Annual average BC grid predictions from different UK models" ) 
-   
-```
-
 
 
 ## Prediction differences 
@@ -1712,10 +2367,19 @@ pred_differences %>%
 ```{r}
 # grid: calculate difference between sensitivity & primary estimates
 pred_differences_grid <- grid_covars %>%
+  # #drop points not in study area
+  # filter(in_study_area == TRUE,
+  #        not_in_water == TRUE
+  #        ) %>%
   select(site_id, latitude, longitude, contains(analysis_names)) %>%
     mutate_at(vars(contains("ufp"), -contains("primary")), ~.-ufp_primary_uk) %>%
   mutate_at(vars(contains("bc"), -contains("primary")), ~.-bc_primary_uk) %>% 
   select(-contains("primary"))
+
+# make long format for plotting
+pred_differences_grid_l <- pred_differences_grid %>%
+  gather("Analysis", "Diff", contains(c("ufp", "bc"))) %>%
+  label_analysis(var="Analysis", end_character = 3) 
 
 ```
 
@@ -1731,53 +2395,72 @@ Unweighted average stop predictions are ___________
 
 Native scale predictions are generally higher along major highways and lower on the east side of the study area where concentration predictions from the primary analysis were already low.
 
-```{r, fig.height=8}
-# maps 
-my_pollutant <- "ufp"
 
-# min and max difference of all estimates
-diff_range <- pred_differences_grid %>%
-  select(contains(my_pollutant)) %>%
-  dplyr::summarize(min = min(.),
-                   max = max(.)) %>%
-  round()
-
-uk_names_diff <- names(pred_differences_grid)[grepl(my_pollutant, names(pred_differences_grid))]
-# map titles
-map_titles <- factor(substr(uk_names_diff, nchar(my_pollutant)+2, nchar(uk_names_diff)-nchar("_uk")))
-map_titles <- recode_factor(map_titles,
-                            "stop_means" = "Stop means",
-                            "trim10" = "10% trimmed mean",
-                            "windsorize" = "Windsorized mean",
-                            "uw" = "Unweighted mean",
-                            "native_scale" = "Native scale modeling")
-
-difference_maps <-list()
-
-for(i in seq_along(uk_names_diff)) {
-  #i=1
-  mymap <- suppressMessages(
-     pred_differences_grid %>% map_fn(color_by = uk_names_diff[i], outline_points = F,
-                                   map_title = map_titles[i]) +
-       scale_color_gradient2(name = "UFP (pt/cm3)", 
+```{r, fig.height=10}
+map0 +
+  geom_point(data = subset(pred_differences_grid_l, 
+                           subset = grepl("UFP", Pollutant)),
+             aes(x=longitude, y=latitude, col=Diff),
+             #size=0.8
+             ) + 
+   scale_color_gradient2(name = "UFP Diff\n(pt/cm3)", 
                         low = "black", mid= "white", high = "red",
-                        midpoint = 0, 
-                        limits = c(diff_range$min, diff_range$max))  
-     
-  )
-  
-  difference_maps[i] <- list(mymap)
-  
-  names(difference_maps)[i] <- uk_names_diff[i]
-  
-}
+                        midpoint = 0
+                        ) +  
+  facet_wrap(~Analysis) + 
+  labs(title = "Difference in annual average UFP predictions relative to primary UK model")
 
 
+```
 
-ggarrange(plotlist = difference_maps,
-          ncol = 3, nrow = 2,
-          common.legend = T, legend = "right") %>%
-  annotate_figure(top = "Difference in annual average UFP predictions relative to primary UK model" ) 
+
+```{r, delete2, fig.height=8}
+# # maps 
+# my_pollutant <- "ufp"
+# 
+# # min and max difference of all estimates
+# diff_range <- pred_differences_grid %>%
+#   select(contains(my_pollutant)) %>%
+#   dplyr::summarize(min = min(.),
+#                    max = max(.)) %>%
+#   round()
+# 
+# uk_names_diff <- names(pred_differences_grid)[grepl(my_pollutant, names(pred_differences_grid))]
+# # map titles
+# map_titles <- factor(substr(uk_names_diff, nchar(my_pollutant)+2, nchar(uk_names_diff)-nchar("_uk")))
+# map_titles <- recode_factor(map_titles,
+#                             "stop_means" = "Stop means",
+#                             "trim10" = "10% trimmed mean",
+#                             "windsorize" = "Windsorized mean",
+#                             "uw" = "Unweighted mean",
+#                             "native_scale" = "Native scale modeling")
+# 
+# difference_maps <-list()
+# 
+# for(i in seq_along(uk_names_diff)) {
+#   #i=1
+#   mymap <- suppressMessages(
+#      pred_differences_grid %>% map_fn(color_by = uk_names_diff[i], outline_points = F,
+#                                    map_title = map_titles[i]) +
+#        scale_color_gradient2(name = "UFP (pt/cm3)", 
+#                         low = "black", mid= "white", high = "red",
+#                         midpoint = 0, 
+#                         limits = c(diff_range$min, diff_range$max))  
+#      
+#   )
+#   
+#   difference_maps[i] <- list(mymap)
+#   
+#   names(difference_maps)[i] <- uk_names_diff[i]
+#   
+# }
+# 
+# 
+# 
+# ggarrange(plotlist = difference_maps,
+#           #ncol = 3, nrow = 2,
+#           common.legend = T, legend = "right") %>%
+#   annotate_figure(top = "Difference in annual average UFP predictions relative to primary UK model" ) 
  
 ```
 
@@ -1793,51 +2476,67 @@ Unweighted average stop predictions were similar.
 
 Native scale predictions were more extreme, with both higher and lower predictions throughout the study area.
 
-```{r, fig.height=8}
-# maps 
-my_pollutant <- "bc"
-
-# min and max difference of all estimates
-diff_range <- pred_differences_grid %>%
-  select(contains(my_pollutant)) %>%
-  dplyr::summarize(min = min(.),
-                   max = max(.)) %>%
-  round()
-
-uk_names_diff <- names(pred_differences_grid)[grepl(my_pollutant, names(pred_differences_grid))]
-# map titles
-map_titles <- factor(substr(uk_names_diff, nchar(my_pollutant)+2, nchar(uk_names_diff)-nchar("_uk")))
-map_titles <- recode_factor(map_titles,
-                            "stop_means" = "Stop means",
-                            "trim10" = "10% trimmed mean",
-                            "windsorize" = "Windsorized mean",
-                            "uw" = "Unweighted mean",
-                            "native_scale" = "Native scale modeling")
-
-difference_maps <-list()
-
-for(i in seq_along(uk_names_diff)) {
-  #i=2
-  mymap <- suppressMessages(
-     pred_differences_grid %>% 
-       map_fn(color_by = uk_names_diff[i], outline_points = F,
-                                   map_title = map_titles[i]) +
-       scale_color_gradient2(name = "BC (ng/m3)", 
-                        low = "black", mid= "white", high = "red",
-                        midpoint = 0, 
-                        limits = c(diff_range$min, diff_range$max)
-                        )  
-  )
-  
-  difference_maps[i] <- list(mymap)
-  names(difference_maps)[i] <- uk_names_diff[i]
-}
-
-ggarrange(plotlist = difference_maps,
-          ncol = 3, nrow = 2,
-          common.legend = T, legend = "right") %>%
-  annotate_figure(top = "Difference in annual average BC predictions relative to primary UK model" ) 
+```{r, delete3, fig.height=8}
+# # maps 
+# my_pollutant <- "bc"
+# 
+# # min and max difference of all estimates
+# diff_range <- pred_differences_grid %>%
+#   select(contains(my_pollutant)) %>%
+#   dplyr::summarize(min = min(.),
+#                    max = max(.)) %>%
+#   round()
+# 
+# uk_names_diff <- names(pred_differences_grid)[grepl(my_pollutant, names(pred_differences_grid))]
+# # map titles
+# map_titles <- factor(substr(uk_names_diff, nchar(my_pollutant)+2, nchar(uk_names_diff)-nchar("_uk")))
+# map_titles <- recode_factor(map_titles,
+#                             "stop_means" = "Stop means",
+#                             "trim10" = "10% trimmed mean",
+#                             "windsorize" = "Windsorized mean",
+#                             "uw" = "Unweighted mean",
+#                             "native_scale" = "Native scale modeling")
+# 
+# difference_maps <-list()
+# 
+# for(i in seq_along(uk_names_diff)) {
+#   #i=2
+#   mymap <- suppressMessages(
+#      pred_differences_grid %>% 
+#        map_fn(color_by = uk_names_diff[i], outline_points = F,
+#                                    map_title = map_titles[i]) +
+#        scale_color_gradient2(name = "BC (ng/m3)", 
+#                         low = "black", mid= "white", high = "red",
+#                         midpoint = 0, 
+#                         limits = c(diff_range$min, diff_range$max)
+#                         )  
+#   )
+#   
+#   difference_maps[i] <- list(mymap)
+#   names(difference_maps)[i] <- uk_names_diff[i]
+# }
+# 
+# ggarrange(plotlist = difference_maps,
+#           #ncol = 3, nrow = 2,
+#           common.legend = T, legend = "right") %>%
+#   annotate_figure(top = "Difference in annual average BC predictions relative to primary UK model" ) 
  
+```
+
+```{r, fig.height=10}
+map0 +
+  geom_point(data = subset(pred_differences_grid_l, 
+                           subset = grepl("BC", Pollutant)),
+             aes(x=longitude, y=latitude, col=Diff),
+             #size=0.8
+             ) + 
+   scale_color_gradient2(name = "BC Diff\n(ng/m3)", 
+                        low = "black", mid= "white", high = "red",
+                        midpoint = 0
+                        ) +  
+  facet_wrap(~Analysis) + 
+  labs(title = "Difference in annual average BC predictions relative to primary UK model")
+
 ```
 
 
@@ -1915,6 +2614,10 @@ annual %>%
 # ### as CSV
 # write.csv(grid_covars[, c("site_id", "latitude", "longitude", uk_names)],
 #           file.path("Data", "Aim 2", "Predictions", "grid_uk_predictions.csv"))
+#
+#kaya
+# write.csv(kaya_grid[, c("site_id", "latitude", "longitude", uk_names, "in_monitoring_area", "in_study_area")],
+#           file.path("Data", "Kaya", "kaya_grid_uk_predictions.csv"))
 
 ```
 

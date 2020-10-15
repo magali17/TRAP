@@ -125,6 +125,28 @@ colo.plot <- function(data.wide=mm.wide,
   lm1 <- lm(formula(paste(y.variable, "~", x.variable)), data = data.wide)
   #summary(lm1)
   
+  
+  ################################################
+  ## ?? need this fns inside this fn???
+  #returns MSE
+  mse <- function(obs, pred){
+    mean((obs - pred)^2)
+  }
+  
+  rmse <- function(obs, pred){
+    sqrt(mean((obs - pred)^2))
+  }
+  
+  #returns MSE-based R2
+  r2_mse_based <- function(obs, pred) {
+    mse.est <- mse(obs, pred)
+    r2 <- 1- mse.est/mean((obs - mean(obs))^2)
+    max(0, r2)
+  }  
+  
+  ################################################ 
+  
+  
   #rmse
   if (convert_rmse_r2_to_native_scale==T) {
     rmse <- rmse(obs = exp(data.wide[[x.variable]]), pred = exp(data.wide[[y.variable]])) %>% 

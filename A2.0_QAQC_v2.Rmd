@@ -62,7 +62,7 @@ editor_options:
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = F,  
-                      cache=T, cache.comments = F, 
+                      cache=F, cache.comments = F, 
                       message = F, warning = F, 
                       tidy.opts=list(width.cutoff=60), tidy=TRUE,
                       fig.height = 5, fig.width = 10
@@ -360,7 +360,8 @@ mm_full %>%
   theme(legend.position = "bottom") + 
   labs(title = "UFP and BC Instruments Used",
        x = "Date",
-       y = "Instrument ID"
+       y = "Instrument ID",
+       col = ""
        ) 
 ```
 
@@ -998,6 +999,12 @@ df %>%
 
 ```
 
+# (?) see all BC, UFP flags/warning messages? Any other observations that need to be dropped?
+
+```{r}
+
+```
+
 
 # Raw Data 
 
@@ -1534,7 +1541,7 @@ mm %>%
 
 ````{r}
 # Save dataset
-# saveRDS(mm.w, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-03-17.rda"))
+# saveRDS(mm.w, file.path("Data", "Aim 2", "Mobile Monitoring", "mm_stops_2020-10-02.rda"))
 
 ```
 

@@ -1,0 +1,1082 @@
+---
+title: "Other studies"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+**TO DO**   
+
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = F, 
+                      cache=F, cache.comments = F, 
+                      message = F, warning = F, 
+                      tidy.opts=list(width.cutoff=60), tidy=TRUE,
+                      dpi=300
+                      #fig.height = 4
+                      )  
+set.seed(1)
+
+
+pacman::p_load(knitr, kableExtra,
+               tidyverse, dplyr,
+               ggrepel #avoid overlapping labels when plotting
+               )  
+
+source("0.Global_FNs.R")
+
+# #wraps a long string
+# wrapper <- function(x, ...) 
+# {
+#   paste(strwrap(x, ...), collapse = "\n")
+# }
+
+```
+
+```{r}
+#common variables
+text_size <- 3
+
+```
+
+
+# Aim 2 
+
+## UFP 
+
+### Concentrations in other studies
+
+
+```{r}
+ufp0 <- readxl::read_xlsx(file.path("..", "References", "Mean UFP & BC comparison.xlsx")) %>%
+  #only include studies that have been fully entered into excel or qualify
+  filter(Include_in_analysis == TRUE) %>%
+  select(-Include_in_analysis) %>%
+  #use median if mean is missing
+  mutate(Mean = ifelse(is.na(Mean), yes = Median, no = Mean),
+         Location = gsub("Amsterdam", "AMS", Location),
+         Location = gsub("Utrecht", "UT", Location),
+         Location = gsub("Maastricht", "MMa", Location),
+         Location = gsub("Rotterdam", "RTM", Location),
+         #Location_full = paste(Location, Country, sep=", "),
+         
+         This_study = grepl("Blanco", Study),
+         
+         Year = as.numeric(str_extract(Study, "[0-9]{4}"))
+         
+         )
+
+ours <- ufp0 %>%
+  filter(grepl("Blanco", Study))
+
+ufp <- ufp0 %>%
+  #drop this study
+  filter(!grepl("Blanco", Study)) 
+         
+```
+
+
+```{r, fig.height=6, eval=F}
+#label position
+set.seed(2)
+
+ufp0 %>%
+  ggplot(aes(x=Country, y=Mean,
+             col = grepl("This Study", ufp0$Title),
+             #col = Country,
+             label = Location,
+             
+             )) + 
+   
+  
+
+  # #city names 
+  geom_text_repel(size = text_size, #ifelse(grepl("Seattle", ufp0$Location), 5, 4), 
+                  fontface = "plain", # ifelse(grepl("Seattle", ufp0$Location), "bold", "plain"),
+                   ) +
+  
+  #this study
+  geom_hline(yintercept = ours$Mean,
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  # annotate(geom="text", x=1, y= ours$Mean+1500,
+  #          label="This Study",
+  #          #color="red",
+  #          fontface =2,
+  #          size=4
+  #          ) +
+  
+  #city locations & y axis scale
+  geom_point(alpha=0.6,
+             size = 2 #ifelse(grepl("Seattle", ufp0$Location), 3, 2)
+             ) +
+  # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./ours$Mean, 
+                                         name="UFP relative to this study", 
+                                         breaks = seq(1,8)
+                                         )
+                     ) +
+  #theme_classic(base_size = 15) + 
+  theme(axis.text.x  = element_text(angle=90,), 
+        
+        legend.position = "none",
+        plot.caption = element_text(size=8,
+                                    #left justify
+                                    hjust = 0),
+        ) + 
+  labs(title = "Mean UFP levels reported by current studies",
+       y = "UFP Conc (pt/cm3)",
+       caption = "AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"
+       )
+
+  
+```
+
+simpler alternative to above
+
+```{r}
+set.seed(2)
+
+ufp0 %>%
+ggplot(aes(y = Mean,
+           x=Sampling_type, #x=1,
+           )) + 
+  geom_boxplot(col=alpha("black", 0.4)) + 
+  geom_point(aes(col = This_study,
+                 ),
+             alpha=0.6
+             ) + 
+  # #city names 
+  geom_text_repel(size = text_size-0.5, 
+                  fontface = "plain",  
+                  #make labels more spaced out
+                  #box.padding = 0.5, 
+                  aes(label = Location,
+                      col = This_study
+                      )
+                   ) +
+  
+  # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./ours$Mean, 
+                                         name="UFP Conc Relative to This Study", 
+                                         breaks = seq(1,9, 2)
+                                         )
+                     ) +
+  #this study
+  geom_hline(yintercept = ours$Mean,
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  
+  theme(
+  # axis.text.x = element_blank(),
+  # axis.ticks = element_blank(),
+  
+  legend.position = "none"
+  ) +
+  
+  labs(x = "Sampling Type",
+       y = "Mean UFP Conc (pt/cm3)",
+       title = "Mean UFP Conc reported in other LUR UFP studies",
+       caption = "AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"
+       )
+  
+
+```
+
+instrument ranges
+
+- instrument ranges are not necessarily related to observed higher/lower concentrations? 
+
+```{r, fig.height=6}
+ufp0 %>%
+  mutate(Study = paste0(Location, "; ", 
+                        Study)
+         ) %>%
+   ggplot(aes(y= Study, #Location, 
+             xmin = instrument_low_range_nm, xmax=instrument_high_range_nm,
+             col = Mean,
+             )) + 
+  geom_linerange(size=1.5
+    ) +
+  scale_color_gradient(low = "yellow", high = "red") +
+  
+  scale_x_log10(breaks = c(4, 10, 20, 300, 1000, 3000)) +
+  
+  facet_grid(rows = vars(Sampling_type), 
+             scales="free_y", #space="free_y"
+             ) +
+  
+  labs(x = "Instrument Particle Size Range (nm)",
+       col = "Avg PNC\n(pt/cm3)",
+       title = "UFP size ranges collected in various UFP studies"
+       )
+  
+
+```
+
+UFP levels by publication year
+
+```{r}
+ufp0 %>%
+   ggplot(aes(y= Mean, #Location, 
+              x=Year
+              
+             )) + 
+  geom_point() + 
+  labs(y = "Mean UFP (pt/cm3)",
+       title = "UFP concentrations reported, by study publication year"
+       )
+
+```
+
+
+table
+
+```{r}
+ufp0 %>%
+  group_by(Study) %>%
+   select(Study, Location,  
+    Mean_UFP_Conc = Mean,
+    Instrument, Instrument_range
+  ) %>%
+    
+   rename_if( grepl("_", names(.)), ~gsub("_", " ", .) ) %>%
+  kable(caption = "Average UFP Concentrations (pt/cm3) reported in other LUR UFP studies", 
+        digits = 2) %>%
+  kable_styling()
+  
+```
+
+
+
+
+### Model performances
+
+```{r}
+ufp_r2 <- readxl::read_xlsx(file.path("..", "References", "Mean UFP & BC comparison.xlsx"), sheet = 3) %>%
+  #only include studies that have been fully entered into excel or qualify
+  filter(Include_in_analysis == TRUE) %>%
+  select(-Include_in_analysis) %>%
+  mutate(
+    Mean_Model_R2 = as.numeric(Mean_Model_R2),
+    #shorten names
+    Study_location = gsub("Amsterdam", "AMS", Study_location),
+    Study_location = gsub("Rotterdam", "RTM", Study_location)
+  ) %>%
+  arrange(Sampling_type, Study) %>%
+  #remove white spaces from start & end of strings
+  mutate_if(is.character, ~str_trim(.))
+
+
+```
+
+Plots
+
+-Note: plotting the primary analysis R2 or the average R2 if multiple models were run without a clear indication of which was the primary model
+
+All studies 
+
+```{r}
+ufp_r2 %>%
+  { 
+  ggplot(data=., aes(x=Sampling_type, y=Mean_Model_R2,
+             label = Study_location
+             )) + 
+  
+  geom_boxplot(col=alpha("red", 0.4)) +
+  
+  # #city names 
+  geom_text_repel(aes(col = grepl("Blanco", .$Study)),
+                  size = text_size,  
+                  fontface = "plain",  
+                   )    +
+  #this study
+  geom_hline(yintercept = .$Mean_Model_R2[grepl("Blanco", .$Study)],
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  geom_point(aes(col = grepl("Blanco", .$Study)),
+             ) + 
+    # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./ufp_r2$Mean_Model_R2[grepl("Blanco", ufp_r2$Study)], 
+                                         name="Model R2 Relative to This Study", 
+                                         breaks = seq(0,1.2,0.2)
+                                         )
+                     ) +
+  #theme_classic(base_size = 15) + 
+  theme( 
+        legend.position = "none",
+        plot.caption = element_text(size=8,
+                                    hjust = 0),
+        ) + 
+  labs(title = "Model R2 estimates from other LUR UFP studies",
+       y = "Model R2",
+       x = "Sampling Type",
+       caption = "AMS = Amsterdam; UT = Utrecht"
+       )  
+  }
+
+```
+
+only showing Short-term stationary similar to ours: site visits > 1 & analysis uses site means (vs indidivual site readings)
+
+```{r}
+ufp_r2 %>%
+  #drop ST mobile studies w/o a clear # of visits per road segment
+  #filter(!is.na(visits_per_site)) %>%
+  mutate(
+    # are they calculating a site average from >1 visit & using this in their analysis (e.g., vs using individual site visits in a regression)
+    multi_visit_mean = visits_per_site > 1 & site_mean_only == "yes"
+  ) %>%
+  filter(multi_visit_mean == TRUE) %>%
+  { 
+  
+  ggplot(data=., aes(x=Sampling_type, y=Mean_Model_R2,
+             label = Study_location
+             )) + 
+  
+  #geom_boxplot(alpha=0.1) +
+  geom_boxplot(col=alpha("red", 0.4)) +
+  
+  # #city names 
+  geom_text_repel(aes(col = grepl("Blanco", .$Study)),
+                  size = text_size,  
+                  fontface = "plain",  
+                   )    +
+  #this study
+  geom_hline(yintercept = .$Mean_Model_R2[grepl("Blanco", .$Study)],
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  
+  geom_point(aes(col = grepl("Blanco", .$Study)),
+             ) + 
+  
+      # facet_wrap(~multi_visit_mean, #scales = "free_x",
+      #            ncol = 1,
+      #            labeller = as_labeller( c("TRUE" = "analysis uses site mean from multiple visits",
+      #                                      "FALSE" = "analysis uses individual site visits"
+      #                                      )
+      #            )
+      #            ) +
+  # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./ufp_r2$Mean_Model_R2[grepl("Blanco", ufp_r2$Study)], 
+                                         name="Model R2 Relative to This Study", 
+                                         breaks = seq(0,1.2,0.2)
+                                         )
+                     ) +
+      theme(
+        legend.position = "none",
+        plot.caption = element_text(size=8,
+                                    hjust = 0),
+        ) + 
+  labs(title = "Model R2 estimates from other LUR UFP studies\nthat model overall site average from mulitple site visits",
+       y = "Model R2",
+       x = "Sampling Type",
+       caption = paste0("AMS = Amsterdam; UT = Utrecht"#,
+                       # "\nNA plot: number of visits per road segment is unclear"
+                        )
+       )  
+  }
+
+```
+
+
+sampling approach in other LUR UFP studies (all)
+
+```{r}
+ 
+t <- ufp_r2 %>%
+  gather("variable", "Value", visits_per_site, visit_duration_min, total_site_duration_min, sites_per_model) %>%
+  mutate(This_study = grepl("Blanco", Study),
+         variable = recode_factor(factor(variable),
+                                  "sites_per_model" = "sites",
+                                  "visit_duration_min" = "visit duration (min)",
+                                  "total_site_duration_min" = "total site duration (min)",
+                 "visits_per_site"  = "visits per sites"               
+                                  
+         )
+         
+         ) %>% # View()
+  filter(This_study==TRUE) %>%
+  group_by(variable) %>%
+  summarize(h_line = Value)
+  
+ 
+  
+  ufp_r2 %>%
+  gather("variable", "Value", visits_per_site, visit_duration_min, total_site_duration_min, sites_per_model) %>%
+  mutate(This_study = grepl("Blanco", Study),
+         variable = recode_factor(factor(variable),
+                                  "sites_per_model" = "sites",
+                                  "visit_duration_min" = "visit duration (min)",
+                                  "total_site_duration_min" = "total site duration (min)",
+                 "visits_per_site"  = "visits per sites"               
+                                  
+         )
+         
+         ) %>%# View()
+  # group_by(variable) %>%
+  # mutate(
+  #   h_line1 = .$Value[.$This_study==TRUE]
+  # )
+  
+  {
+  ggplot(data=., aes(x=Sampling_type, y=Value,
+              label = Study_location
+              )) + 
+  
+  geom_boxplot(col=alpha("red", 0.4)) +
+
+  # # #city names
+  # geom_text_repel(aes(col = This_study),
+  #                 size = text_size,
+  #                 fontface = "plain",
+  #                 show.legend = F
+  #                  )    +
+  
+      #this study
+  # geom_hline(data=t, aes(yintercept = h_line),
+  #            linetype = "dashed",
+  #            alpha=0.5
+  #            ) +
+
+  geom_point(aes(col = This_study,
+                 #size = Mean_Model_R2
+                 ),
+             alpha=0.5,
+              
+             
+             #alpha= ifelse(grepl("Blanco", .$Study), 1, 0.5)
+
+             ) +
+      geom_point(data=subset(., This_study==TRUE), 
+                 aes(col = This_study,
+                     #size = Mean_Model_R2
+                     )
+                 ) +
+      
+      #avoid overlapping x axis ticks
+      scale_x_discrete(guide = guide_axis(n.dodge=2))+
+      scale_y_log10() +
+      
+      facet_wrap(~variable, scales = "free") + 
+      
+      labs(title = "Sampling approaches across other LUR UFP studies",
+           x = "Sampling type"
+           )
+      
+  }
+  
+
+```
+
+ 
+
+### --> ? delete these plots?
+
+```{r}
+
+### ???delete?
+
+ufp_r2 %>%
+  #?
+  #filter(!grepl("Fixed", Sampling_type)) %>%
+  
+  gather("var", "value", sites_per_model, visits_per_site, total_site_duration_min) %>%
+  
+  ggplot(aes(x=value, y=Mean_Model_R2,
+             col = Sampling_type
+             )) + 
+  geom_smooth(se=F, method="lm") +  
+    geom_point(alpha=0.5) + 
+
+  facet_grid(~var, #~var, 
+             scales="free_x")
+  
+  
+```
+
+THe more sites, the fewer visits likely to occur
+
+```{r}
+# ? delete? 
+
+ufp_r2 %>%
+  ggplot(aes(x=sites_per_model, y=visits_per_site, col=Mean_Model_R2)) + 
+  geom_point() +
+    geom_smooth(se=F, method="lm") +  
+
+  facet_wrap(~Sampling_type, scales="free_x"
+             ) + 
+  labs(
+    x = "Sites",
+    y = "Repeat visits per site",
+    title = "Site visits vs number of sites in different studies\nUFP"
+  )
+
+```
+
+fixed and short-term mobile with longer site sampling durations generally have higher R2. This is not true for short-term stationary
+
+```{r}
+# ? delete? 
+
+ufp_r2 %>%
+  ggplot(aes(#x=sites_per_model, 
+             x=total_site_duration_min, y=Mean_Model_R2,
+             col = sites_per_model
+             )) + 
+  geom_point() +
+    geom_smooth(se=F, method="lm") +  
+
+  facet_wrap(~Sampling_type, scales="free") + 
+  labs(
+    y = "R2",
+    x = "Total site duration (min)",
+    title = "Total site sampling duration vs number of sites in different studies\nUFP"
+  )
+
+
+```
+
+ 
+
+Table
+
+### --> update Sampling_type if change study order
+
+```{r}
+ufp_r2 %>%
+  select(
+    ## update if change study order!
+    #Sampling_type,
+    
+    Study, Location = Study_location,
+    Sampling = Sampling_approach, 
+    
+    Analysis_uses_site_mean = site_mean_only, Model_R2) %>%
+  rename_if( grepl("_", names(.)), ~gsub("_", " ", .) ) %>%
+  kable(caption = "Model R2 estimates from other LUR UFP studies", 
+        digits = 2) %>%
+  
+  ### --> check that these are correct in the end
+  pack_rows("Fixed site; Continuous", 1, 5) %>%
+  pack_rows("Short-term Mobile", 6, 14) %>%
+  pack_rows("Short-term Stationary", 15, 23) %>%
+  add_footnote(., label = c("Location: AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"),
+                notation = "none"
+                ) %>%
+  kable_styling()
+  
+```
+
+
+
+## BC 
+
+### Concentrations in other studies
+
+```{r}
+bc0 <- readxl::read_xlsx(file.path("..", "References", "Mean UFP & BC comparison.xlsx"), sheet=2) %>%
+  #only include studies that have been fully entered into excel or qualify
+  filter(Include_in_analysis == TRUE) %>%
+  select(-Include_in_analysis) %>%
+  mutate(
+         Location = gsub("Amsterdam", "AMS", Location),
+         Location = gsub("Utrecht", "UT", Location),
+         Location = gsub("Maastricht", "MMa", Location),
+         Location = gsub("Rotterdam", "RTM", Location),
+         
+         This_study = grepl("Blanco", Study)
+         
+         ) %>%
+  rename(Mean = Mean_Median)
+
+bc_ours <- bc0 %>%
+  filter(grepl("Blanco", Study))
+
+```
+
+```{r, fig.height=6, eval=F}
+
+#label position
+set.seed(2)
+
+bc0 %>%
+  ggplot(aes(x=Country, y=Mean,
+             col = grepl("This Study", bc0$Title),
+             #col = Location,
+             label = Location,
+             )) + 
+
+  # #city names 
+  geom_text_repel(size = text_size, #ifelse(grepl("Seattle", ufp0$Location), 5, 4), 
+                  fontface = "plain", # ifelse(grepl("Seattle", ufp0$Location), "bold", "plain"),
+                   ) +
+  
+  #this study
+  geom_hline(yintercept = bc_ours$Mean,
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  
+  #city locations & y axis scale
+  geom_point(alpha=0.6,
+             size = 2 #ifelse(grepl("Seattle", ufp0$Location), 3, 2)
+             ) +
+  # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./bc_ours$Mean, 
+                                         name="Normalized", 
+                                         breaks = c(1, seq(5,20, 5))
+                                         )
+                     ) +
+  theme_classic(base_size = 15) + 
+  theme(axis.text.x  = element_text(angle=90,), 
+        
+        legend.position = "none",
+        plot.caption = element_text(size=8,
+                                    #left justify
+                                    hjust = 0),
+        ) + 
+  labs(title = "Mean BC levels reported by current studies",
+       y = "BC Conc (ng/m3)",
+       caption = "AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"
+       )
+
+  
+
+```
+
+```{r, fig.height = 6, eval=F}
+# ?? delete, not using plot
+
+# **this is not a comprehensive list**
+# Using Avg/Median observations 
+mean_median_estimates <- data.frame(
+  Location = c(
+    "Puget Sound",
+    "Oakland, CA",
+    "The Netherlands",
+    "Toronto, CA",
+    "New Delhi, India",
+    "Newark, NJ",
+    "Minneapolis, MN",
+    "Warwick, RI"
+               ),
+  Geographic_Area = NA,
+  Min = c(
+    500,
+    400,
+    1100,
+    1500,
+    600,
+    2500,
+    700,
+    500
+    ),
+  Max = c(
+    500,
+    1000,
+    2300,
+    1800,
+    2100,
+    2500,
+    2500,
+    500
+    ),
+  
+  Source = c(
+    #"Puget Sound"
+    "This Study",
+    # "Oakland, CA"
+    "Apte et al., 2017",
+    # "The Netherlands"
+    "Kerckhoffs et al. 2016 & 2017, Montagne et al. 2015",
+    #"Toronto, CA"
+    "Minet et al. 2018",
+    #New Delhi, India
+    "Saraswat et al. 2013",
+    # Newark, NJ
+    "Yu et al. 2016",
+    # Minneapolis, MN
+    "Hankey et al. 2015",
+    # Warwick, RI
+    "Dodson et al., 2009"
+    )
+   
+  
+) %>%
+  group_by(Location) %>%
+  mutate(
+    middle = mean(c(Min, Max))
+  )
+   
+
+
+#Plot of BC estimates from different studies
+
+our_bc_mean <- 500
+
+mean_median_estimates %>%
+  filter(Source != "This Study") %>%
+  ggplot(aes(x=Location)) +
+  geom_linerange(aes(ymin = Min, ymax = Max)) +
+  geom_point(aes(y=middle)) +
+  geom_hline(aes(yintercept=our_bc_mean, col= "This Study")) + 
+  annotate(geom="text", x=1, y=our_bc_mean+100, 
+           label="This Study",
+           color="red", 
+           fontface =2,
+           size=5
+           ) +
+  labs(
+    title = "Estimated mean or median BC concentrations from various studies",
+    subtitle = "Lines indicate the range of mean/median study estimates. \nDots are the center of each range.",
+    #wrap long string
+    caption = wrapper(paste0("Sources: ", 
+                     paste0(mean_median_estimates$Source, collapse = "; ")), 
+                     width=120 ),
+    y= "BC Conc (ng/m3)"
+    
+    ) +
+
+  theme_classic(base_size = 15) + 
+  theme(axis.text.x  = element_text(angle=90), 
+        legend.position = "none",
+        plot.caption = element_text(size=8, 
+                                    #left justify
+                                    hjust = 0),
+        ) 
+
+```
+
+simpler alternative to above
+
+```{r}
+set.seed(2)
+
+bc0 %>%
+ggplot(aes(y = Mean,
+           x=Sampling_type,
+           )) + 
+  geom_boxplot(col=alpha("black", 0.4)) + 
+  geom_point(aes(col = This_study,
+                 ),
+             alpha=0.6
+             ) + 
+  # #city names 
+  geom_text_repel(size = text_size-0.5, 
+                  fontface = "plain",  
+                  #make labels more spaced out
+                  #box.padding = 0.5, 
+                  aes(label = Location,
+                      col = This_study
+                      )
+                   ) +
+  
+  # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./bc_ours$Mean, 
+                                         name="BC Conc Relative to This Study", 
+                                         breaks = c(1, seq(5,20,5))
+                                         )
+                     ) +
+  #this study
+  geom_hline(yintercept = bc_ours$Mean,
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  
+  theme(
+  # axis.text.x = element_blank(),
+  # axis.ticks = element_blank(),
+  
+  legend.position = "none"
+  ) +
+  
+  labs(x = "Sampling Type",
+       y = "Mean BC Conc (pt/cm3)",
+       title = "Mean BC Conc reported in other LUR UFP studies",
+       caption = "AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"
+       )
+  
+
+```
+
+### --> ? delete since don't have instrument? or add? 
+
+```{r}
+bc0 %>%
+  #group_by(Study) %>%
+   select(Study, Location,  
+    Mean_BC_Conc = Mean,
+  ) %>%
+   rename_if( grepl("_", names(.)), ~gsub("_", " ", .) ) %>%
+  kable(caption = "Average BC Concentrations (ng/m3) reported in other LUR UFP studies", 
+        digits = 2) %>%
+  kable_styling()
+```
+
+
+### Model Performance 
+
+```{r}
+bc_r2 <- readxl::read_xlsx(file.path("..", "References", "Mean UFP & BC comparison.xlsx"), sheet = 4) %>%
+   #only include studies that have been fully entered into excel or qualify
+  filter(Include_in_analysis == TRUE) %>%
+  select(-Include_in_analysis) %>%
+  mutate(
+    #only keep few digits - for some reason some values have many decimal #s
+    Model_R2 = ifelse(nchar(Model_R2) > 9, substr(Model_R2, 1,4), Model_R2),
+    
+    Mean_Model_R2 = as.numeric(Mean_Model_R2),
+    #shorten names
+    Study_location = gsub("Amsterdam", "AMS", Study_location),
+    Study_location = gsub("Rotterdam", "RTM", Study_location)
+  ) %>%
+  arrange(Sampling_type, Study)%>%
+  #remove white spaces from start & end of strings
+  mutate_if(is.character, ~str_trim(.))
+
+```
+
+Plot 
+
+All studies
+
+```{r}
+bc_r2 %>%  
+  ggplot(data=., aes(x=Sampling_type, y=Mean_Model_R2,
+                     label = Study_location
+             )) + 
+  
+  #geom_boxplot(alpha=0.1) +
+  geom_boxplot(colour=alpha("red", 0.4)) +
+  
+  # #city names 
+  geom_text_repel(aes(col = grepl("Blanco", bc_r2$Study)),
+                  size = text_size,  
+                  fontface = "plain",  
+                   ) +
+  #this study
+  geom_hline(yintercept = bc_r2$Mean_Model_R2[grepl("Blanco", bc_r2$Study)],
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  
+  geom_point(aes(col = grepl("Blanco", bc_r2$Study)),
+             #alpha=0.8
+             ) + 
+  
+  # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./bc_r2$Mean_Model_R2[grepl("Blanco", ufp_r2$Study)], 
+                                         name="Model R2 Relative to This Study", 
+                                         breaks = seq(0,1.2,0.2)
+                                         )
+                     ) +
+   
+  theme(
+    legend.position = "none",
+    plot.caption = element_text(size=8, hjust = 0),
+        ) + 
+  labs(title = "Model R2 estimates from other LUR BC studies",
+       y = "Model R2",
+       x = "Sampling Type",
+       caption = "AMS = Amsterdam; RTM = Rotterdam"
+  )
+  
+   
+  
+```
+
+
+only showing short-term stationary similar to ours: site visits > 1 & analysis uses site means (vs indidivual site readings)
+
+```{r}
+#fig.height=8, fig.width=6
+
+bc_r2 %>%
+  #drop ST mobile studies w/o a clear # of visits per road segment
+  #filter(!is.na(visits_per_site)) %>%
+  mutate(
+    # are they calculating a site average from >1 visit & using this in their analysis (e.g., vs using individual site visits in a regression)
+    multi_visit_mean = visits_per_site > 1 & site_mean_only == "yes"
+  ) %>%
+    filter(multi_visit_mean == TRUE) %>%
+
+  { 
+  
+  ggplot(data=., aes(x=Sampling_type, y=Mean_Model_R2,
+             label = Study_location
+             )) + 
+  
+  #geom_boxplot(alpha=0.1) +
+  geom_boxplot(col=alpha("red", 0.4)) +
+  
+  # #city names 
+  geom_text_repel(aes(col = grepl("Blanco", .$Study)),
+                  size = text_size,  
+                  fontface = "plain",  
+                   )    +
+  #this study
+  geom_hline(yintercept = .$Mean_Model_R2[grepl("Blanco", .$Study)],
+             linetype = "dashed",
+             alpha=0.5
+             ) +
+  
+  geom_point(aes(col = grepl("Blanco", .$Study)),
+             ) + 
+  
+      # facet_wrap(~multi_visit_mean, #scales = "free_x", 
+      #            ncol = 1,
+      #            labeller = as_labeller( c("TRUE" = "analysis uses site mean from multiple visits",
+      #                                      "FALSE" = "analysis uses individual site visits"
+      #                                      )
+      #            )
+      #            ) +
+  # Add a second axis and specify its features
+  scale_y_continuous(sec.axis = sec_axis(~./ufp_r2$Mean_Model_R2[grepl("Blanco", ufp_r2$Study)], 
+                                         name="Model R2 Relative to This Study", 
+                                         breaks = seq(0,1.2,0.2)
+                                         )
+                     ) +
+      theme(
+        legend.position = "none",
+        plot.caption = element_text(size=8,
+                                    hjust = 0),
+        ) + 
+  labs(title = "Model R2 estimates from other LUR BC studies\nthat model overall site average from multiple visits",
+       y = "Model R2",
+       x = "Sampling Type",
+       caption = paste0("AMS = Amsterdam; UT = Utrecht"#,
+                        #"\nNote: A few studies are excluded due to an uncler number of visits per site or road segment"
+                        )
+       )  
+  }
+
+
+```
+
+
+sampling approach in other LUR BC studies (all)
+
+```{r}
+ 
+t <- bc_r2 %>%
+  gather("variable", "Value", visits_per_site, visit_duration_min, total_site_duration_min, sites_per_model) %>%
+  mutate(This_study = grepl("Blanco", Study),
+         variable = recode_factor(factor(variable),
+                                  "sites_per_model" = "sites",
+                                  "visit_duration_min" = "visit duration (min)",
+                                  "total_site_duration_min" = "total site duration (min)",
+                 "visits_per_site"  = "visits per sites"               
+                                  
+         )
+         
+         ) %>% # View()
+  filter(This_study==TRUE) %>%
+  group_by(variable) %>%
+  summarize(h_line = Value)
+  
+ 
+  
+  bc_r2 %>%
+  gather("variable", "Value", visits_per_site, visit_duration_min, total_site_duration_min, sites_per_model) %>%
+  mutate(This_study = grepl("Blanco", Study),
+         variable = recode_factor(factor(variable),
+                                  "sites_per_model" = "sites",
+                                  "visit_duration_min" = "visit duration (min)",
+                                  "total_site_duration_min" = "total site duration (min)",
+                 "visits_per_site"  = "visits per sites"               
+                                  
+         )
+         
+         ) %>%# View()
+  # group_by(variable) %>%
+  # mutate(
+  #   h_line1 = .$Value[.$This_study==TRUE]
+  # )
+  
+  {
+  ggplot(data=., aes(x=Sampling_type, y=Value,
+              label = Study_location
+              )) + 
+  
+  geom_boxplot(col=alpha("red", 0.4)) +
+
+  # # #city names
+  # geom_text_repel(aes(col = This_study),
+  #                 size = text_size,
+  #                 fontface = "plain",
+  #                 show.legend = F
+  #                  )    +
+  
+      #this study
+  # geom_hline(data=t, aes(yintercept = h_line),
+  #            linetype = "dashed",
+  #            alpha=0.5
+  #            ) +
+
+  geom_point(aes(col = This_study,
+                 #size = Mean_Model_R2
+                 ),
+             alpha=0.5,
+              
+             
+             #alpha= ifelse(grepl("Blanco", .$Study), 1, 0.5)
+
+             ) +
+      geom_point(data=subset(., This_study==TRUE), 
+                 aes(col = This_study,
+                     #size = Mean_Model_R2
+                     )
+                 ) +
+      
+      #avoid overlapping x axis ticks
+      scale_x_discrete(guide = guide_axis(n.dodge=2))+
+      scale_y_log10() +
+      
+      facet_wrap(~variable, scales = "free") + 
+      
+      labs(title = "Sampling approaches across other LUR BC studies",
+           x = "Sampling type",
+           col = "This Study"
+           )
+      
+  }
+  
+
+```
+
+
+
+Table
+
+```{r}
+bc_r2 %>%
+ select(
+   
+   ## update if change study order!
+   #Sampling_type,
+   
+   Study, Location = Study_location, Sampling = Sampling_approach, Analysis_uses_site_mean = site_mean_only, Model_R2) %>%  
+  rename_if( grepl("_", names(.)), ~gsub("_", " ", .) ) %>%
+  kable(caption = "Model R2 estimates from other LUR BC studies", 
+        digits = 2
+        ) %>%
+  pack_rows("Fixed site; Continuous", 1, 9) %>%
+  pack_rows("Short-term mobile", 10, 14) %>%
+  pack_rows("Short-term stationary", 15, nrow(bc_r2)) %>%
+  add_footnote(., label = c("Location: AMS = Amsterdam; MMa = Maastricht; RTM = Rotterdam; UT = Utrecht"),
+               notation = "none"
+               ) %>%
+  kable_styling()
+
+```
+
+ 
+
+

@@ -224,7 +224,7 @@ t1.fn <- function(data,
       "1930-1934" =  paste0(birth_cohort6_n, " (", birth_cohort6_pct, "%)"), 
       "1935 or later" =  paste0(birth_cohort7_n, " (", birth_cohort7_pct, "%)"), 
       "Female (n, %)" = paste0(female_n, " (", female_pct, "%)"),
-      "White (n, %)" = paste0(race_white_n, " (", race_white_pct, "%)"),
+      "White Race (n, %)" = paste0(race_white_n, " (", race_white_pct, "%)"),
       "Education (n, %)" = "",
       "Less than High School" = paste0(degree0_n, " (", degree0_pct, "%)"),
       "High School or GED" = paste0(degree1_n, " (", degree1_pct, "%)"),
@@ -533,6 +533,88 @@ models.fn <- function(mydata = dem.w,
   
 }
 
+##############################################################################
+# APOE interaction model, simpler output
+apoe_model <- function(mydata = dem.w,
+                      #models,
+                      surv.time1 = "age_start_exposure",
+                      surv.time2 = "age_end_exposure", 
+                      surv.event = "dementia_now", 
+                      no2.var = "no2_10yr",
+                      pm25.var = "pm25_10yr",
+                      no2.units = my.no2.units,
+                      pm25.units = my.pm25.units) {
+  
+  #rename variables for fns
+  mydata <- mydata %>%
+    #want to use 5 yr bins instead of this one w/ larger categories
+    select(-birth_cohort) %>%
+    rename(
+      #m1 
+      no2 = no2.var,
+      birth_cohort = birth_cohort_5yr,
+      #m2
+      income = income_cat,
+      edu = degree,
+      #m3
+      #bmi = bmi4,
+      #m6
+      pm25 = pm25.var
+    ) %>%
+    mutate_at(
+      c("income",
+        "edu",
+        "birth_cohort",
+        "cohort",
+        "smoke",
+        "bmi"), 
+      as.factor) %>%
+    mutate(
+      #adjust AP units
+      no2 = as.double(no2/no2.units),
+      pm25 = as.double(pm25/pm25.units),
+    )  
+  
+  #create a survival object
+  s.dem <- Surv(
+    time = as.numeric(unlist(mydata[surv.time1])),  
+    time2 = as.numeric(unlist(mydata[surv.time2])) ,  
+    event = as.numeric(unlist(mydata[surv.event])))
+  
+ 
+  #Model 5 (APOE interaction): M2 + NO2*APOE
+   
+    ## create single variable for interaction term so that interaction HRs is directly interpretable #see B537 L3 # 56
+    # mydata <- mydata %>%
+    #   mutate(
+    #     no2_noapoe = (1-apoe)*no2,
+    #     no2_apoe = apoe*no2
+    #     )
+    
+    m5 <- mydata %>%
+      coxph(s.dem ~ apoe*no2 + apoe +
+              male + edu + race_white + income + birth_cohort + strata(apoe),
+            data=., 
+            #robust = T,          
+            cluster = study_id,
+            weights = model_wt)
+    
+    #m5.s <- m5 %>% summary()
+    
+   
+  
+    return(m5)
+  
+}
+
+
+
+
+
+
+
+
+
 
 ###############################################################################
 #returns plot with all HRs 
@@ -549,21 +631,23 @@ hr.plot <- function(dt,
   p <- dt %>% 
     ggplot(aes(x=Description, 
                y=hr, ymin=lower_limit, ymax=upper_limit,
-               col=Exposure, linetype = grepl("2", Model))
+               col=Exposure, 
+               #linetype = grepl("2", Model)
+               )
     ) + 
     geom_pointrange() + 
     geom_errorbar() +
     geom_hline(yintercept = 1, linetype=2) + 
     labs(y= "Hazard Ratio (95% CI)",
          x = "Model Description",
-         title = paste0(title_pollutant, " hazard ratios for ", outcome_var),
-         linetype = "M2 Covariates"
+         title = paste0(title_pollutant, " hazard ratios for ", outcome_var)
+         #linetype = "M2 Adjustment\nCovariates"
     ) + 
     theme(
       legend.position = "bottom",
       axis.ticks.y=element_blank()
     ) +  
-    coord_flip()  
+    coord_flip()   
 
   #p
   

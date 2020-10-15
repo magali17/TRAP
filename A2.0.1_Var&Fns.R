@@ -724,9 +724,11 @@ map_fn <- function(dt,
 
 # returns annual average site estimates for "ptrak" variable from repeated stop-level observations. Also returns summary tables and figures. 
 
-# dt <- stops
-# var <- "ufp_pt_cm3"
-# lm_x_names = c("site_id", "season", "time_of_week", "tod5")
+# dt = stops
+# lm_x_names = c("site_id", "season", "day", "hour")   #month: # lm_x_names = c("site_id", "season", "month", "hour")
+# var = "ufp_pt_cm3"
+# estimate_label = "ufp_tow7_tod21"
+
 
 estimate_annual_avg <- function(dt,
                                 var,
@@ -734,9 +736,11 @@ estimate_annual_avg <- function(dt,
                                 lm_x_names = c("site_id", "season", "time_of_week", "tod5"),
                                 estimate_label = ""
                                 ) {
-  # #rename variables
-  # dt <- dt %>%
-  #   rename(var = var)
+   
+ dt <- dt %>%
+   #convert to unorderd factor if not a weight
+   #mutate_if(!(grepl("_wt", names(.)) | var %in% names(.) ), ~factor( as.factor(.), ordered = F) ) 
+   mutate_if(grepl("month|day|hour", names(.)), ~factor( as.factor(.), ordered = F) ) 
 
   ## grid to save predictions
   lm_pred <- expand.grid(
@@ -744,21 +748,39 @@ estimate_annual_avg <- function(dt,
     site_id = unique(dt$site_id), 
     season = unique(dt$season),
     time_of_week = unique(dt$time_of_week),
-    tod2 = unique(dt$tod2),
+    
+    day = unique(dt$day), #added 8/25/20
+    hour = unique(dt$hour), #added 8/25/20
+    
+    #tod2 = unique(dt$tod2),
     tod5 = unique(dt$tod5)) %>%
-    mutate(tod5_wt = recode(tod5, 
+    mutate(
+      #weights 
+      season_wt = 1/length(unique(dt$season)),
+      time_of_week_wt = ifelse(time_of_week == "weekday", 5/7, 2/7),
+      
+      day_wt = 1/length(unique(dt$day)),
+      #upweigh neighboring hours - note, few samples at 0 & 4
+      hour_wt = ifelse(hour %in% c(23,0,4,5), 1.75/24, 1/24),
+      
+      tod5_wt = recode(tod5, 
                      "3_8" = 6,
                      "9_11" = 3,
                      "12_15" = 4,
                      "16_20" = 5,
                      "21_2" = 6
                      )/24,
-           tod2_wt = recode(tod2, 
-                         "9_17" = 9,
-                         "18_08" = 15
-                         )/24,
-          season_wt = 1/length(unique(dt$season)),
-          time_of_week_wt = ifelse(time_of_week == "weekday", 5/7, 2/7)) %>%
+           # tod2_wt = recode(tod2, 
+           #               "9_17" = 9,
+           #               "18_08" = 15
+           #               )/24,
+           # 
+          
+          ) %>%
+    #convert to unorderd factor if not a weight
+    #mutate_if(!grepl("_wt", names(.)), ~factor( as.factor(.), ordered = F) ) %>%
+    #str()
+    
     # only keep variable names used to estimate annual avg
     select(matches(paste0(lm_x_names, collapse = "|"))) %>%
     #may have multiple rows per combination
@@ -772,6 +794,9 @@ estimate_annual_avg <- function(dt,
     if("season" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$season_wt}
     
     if("time_of_week" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$time_of_week_wt}
+    
+    if("day" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$day_wt}
+    if("hour" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$hour_wt}
     
     if("tod2" %in% lm_x_names) {lm_pred$yhat <- lm_pred$yhat*lm_pred$tod2_wt}
     
@@ -858,14 +883,21 @@ label_analysis <- function(dt,
       Pollutant = factor(Pollutant, levels = c("UFP (pt/cm3)", "BC (ng/m3)")),
       var = as.character(var),
       var = ifelse(grepl("ufp", var), substr(var, 5, nchar(var)-end_character), substr(var, 4, nchar(var)-end_character)),
-      var = factor(var, levels = c("primary", "stop_means", "trim10", "windsorize", "uw", "native_scale", "monitoring_area")),
+      var = factor(var, levels = c("primary", "stop_means", "trim10", "windsorize", "uw", 
+                                   
+                                   "tow7_tod21", 
+                                   
+                                   "native_scale", "monitoring_area")),
       var = recode_factor(var, 
                           "primary" = "Primary",
                           "stop_means" = "Stop means",
                           "trim10" = "10% trimmed mean",
                           "windsorize" = "Windsorized mean",
                           "uw" = "Unweighted mean",
-                          "native_scale" = "Native scale modeling",
+                          
+                          "tow7_tod21" = "TOW7 TOD21",
+                          
+                          "native_scale" = "Native scale", #"Native scale modeling",
                           "monitoring_area" = "Predict within monitoring area"
                           )
       ) %>%
@@ -1114,9 +1146,9 @@ pls_uk_cv_predictions <- function(
 # 2. returns UK predictions for new locations. Fits PLS to a modeling dataset using a selected number of PLS components, variogram distance fraction; creates geodatasets; predicts at new locations using UK. 
 # unlike pls_uk_cv_predictions() fn above, does not create trainin/test sets over which it loops over to estimate CV predictions
 
-# dt = annual[!validation_idx,]
-# cov_loc_new = annual[validation_idx,]
-# y_name = pls_cv_names[i]
+# dt = annual
+# cov_loc_new = cov_act_all
+# y_name = analysis_names[i]
 # cov_names. = cov_names_log
 # pls_comp = pls_components 
 # variogram_dist_fract = pls_variogram_dist

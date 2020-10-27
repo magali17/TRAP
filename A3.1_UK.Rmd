@@ -51,7 +51,9 @@ pacman::p_load(knitr, kableExtra,
                akima, # interp() - interpolate predictions on map
                ggpubr, tidyverse,
                # 3D mapping
-               rayshader
+               #rayshader,
+               ggmap, sf, #mapping
+               ggspatial #mapping, adding scales, N arrows...
                
                #parallel  # mclapply() for parallized processing;  detectCores()
                )    
@@ -103,9 +105,6 @@ This script builds off of the Universal Kriging work completed for Aim 2 (in A2.
 
 ### --> ? update PLS component # at end  
 
-### --> update notation
-
- 
 The models separate space and space-time geocovarites in order to:
 
 a) inter-/intra-polate a single linear combinations composed of related geocovariates (e.g., different buffers for the same covariate) rather than many individual covariate buffers each year, and    
@@ -147,97 +146,264 @@ cbind(
 
 ```
 
+MM stop estimates & covariates
 
 ```{r}
 # upload datasets 
-#mm annual estimates & covariates
-mm0 <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-03-17.rda")) %>%
+
+#MM 
+
+## annual avgs
+estimates_mm <- readRDS(file.path("Data", "Aim 2", "Mobile Monitoring", "annual_2020-10-02.rda")) %>%
   # drop sensitivity analysis estimaets for Aim 2
   select(site_id, contains("primary")) %>%
   rename_at(vars(contains("primary")), ~gsub("_primary", "", .))
 
-## still has: [1] MS0000 MS0398     #MS0601 replaced MS0398
+## cov
 cov_mm <- readRDS(file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda")) %>%
   #drop Roosevelt garage & stop w/ 1 obeservation that was replaced by MS0601
-  filter(!site_id %in% c("MS0000", "MS0398"))
-   
-## act geocovariates
-### ~cov_act_all in A2 code
-cohort <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
+  filter(!site_id %in% c("MS0000", "MS0398")) #MS0601 replaced MS0398
 
-# emission estimates
+## emissions cov
 emissions_mm <- read.csv(file.path("Data", "Aim 3", "Emissions", "mm_locs_trap_sum.csv")) %>%
   select(-gid) %>%
   rename(site_id = native_id) %>%
   #?? take out "_" before buffer - for fn later
   rename_if(grepl("_g_", names(.)), 
             ~str_replace(string = ., pattern =  "_g_",replacement =  "") ) 
-  
-
-## --> update using grid_trap_sum.csv when have other covariates
-emissions_grid <- read.csv(file.path("Data", "Aim 3", "Emissions", "grid_old_trap_sum.csv")) %>%
-  select(-gid) %>%
-  rename(site_id = native_id) %>%
-  #?? take out "_" before buffer - for fn later
-  rename_if(grepl("_g_", names(.)), 
-            ~str_replace(string = ., pattern =  "_g_",replacement =  "") ) 
-
-# emissions_cohort <- read.csv(file.path("Data", "Aim 3", "Emissions", "______.csv")) %>%
-#   select(-gid) %>%
-#   rename(site_id = native_id)
 
 
-### --> update native_id when get other geocovariates
-      #### delete this dataset when rename native_id
-aqs_monitors_nearby_TEMP <- read.csv(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "EPA", "aqs_monitors_nearby_bc.csv"))
-## add stop IDs to sites where we stopped 
-aqs_monitors_nearby_TEMP$site_id[grepl("10th & Weller", aqs_monitors_nearby_TEMP$Local.Site.Name)] <- "MC0120"
-aqs_monitors_nearby_TEMP$site_id[grepl("Beacon Hill", aqs_monitors_nearby_TEMP$Local.Site.Name)] <- "MC0003"
-aqs_monitors_nearby_TEMP$site_id[grepl("Beacon Hill", aqs_monitors_nearby_TEMP$Local.Site.Name)] <- "MC0003"
-aqs_monitors_nearby_TEMP$site_id[grepl("Duwamish", aqs_monitors_nearby_TEMP$Local.Site.Name)] <- "MC0126"
-aqs_monitors_nearby_TEMP$site_id[grepl("Kent", aqs_monitors_nearby_TEMP$Local.Site.Name)] <- "MC0406"
-aqs_monitors_nearby_TEMP$site_id[grepl("Tukwila", aqs_monitors_nearby_TEMP$Local.Site.Name)] <- "MC0002"
+## NDVI cov
+
+### --> 
 
 
-
-
-
-
-emissions_aqs_nearby <- read.csv(file.path("Data", "Aim 3", "Emissions", "aqs_trap_sum.csv")) %>%
-  select(-gid) %>%
-  rename(site_id = native_id)
-
-
-# NDVI
-### --> upload
-
-
-# AQS sites (including those outside study area)
-### --> upload
-
-
-mm <- mm0 %>%
+## ? combine all
+mm <- estimates_mm %>%
   #convert to log
   mutate_at(vars(contains(c("ufp", "bc"))), ~log(.)) %>%
   left_join(cov_mm) %>%
   left_join(emissions_mm) #%>%
   # --> add ndvi
 
-#AQS observations for validation? Or use year-round estimates from PSCAA?
+```
+
+### --> ? need? delete?
+
+```{r}
+
+
+#AQS observations for validation? 
 mm_aqs_2019 <- mm %>%
   filter(str_detect(site_id, "MC"))
-
-
-
-
-
-
-
 
 
 #only keep non-AQS site stops
 mm <- mm %>%
   filter(str_detect(site_id, "MS"))
+
+```
+
+Cohort covariates
+
+```{r}
+# cohort
+
+##  cov
+### ~cov_act_all in A2 code
+cohort <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
+
+## emissions cov
+# emissions_cohort <- read.csv(file.path("Data", "Aim 3", "Emissions", "______.csv")) %>%
+#   select(-gid) %>%
+#   rename(site_id = native_id) %>%
+# #?? take out "_" before buffer - for fn later
+#   rename_if(grepl("_g_", names(.)), 
+#             ~str_replace(string = ., pattern =  "_g_",replacement =  "") ) 
+
+
+## NDVI 
+
+### ---> 
+
+
+# combine all
+
+
+```
+
+```{r}
+#only keep if in study
+## ACT cov for primary analysis
+cohort <- cohort %>%
+  filter(site_location %in% c("monitoring", "study")) # %>%
+  # --> add emissions
+  #left_join() #%>%
+# --> add ndvi
+
+```
+
+
+AQS site covariates
+
+```{r}
+# aqs 
+
+## cov
+aqs_cov <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_agency_preprocessed.rda")) %>%
+  select(site_id, native_id, Local.Site.Name:Longitude, everything())
+
+## emissions cov
+aqs_emissions <- read.csv(file.path("Data", "Aim 3", "Emissions", "aqs_trap_sum.csv")) %>%
+  select(-gid) %>%
+  rename(site_id = native_id) %>%
+  #?? take out "_" before buffer - for fn later
+  rename_if(grepl("_g_", names(.)), 
+            ~str_replace(string = ., pattern =  "_g_",replacement =  "") ) 
+
+###crosswalk for emissions estimates & cov
+aqs_emissions <-  read_sf(file.path("..", "GIS", "Shapefiles", "AQS Sites", "aqs_nearby.shp")) %>%
+  st_drop_geometry() %>%
+  select(site_id = native_id, Local.Site.Name = Local.Site, everything()) %>%
+  mutate(Latitude = as.numeric(Latitude),
+         Longitude = as.numeric(Longitude),
+         ) %>%
+  left_join(aqs_emissions) %>%
+  select(-site_id)  
+  
+  
+## NDVI 
+
+### --> 
+#aqs_ndvi <- read.csv(file.path("Data", "Aim 3", "NDVI", "aqs_ndvi.csv"))
+
+
+#combine all
+aqs <- aqs_cov %>%
+  left_join(aqs_emissions) #%>%
+#left_join(aqs_ndvi)
+  
+
+```
+
+```{r}
+# ? need for validation set??
+aqs_ids <- aqs %>%
+  select(native_id, Local.Site.Name, Longitude, Latitude)
+
+
+```
+
+
+Grid covariates
+
+```{r}
+# grid
+
+## cov
+grid_cov <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda"))  %>% 
+  select(site_id, location_id:msa, longitude, latitude, everything()) %>%
+  #ps_a00001 is equal to grid_mm 0001, so we can join columns afterwards
+  arrange(native_id)
+ 
+ 
+## emissions cov
+grid_emissions <- read.csv(file.path("Data", "Aim 3", "Emissions", 
+                                     "grid_trap_sum.csv" #"grid_old_trap_sum.csv"
+                                     )) %>%
+  select(-gid) %>%
+  #rename(site_id = native_id) %>%
+  #?? take out "_" before buffer - for fn later
+  rename_if(grepl("_g_", names(.)), 
+            ~str_replace(string = ., pattern =  "_g_",replacement =  "") ) 
+
+
+###crosswalk for emissions estimates & cov
+grid_emissions <-  read_sf(file.path("..", "GIS", "Shapefiles", "Predictions", "grid", "new_grid.shp")) %>%
+  st_drop_geometry() %>%
+  select(native_id, longitude = long, latitude = lat) %>%
+  left_join(grid_emissions) %>% #select(-site_id)  
+  #ps_a00001 is equal to grid_mm 0001, so we can join columns afterwards
+  arrange(native_id) %>%
+  select(native_id_emissions = native_id,
+         longitude_emissions = longitude,
+         latitude_emissions = latitude,
+         everything()
+         )
+
+
+
+
+
+
+
+
+# NDVI
+### --> upload
+#grid_ndvi <- 
+
+
+
+# combine all
+grid <- grid_cov %>% #left_join(
+  #datasets are arranged in same order
+  cbind(grid_emissions) %>%
+  # check that lat/long is same for 2 dfs. #looks good
+  select(contains(c("site_id", "native_id", "longitude", "latitude")), everything() )
+  
+# add DNVI  
+#left_join(grid_ndvi)
+
+```
+
+```{r}
+
+### only keep grid points in study area & not on water
+project_crs <- 4326
+
+#### study area
+study_area_shp <- read_sf(file.path("..", "GIS", "Shapefiles", "Study area", "oval_around_monitoring_area.shp")) %>%
+  st_transform(project_crs)
+
+#### water
+water_shp <- read_sf(file.path("..", "GIS", "Shapefiles", "Other features", "Water", "DNR_Hydrography__Water_Bodies", "DNR_Hydrography__Water_Bodies.shp")) %>%
+  st_transform(project_crs)
+
+
+####create sf object from grid
+grid_shp <- grid %>%
+  st_as_sf(., coords=c("longitude","latitude"), remove=F,
+           crs=project_crs)
+
+#### intersection
+grid_shp$in_study_area <- st_intersects(grid_shp, study_area_shp, sparse = F) %>%
+  apply(., 1, any)
+
+#### points not in water
+grid_shp$not_in_water <- !st_intersects(grid_shp, water_shp, sparse = F) %>%
+  apply(., 1, any)
+
+
+#### convert back to df
+grid <- grid_shp %>%
+  st_drop_geometry() %>% 
+  #only need these points
+  filter(in_study_area == TRUE,
+         not_in_water == TRUE
+         ) %>%
+  select(-c(in_study_area, not_in_water, #site_id
+            )) %>%
+  select(longitude, latitude, everything())
+
+```
+
+
+
+
+
+```{r}
+
+# delete??
 
 # group ACT locations by location
 # monitoring_ids <- cohort$site_id[grepl("monitoring", cohort$site_location)] 
@@ -249,52 +415,16 @@ mm <- mm %>%
 # st_ids <- append(monitoring_ids, outside_monitoring_in_st_ids)
 
 
-# ACT cov for primary analysis
-cohort <- cohort %>%
-  #filter(site_id %in% study_ids) #%>%
-  filter(site_location %in% c("monitoring", "study")) # %>%
-  # --> add emissions
-  #left_join() #%>%
-# --> add ndvi
+```
 
 
-# grid in study area (from GIS)
-                                        ## used to have grid_200602.csv but this doesn't have native_id
-grid_in_study <- read.csv(file.path("..", "GIS", "Shapefiles", "Predictions", "grid", "grid_mm.csv")) %>%
-  filter(study == TRUE) %>%
-  select(site_id = native_id)
-  #select(location_id = location_i)
-
-grid_in_study <- grid_in_study$site_id
-
-
-
-
-
-### --> ERROR: native_id is diff for cov_grid_preprocessed.rda vs emissions_grid
-
-#emissions_grid$site_id %>% as.numeric()
-
-# grid cov
-grid <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda")) %>%
-  # only keep points in study area-land (grid isn't large enough for st area)
-  filter(site_id %in% grid_in_study) %>%
-  left_join(emissions_grid) #%>%
-  # --> add ndvi
-
-#save grid for testing
-#saveRDS(grid, file = file.path("Output", "Aim 3", "grid.rda"))
-
-
-
-
-
-
+```{r}
 
 # main datasets
-# mm 
-# cohort 
-# grid 
+
+## mm 
+## cohort 
+## grid 
 
 ```
 
@@ -313,6 +443,7 @@ label_analysis(var = "Analysis") %>%
 ```{r}
 # trend adjustment
 ## convert ug/m3 (10^-6) to ng/m3 (10^-9)
+
 conversion_factor <- 1e3 
 trend_adjustment <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "trend_adjustment.rda")) %>%
   #mutate(difference = difference*conversion_factor) %>%
@@ -321,56 +452,70 @@ trend_adjustment <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "t
 # Hx BC validation - Hx AQS readings 
 bc_validation <- read_rds(file.path("Data", "Aim 3", "Hx BC at AQS Sites", "aqs_avgs_for_validation.rda")) %>%
   mutate(mean_ng_m3 = mean*conversion_factor,
-         site_id = NA,
+         #site_id = NA,
          Pollutant = "bc"
          ) %>%
-  select(-c(mean, no_zero_readings))  
- 
-## add site_id #s for merging later since these sites have slightly different site names
-bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Weller")] <- "MC0120"
-bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Beacon")] <- "MC0003"
-bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Duwamish")] <- "MC0126"
-bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Kent")] <- "MC0406"
-bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Allentown")] <- "MC0002"
+  select(-c(mean, no_zero_readings)) %>%
+  mutate(
+    #match other datasets
+    Local.Site.Name = recode_factor(factor(Site),
+                         "Seattle Beacon Hill" = "Seattle - Beacon Hill",
+                         "Seattle Duwamish Vly" = "Seattle - Duwamish",
+                         "Puyallup South Hill" = "Puyallup",
+                         "Seattle 10th & Weller" = "Seattle-10th & Weller"
+                         )
+    ) %>%
+  left_join(aqs[c("site_id", "Local.Site.Name")])
 
-### --> add site_ids for other sites  when get new datasaet? or merge them in 
+
+
+# ## add site_id #s for merging later since these sites have slightly different site names
+# bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Weller")] <- "MC0120"
+# bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Beacon")] <- "MC0003"
+# bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Duwamish")] <- "MC0126"
+# bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Kent")] <- "MC0406"
+# bc_validation$site_id[str_detect(string = bc_validation$Site, pattern = "Allentown")] <- "MC0002"
 
 
 # UFP validation - BH 2001
 ufp_validation <- readRDS(file.path("Data", "Aim 3", "Hx UFP at BH", "BH_2001_UFP.rda")) %>%
-  mutate(site_id = "MC0003",
+  mutate(site_id = unique(aqs$site_id[grepl("Beacon", aqs$Local.Site.Name)]), #"MC0003",
          Pollutant = "ufp",
          Year = 2001
          )
 
 ```
 
-Add geocovariates to validation AQS sites so we can make predictions here later
 
-### --> need geocovariates for AQS sites not in MM campaign 
 
 ```{r}
-#add geocovariates to validation AQS sites so we can make predictions here later 
-aqs <- bc_validation %>%
-  select(Site) %>%
-  unique() 
 
-aqs$site_id <- NA
-aqs$site_id[str_detect(string = aqs$Site, pattern = "Weller")] <- "MC0120"
-aqs$site_id[str_detect(string = aqs$Site, pattern = "Beacon")] <- "MC0003"
-aqs$site_id[str_detect(string = aqs$Site, pattern = "Duwamish")] <- "MC0126"
-aqs$site_id[str_detect(string = aqs$Site, pattern = "Kent")] <- "MC0406"
-aqs$site_id[str_detect(string = aqs$Site, pattern = "Allentown")] <- "MC0002"
-
-aqs <- aqs %>%
-  #add geocovariates
-  left_join(mm_aqs_2019) %>%
-  #won't be using these annual avg estimates from the MM campaign
-  select(-c(bc, ufp))
+# # ??? what is this?? delete??
+# 
+# Add geocovariates to validation AQS sites so we can make predictions here later
+# 
+# #add geocovariates to validation AQS sites so we can make predictions here later 
+# aqs <- bc_validation %>%
+#   select(Site) %>%
+#   unique() 
+# 
+# aqs$site_id <- NA
+# aqs$site_id[str_detect(string = aqs$Site, pattern = "Weller")] <- "MC0120"
+# aqs$site_id[str_detect(string = aqs$Site, pattern = "Beacon")] <- "MC0003"
+# aqs$site_id[str_detect(string = aqs$Site, pattern = "Duwamish")] <- "MC0126"
+# aqs$site_id[str_detect(string = aqs$Site, pattern = "Kent")] <- "MC0406"
+# aqs$site_id[str_detect(string = aqs$Site, pattern = "Allentown")] <- "MC0002"
+# 
+# aqs <- aqs %>%
+#   #add geocovariates
+#   left_join(mm_aqs_2019) %>%
+#   #won't be using these annual avg estimates from the MM campaign
+#   select(-c(bc, ufp))
 
 ```
 
 
+ACS survey: Pop density 2010+
 
 ```{r}
 # pop density 2010+ for Seattle-Tacoma-Bellevue, WA Metro Area from annual Census ACS surveys  
@@ -429,15 +574,15 @@ airports_area <- readRDS(file.path("Data", "GIS", "airports_df.rda"))
 
 ```
 
-###--> check that n_components still the same for BC & UFP
+###--> keep variog dist fract at 10%? since UFP and BC were differnet in A2
 
 ```{r}
 # common variables
 
-site_loc_vars <- cov_mm %>% select(site_id:lambert_y) %>% names()
+site_loc_vars <- cov_mm %>% select(site_id, longitude, latitude, lambert_x, lambert_y) %>% names()
 
 space_vars <- cov_mm %>%
-  select(-site_loc_vars,
+  select(-site_loc_vars, -native_id,
          -contains(c("pop", "ndvi"#, 
                     #"ec"
                     ))) %>%
@@ -457,8 +602,8 @@ variog_dist_frac_bc <- a2_cv_results$Variogram_Distance_Fraction[str_detect(a2_c
 # years obtained for TVCs
 census_data_yrs <- c(1990, 2000, 2010)
 last_acs_yr <- max(acs$Year)
-### --> check that these years are correct
-ndvi_data_yrs <- c(2006) #c(1990:1993, 2006, 2010)
+### --> check that these years are correct. DROP 2006??
+ndvi_data_yrs <- c(2006) #c(1990:1993, 2006, 2010, 2019)
 emissions_data_yrs <- c(seq(1990, 2015, by = 5), 2019)
 
 #PLS modeling year used
@@ -524,7 +669,7 @@ Variability explained by each model.
 variance_explained <- data.frame()
 
 for(i in seq_along(pollutants)) {
-  
+  #i=1
   space_var <- explvar(space_models[[pollutants[i]]]) %>% as.vector()
                                                     
   pop_var <- explvar(pop2010_models[[pollutants[i]]]) %>% as.vector() %>% 
@@ -559,12 +704,12 @@ for(i in seq_along(pollutants)) {
    
 }
 
-variance_explained %>%
-    kable(
-      caption = paste0("Percent of variability explained by each PLS model for annual average ", toupper(pollutants[i] )),
-      digits = 1
-    ) %>%
-    kable_styling() 
+variance_explained %>% kable(caption = 
+                               paste0("Percent of variability explained by each PLS model for annual average ", 
+                                      toupper(pollutants[i] )),
+                             digits = 1
+                             ) %>%
+  kable_styling() 
 
 ```
 
@@ -933,7 +1078,7 @@ ufp_scores_ec <- list()
 ### --> change c(1,3,4) to seq_along(dt_list) when get cohort estimates
 
 for (i in c(1,3,4) ) {   
-  #i=1
+  #i=4
   bc_scores_ec[i] <- list(get_scores_ec_models(.dt = dt_list[[i]], .pls_model = ec2019_models$bc) )
   ufp_scores_ec[i] <- list(get_scores_ec_models(.dt = dt_list[[i]], .pls_model = ec2019_models$ufp) )
   
@@ -1013,7 +1158,7 @@ bc_scores_grid0 <- cbind(grid[site_loc_vars],
                    
                    #sensitivity
                    bc_scores_nox$grid
-                   )%>% 
+                   ) %>% 
   mutate(Pollutant = "bc")
 
 bc_scores_aqs0 <- cbind(aqs[site_loc_vars],
@@ -1188,11 +1333,8 @@ grid_scores0 %>%
 ```
 
 
- 
-
 Compare the distribution of the PLS scores at MM locations used to fit & transform all other geocovariates at cohort locations to linear combinations
 
-### --> replace grid w/ cohort predictions & change Location description to "Cohort"
 
 ```{r}
 mm_og_scores <- mm_scores0 %>%
@@ -1220,8 +1362,8 @@ mm_og_scores <- mm_scores0 %>%
          #Pollutant = toupper(Pollutant)
          )  
 
-### --> replace w/ cohort_scores0
-score_comp <- grid_scores0 %>%
+                      ### DONE. # --> replace w/ cohort_scores0
+score_comp <- cohort_scores0 %>% #grid_scores0 %>%
   select(
     Pollutant,
     #space1, space2, 
@@ -1232,7 +1374,6 @@ score_comp <- grid_scores0 %>%
                   ))
     ) %>%  
   
-  #            --> update when get new emission covariates
   gather("TVC", "value", starts_with(c( "pop", "ndvi", "ec",
                                         # sensitivity
                                         "nox"
@@ -1243,7 +1384,7 @@ score_comp <- grid_scores0 %>%
            sep = "(?<=[A-Za-z])(?=[0-9])" 
            )  %>%
   mutate(
-    Location = "Grid",
+    Location = "Cohort", #"Grid",
     #Alpha=0.3,
     
   ) %>% 
@@ -1251,7 +1392,9 @@ score_comp <- grid_scores0 %>%
   mutate(
     Pollutant = toupper(Pollutant),
     TVC = toupper(TVC),
-    Location = factor(Location, levels = c("Mobile Monitoring", "Grid"))
+    Location = factor(Location, levels = c("Mobile Monitoring", 
+                                           "Cohort" #"Grid"
+                                           ))
     
   )
 
@@ -1317,72 +1460,6 @@ score_comp %>%
 ```
 
 
-```{r}
-# score_comp %>%
-#   filter(grepl("ec", TVC, ignore.case = T),
-#          Year >=1995
-#          ) %>%
-#   ggplot(data=., aes(x=value,
-#                      fill=Year,
-#              #col=Location
-#              )
-#          ) +
-#   geom_density(
-#     alpha=0.2
-#     ) +
-#   facet_grid(Location~Pollutant,
-#              scales="free"
-#              ) +
-#   scale_x_log10() +
-#   labs(x = "PLS Score",
-#        title = "Distribution of EC Emissions PLS scores at the mobile monitoring locations used to build the models and GRID/COHORT locations where predictions are made"
-#        )
-
-
-# #pop
-# score_comp %>%
-#   filter(grepl("pop", TVC, ignore.case = T)) %>%
-#   ggplot(data=., aes(x=value,
-#                      fill=Year,
-#              )
-#          ) +
-#   geom_density(
-#     alpha=0.2
-#     ) +
-#   facet_grid(Location~Pollutant,
-#              scales="free"
-#              ) +
-#   scale_x_log10() +
-#   labs(x = "PLS Score",
-#        title = "Distribution of population density PLS scores at the mobile monitoring locations used to build the models and GRID/COHORT locations where predictions are made"
-#        )
-
-
-# #ndvi
-# score_comp %>%
-#   filter(grepl("ndvi", TVC, ignore.case = T)) %>%
-#   ggplot(data=., aes(x=value,
-#                      fill=Year,
-#              )
-#          ) +
-#   geom_density(
-#     alpha=0.2
-#     ) +
-#   facet_grid(Location~Pollutant,
-#              scales="free"
-#              ) +
-#   scale_x_log10() +
-#   labs(x = "PLS Score",
-#        title = "Distribution of NDVI PLS scores at the mobile monitoring locations used to build the models and GRID/COHORT locations where predictions are made"
-#        )
-  
-  
-
-```
-
-
-
-
 
 * the best fit line is not parallel to the 1-1 line. In general, higher density areas had a greater increase in population density over time than lower density areas.
 * Some sites deviate from the general trend more than others.    
@@ -1390,10 +1467,8 @@ score_comp %>%
 
 TVCs will characterize temporal site changes better than our trend adjustment at sites where the change in population density between 1990 and 2010 differs from what would be our trend adjustment (i.e., a parallel line above the 1-1 line)
 
-###--> ? see strange pattern. Amanda says it is due to transformation issues in Tacoma area.
-
 ```{r}
-grid_scores0 %>%
+cohort_scores0 %>% #grid_scores0 %>%
   gather(key = "Census", value = "Value", contains("pop"), -contains("90")) %>%
   mutate(
     Census = str_extract(Census, "\\d{4}"),
@@ -1406,7 +1481,7 @@ grid_scores0 %>%
   geom_abline(aes(slope = 1, intercept = 0, linetype= "1-1")) +
   facet_grid(Census~Pollutant) + 
   labs(
-    title = "Grid population density PLS scores over time",
+    title = "Cohort population density PLS scores over time",
     x = "1990 Census",
     y = "PLS Score",
     linetype = ""
@@ -1443,7 +1518,7 @@ high_quant <- 0.99
 
 ```{r}
 #use model to predict & estimate residuals
-grid_scores0 %>%
+cohort_scores0 %>%
   mutate(
     #lm_prediction = ifelse(Pollutant == "bc", predict(pop_m1$bc), predict(pop_m1$ufp)),
     lm_residual = ifelse(Pollutant == "bc", residuals(pop_m1$bc), residuals(pop_m1$ufp))

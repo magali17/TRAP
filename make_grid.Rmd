@@ -365,6 +365,25 @@ dt_grid %>%
 ```
 
 
+# small grid
+
+```{r, eval=F}
+small_grid <- make_grid(min_x = 383218, min_y = 61864, 
+                          max_x = 391900, max_y = 72925,
+                  no_pts = 5000, 
+                  id_suffix = "dt2"
+                  )$grid %>%
+  mutate(x_y_crs = "wa_north_m_32148") %>%
+  
+  # add lat/long coordinates
+  add_crs(dt = ., 
+                original_crs = 32148, original_coords = c("x", "y"), 
+                new_crs = 4326, new_coord_names = c("long", "lat") 
+                ) 
+```
+
+
+
 # Save grids
 
 ```{r}

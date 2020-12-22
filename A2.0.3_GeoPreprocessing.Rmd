@@ -84,13 +84,15 @@ cov_mm0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates",
   select(-contains(".y")) %>%
   rename_at(vars(contains(".x")), ~ gsub(".x", "", .))
 
-cov_act0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", 
-                               "201002", #"time-varying", 
+cov_act0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "201002",
                                "dr0311_cohort_covars.csv")) 
 # grid
-grid_covars0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", 
-                                   "201002", #"time-varying",  
+grid_covars0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "201002", 
                                    "dr0311_grid_covars.csv" )) 
+
+small_grid_covars0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", "201002", 
+                                   "grid_deeds_50m.txt" )) 
+
 
 # agency sites
 agency_covars0 <- read.csv(file.path("Data", "Aim 2", "Geocovariates", 
@@ -360,6 +362,15 @@ cov_grid <- grid_covars0 %>%
   # duplicate column - for later
   mutate(site_id = native_id)
 
+# smaller grid
+cov_grid_small <- small_grid_covars0 %>%
+  combine_a123_m() %>%
+  combine_a23_m() %>%
+  combine_a23_ll() %>%
+  log_transform_distance() %>%
+  # duplicate column - for later
+  mutate(site_id = native_id)
+
 # agency
 cov_agency <- agency_covars0 %>%
   combine_a123_m() %>%
@@ -588,14 +599,18 @@ kable(caption = "ACT cohort locations included in the monitoring, study and spat
 
 ```{r}
 # # Save datasets
-
+# 
 # saveRDS(cov_mm,file = file.path("Data", "Aim 2", "Geocovariates", "cov_mm_preprocessed.rda"))
+# 
 # saveRDS(cov_act,file = file.path("Data", "Aim 2", "Geocovariates", "cov_act_preprocessed.rda"))
+# 
 # saveRDS(cov_grid,file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda"))
-#
-#saveRDS(cov_agency, file = file.path("Data", "Aim 2", "Geocovariates", "cov_agency_preprocessed.rda"))
-
-## saveRDS(kaya_grid1, file = file.path("Data", "Kaya", "kaya_grid_preprocessed.rda"))
+# 
+# saveRDS(cov_grid_small,file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_small_preprocessed.rda"))
+# 
+# saveRDS(cov_agency, file = file.path("Data", "Aim 2", "Geocovariates", "cov_agency_preprocessed.rda"))
+# 
+# # saveRDS(kaya_grid1, file = file.path("Data", "Kaya", "kaya_grid_preprocessed.rda"))
 
 
 ```

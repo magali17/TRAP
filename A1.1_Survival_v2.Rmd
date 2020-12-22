@@ -73,7 +73,8 @@ pacman::p_load(knitr, kableExtra,
                Hmisc, EnvStats, lubridate, 
                survival, survminer, glmnet, splines,
                #attach these last to use these functions as the defaults?
-               tidyverse, dplyr
+               tidyverse, dplyr,
+               qwraps2
                )  
 
 ```
@@ -82,7 +83,7 @@ pacman::p_load(knitr, kableExtra,
 
 Primary analysis model
 
-$$h(age) = h_0(age|APOE) exp ( \beta_1 X_{NO_2} } + \beta_2 X_{gender} + \beta_3 X_{edu} + \beta_4 X_{income} + \beta_5 X_{race} + \beta_6 X_{birthcohort} )$$
+$$h(age) = h_0(age|APOE) exp ( \beta_1 X_{NO_2} } + \beta_2 X_{gender} + \beta_3 X_{edu} + \beta_4 X_{income} + \beta_5 X_{race} + \beta_6 X_{birthcohort})$$
 
 
 
@@ -123,6 +124,9 @@ dem0.1 <- dem0.0 %>%
     birthdt,
     intakedt,
     last_visit,
+    
+    deathdt,
+    
     birth_cohort,
     corrected_onsetdate,
     onsetage,
@@ -165,7 +169,9 @@ dem0.1 <- dem0.0 %>%
     one_location,
     imputed_coverage10_yr, imputed_coverage01_yr,
     exact_coverage10_yr, exact_coverage01_yr,
-    imp_qual10_yr
+    imp_qual10_yr,
+    
+    #deathdt
     ) %>%
   #create/clean up variables
   mutate(
@@ -186,6 +192,8 @@ dem0.1 <- dem0.0 %>%
     #collapse earliest & latest cohorts since there are few ppl here - for tables/figures
     birth_cohort = factor(ifelse(birth_cohort <= 1905, 1895,
                            ifelse(birth_cohort >= 1935, 1935, birth_cohort))),
+    #create 2 yr cal time categories like Rachel's: "2-year categories, except for a 3-year category covering the most recent years 2016-2018"
+    cal_t = factor(ifelse(exposure_year==2018, 2016, floor(exposure_year/2)*2)),
     
     # update anydementia. Unless someone was suspected of dementia and was evaluated for it, the ANYDEMENTIA (as well as DSMIVDX, ANYAD, NINDX, etc.) field will be blank. Think of ‘0’ as a confirmation of no dementia, while blank as a presumption of no dementia.
     anydementia = ifelse(is.na(anydementia), 0, anydementia),
@@ -225,7 +233,10 @@ dem0.1 <- dem0.0 %>%
     ) %>%
   select(
   study_id,
-  birthdt, birth_cohort_5yr, birth_cohort, cohort, intakedt, onsetdate, last_visit,
+  birthdt, birth_cohort_5yr, birth_cohort, cal_t, cohort, intakedt, onsetdate, last_visit,
+  
+  deathdt,
+  
   age_intake, age_act, age_last_visit,
 
   anydementia, dsmivdx, nindx, ad_nincds,
@@ -282,7 +293,9 @@ dem1 <-  dem0.1 %>%
   one_location,
   imputed_coverage10_yr, # "doesn't exist"?? #imputed_coverage01_yr,
   exact_coverage10_yr, exact_coverage01_yr,
-  imp_qual10_yr
+  imp_qual10_yr,
+  
+  deathdt
   ) %>%
   filter(
     #drop ppl with only a baseline observation
@@ -502,7 +515,10 @@ fixed.covariates <- dem.w %>%
     study_id:birthdt, 
     #don't include birth_cohort_5yr
     birth_cohort:ad_nincds,
-    apoe:casi_irt
+    apoe:casi_irt,
+    
+    #don't include this for now. cal_t is similar to birth_cohort
+    -deathdt, -cal_t
     ) %>% 
   #make all variables numeric; code has values starting at 0, whereas as.numeric() starts at 1, subtract 1 to fix
   mutate(
@@ -523,12 +539,13 @@ fixed.covariates <- dem.w %>%
 
 ```{r}
 # common variables 
-m2_all_vars <- c("apoe", "male", "race_white", "income_cat", "degree", "birth_cohort", 
-                 #"birth_cohort_5yr", 
+m2_all_vars <- c("apoe", "male", "race_white", "income_cat", "degree", 
+                 "cal_t",
+                 #"birth_cohort", #"birth_cohort_5yr", 
                  "no2_10yr") 
 ## adjustment variables
-m2_vars <- c("apoe", "male", "race_white", "income_cat", "degree", "birth_cohort" 
-             #"birth_cohort_5yr"
+m2_vars <- c("apoe", "male", "race_white", "income_cat", "degree", "cal_t"#,
+             #"birth_cohort" #"birth_cohort_5yr"
              ) 
 
 
@@ -817,13 +834,15 @@ rbind(ipw_all, ipw_m2) %>%
 
 ```
 
+
 ## Distribution of Key Covariates
 
 ```{r}
 #histograms
 fixed.covariates %>% 
-  drop_na(m2_vars) %>%
-  mutate(birth_cohort = as.numeric(birth_cohort)) %>%
+  #drop_na(m2_vars) %>%
+  mutate(birth_cohort = as.numeric(birth_cohort),
+         ) %>%
   gather(key = "variable",  value = "value", -study_id) %>%   
   ggplot(aes(x=value)) + 
   geom_histogram() +
@@ -977,7 +996,7 @@ dem.w %>%
   
 ```
 
-119 event ties? 
+t119 event ties
 
 ```{r}
 dem.w %>%
@@ -1056,17 +1075,37 @@ summary(fixed.covariates$age_act[fixed.covariates$anydementia==1])
 
 ## Table 1   
 
-Participant characteristics.  
+* note, birth cohort categories are summarized relative to how they were used in the analysis (not showing additional 5 yr birth categories for youngest and oldest cohorts)
+
 
 Dementia
 
+### --> total py should be: 41,213.  table reads: 41,195
+### --> ? update "100%" in first row. add to 2nd row? 
+
 ```{r}
 #table1
+
+# everyone in sample
+t1_all <- dem.w %>%
+  #1st year of enrollment (baseline)
+  filter(enrollment_yr == 1) %>%
+  t1.fn() %>%
+  #separate N & %s
+  separate(col = V1, into = c("All_a", "All_b"), sep = " ", fill = "right")  %>%
+    mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA"))   
+
+## Replace NAs w/ ""
+t1_all$All_b[is.na(t1_all$All_b)] <- ""
+
 
 # total 
 t1_tot <- dem.w %>%
   # only keep individuals included in Model 2
   drop_na(m2_all_vars) %>%
+  
+  #mutate(tot_py = nrow(.)) %>%
+  
   #1st year of enrollment (baseline)
   filter(enrollment_yr == 1) %>%
   t1.fn() %>%
@@ -1077,61 +1116,21 @@ t1_tot <- dem.w %>%
 ## Replace NAs w/ ""
 t1_tot$Total_b[is.na(t1_tot$Total_b)] <- ""
 
-## # not stratifying table by outcome (Marco's suggestion) 
-# # dementia 
-# t1_dem <- dem.w %>%
-#   # only keep individuals included in Model 2
-#   drop_na(m2_all_vars) %>%
-#   #1st year of enrollment (baseline)
-#   filter(enrollment_yr == 1) %>%
-#   group_by(anydementia) %>%
-#   t1.fn() %>%
-#   separate(col = V1, into = c("NoDementia_a", "NoDementia_b"), sep = " ", fill = "right")  %>%
-#   separate(col = V2, into = c("Dementia_a", "Dementia_b"), sep = " ", fill = "right")  %>%
-#   #replace "NaN" estimates for APOE w/ "NA"
-#   mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA")) %>%
-#   #remove grouping rows
-#   slice(-c(1)) %>%
-#   select(Variable, starts_with("Dementia"), starts_with("NoDementia"))
-# 
-# ## Replace NAs w/ ""
-# t1_dem$NoDementia_b[is.na(t1_dem$NoDementia_b)] <- ""
-# t1_dem$Dementia_b[is.na(t1_dem$Dementia_b)] <- "" 
-# 
-# 
-# # AD 
-# t1_ad <- dem.w %>%
-#   drop_na(m2_all_vars) %>%
-#   filter(enrollment_yr == 1) %>%
-#   group_by(ad_nincds) %>%
-#   t1.fn() %>%
-#   #separate N & %s
-#  separate(col = V1, into = c("NoAD_a", "NoAD_b"), sep = " ", fill = "right")  %>%
-#   separate(col = V2, into = c("AD_a", "AD_b"), sep = " ", fill = "right")  %>%
-#   #replace "NaN" estimates for APOE w/ "NA"
-#   mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA")) %>%
-#   #remove grouping rows
-#   slice(-c(1)) %>%
-#   select(Variable, starts_with("AD"), starts_with("No"))
-# 
-# ## Replace NAs w/ ""
-# t1_ad$NoAD_b[is.na(t1_ad$NoAD_b)] <- ""
-# t1_ad$AD_b[is.na(t1_ad$AD_b)] <- "" 
+ 
 
-
-t1_tot %>%
-#   left_join(t1_dem) %>%
-# left_join(t1_ad)  %>%
+t1_all %>% 
+  left_join(t1_tot) %>%
   column_to_rownames(var = "Variable") %>%
   kable(caption = "Cohort characteristics", 
         col.names = c(#"Variable", 
-                       "Total", " "#, "Dementia", " ", "No Dementia", "", "AD", "", "No AD", ""
+                      "Entire Cohort", "",  "Cohort in Primary Analysis", " " 
           ), 
         align = "r"
         ) %>%
-  add_indent(c(5:11,15:20,22:25, 27:29, 32:35, 37:39, 44:46)) %>%
+  add_indent(c(8:14,18:23,25:28, 30:32, 35:38, 40:42, 47:49)) %>%
   add_footnote(c(
-    "Table includes participants in primary analysis (those with complete observations for: APOE status, gender, race, Census Tract income, education and birth cohort)",
+    "Primary analysis column is for participants with complete observations for: APOE status, gender, race, Census Tract income, education and birth cohort",
+    "Birth cohort is summarized in fewer categories than how the analysis is performed (additional 5 yr categories)",
     "Baseline cognition is based on CASI scores that have been adjusted for accuracy using Item Response Theory (IRT). Higher numbers indicate greater cognitive function."
     ))
 
@@ -1157,19 +1156,6 @@ dem.w %>%
 
 ## Exposure Distribution
 
-NO2 exposure over time
-
-```{r}
-dem.w %>%
-  drop_na(m2_vars) %>%
-  ggplot(aes(x=exposure_year, y = no2_1yr, group=exposure_year)) +
-  geom_boxplot(alpha=0.05) +
-    labs(x = "Year",
-         y = "NO2 Exposure (ppb)",
-         col = "Birth Cohort",
-         title = "Annual NO2 exposure over time for person-years in the primary analysis"
-           ) 
-```
 
 ```{r}
 # NO2 
@@ -1246,6 +1232,53 @@ dem.w %>%
          title = "10 yr NO2 exposure by participant age for person-years in the primary analysis"
            ) 
 ```
+
+-same as above but with spaghetti plot
+
+```{r}
+dem.w %>%
+  drop_na(m2_vars) %>%
+   group_by(birth_cohort) %>%
+   #relabel birth cohort
+  mutate(birth_cohort2 = paste0(min(year(birthdt)), "-", max(year(birthdt)))) %>%
+  ggplot(aes(x=age_start_exposure, y = no2_10yr, )) +
+  #geom_point(alpha=0.05, aes(col = birth_cohort2)) +
+  geom_line(aes(col = birth_cohort2,
+                  group=study_id
+                  ), 
+              alpha=0.1
+              ) + 
+  #make alpha darker in legend 
+  guides(colour = guide_legend(override.aes = list(alpha = 1))) +
+    labs(x = "Age (years)",
+         y = "10 yr NO2 Exposure (ppb)",
+         col = "Birth Cohort",
+         title = "10 yr NO2 exposure by participant age for person-years in the primary analysis"
+           ) 
+```
+
+-boxplots of NO2 vs year, colored by age
+
+```{r}
+age_group <- 10
+
+dem.w %>%
+  drop_na(m2_vars) %>%
+  mutate(
+    age2 = factor(floor(age_start_exposure/age_group)*age_group)
+  ) %>%
+  
+  ggplot(aes(x=cal_t, y=no2_10yr, #col=age2
+             )) + 
+  geom_boxplot() + 
+  labs(title = "NO2 exposure for a given year ",
+       x = "Year",
+       y="10 yr NO2 Exposure (ppb)",
+       col = "Age"
+       )
+  
+```
+
 
 Distribution of geometric mean road proximity.
 
@@ -1480,7 +1513,8 @@ dem.w %>% select(
     race_white,
     income_cat,
     degree,
-    birth_cohort,
+    birth_cohort_5yr,
+    cal_t,
     #m3
     smoke,
     exercise_reg,
@@ -1505,7 +1539,7 @@ dem.w %>% select(
 
 Dementia
 
-```{r, fig.height=8}
+```{r}
 # note, functions use cluster = study_id in order for coxph() to calculate robust SEs
 
 dem_10yr <- dem.w %>%
@@ -1605,7 +1639,7 @@ pull()
 
 AD 
 
-```{r, fig.height=8}
+```{r}
 ad_10yr <- models.fn(mydata = dem.w,
                 models = paste0("m", c(1, 2, "3a", "3b", "4a", #"4b", 
                                        5, 6)),  
@@ -1718,7 +1752,7 @@ ad_10yr_act <- dem.w2 %>%
 
 ad_10yr_act <- ad_10yr_act$hrs %>%
   mutate(Model = "2",
-         Description = "Onset age")
+         Description = "Onset Age")
 
 ```
 
@@ -1790,7 +1824,7 @@ dem_highest_qual <- dem.w %>%
 
 dem_highest_qual_hrs <- dem_highest_qual$hrs %>%
   mutate(Model = "2",
-         Description = "Highest quality address hx") 
+         Description = "Highest Quality Address Hx") 
 
 ```
 
@@ -1811,7 +1845,7 @@ ad_highest_qual <- dem.w %>%
 # ad_one_location$raw_model_output
 ad_highest_qual_hrs <- ad_highest_qual$hrs %>%
   mutate(Model = "2",
-         Description = "Highest quality address hx") 
+         Description = "Highest Quality Address Hx") 
 
 ```
 
@@ -1840,7 +1874,8 @@ dem_high_quality <- dem.w %>%
 
 dem_high_quality_hrs <- dem_high_quality$hrs %>%
   mutate(Model = "2",
-         Description = "High quality address hx") 
+         Description = "High Quality Address Hx") 
+
 
 ```
 
@@ -1861,7 +1896,7 @@ ad_high_quality <- dem.w %>%
 # ad_one_location$raw_model_output
 ad_high_quality_hrs <- ad_high_quality$hrs %>%
   mutate(Model = "2",
-         Description = "High quality address hx") 
+         Description = "High Quality Address Hx") 
 
 ```
 
@@ -1893,7 +1928,7 @@ dem_never_movers <- dem.w %>%
 
 dem_never_movers_hrs <- dem_never_movers$hrs %>%
   mutate(Model = "2",
-         Description = "Never movers") 
+         Description = "Never Movers") 
 
 ```
 
@@ -1914,7 +1949,7 @@ ad_never_movers <- dem.w %>%
 # ad_one_location$raw_model_output
 ad_never_movers_hrs <- ad_never_movers$hrs %>%
   mutate(Model = "2",
-         Description = "Never movers") 
+         Description = "Never Movers") 
 
 ```
 
@@ -1939,7 +1974,7 @@ dem_age_65_hrs <- dem_age_65$hrs %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Fixed exposure at age 65") 
+    Description = "Fixed Exposure at Age 65") 
 
 ```
 
@@ -1959,7 +1994,7 @@ ad_age_65_hrs <- ad_age_65$hrs %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Fixed exposure at age 65") 
+    Description = "Fixed Exposure at Age 65") 
 
 ```
 
@@ -1981,7 +2016,7 @@ dem_age_entry_hrs <- dem_age_entry$hrs %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Fixed exposure at entry") 
+    Description = "Fixed Exposure at Entry") 
 
 ```
 
@@ -2002,7 +2037,7 @@ ad_age_entry_hrs <- ad_age_entry$hrs %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Fixed exposure at entry") 
+    Description = "Fixed Exposure at Entry") 
 
 ```
 
@@ -2053,7 +2088,7 @@ mydata <- dem.w %>%
   mutate_at(
     c("income",
       "edu",
-      "birth_cohort",
+      "birth_cohort", "birth_cohort_5yr",
       "cohort",
       "smoke",
       "bmi"), 
@@ -2159,19 +2194,19 @@ lines(survfit(s.dem~1, subset = dem.w$exposure_year[dem.w$exposure_year %in% c(2
 #        )
 ```
 
-### Year-specific categories (calendar year) 
+### Birth cohort (5 yrs)
 
 to address the AP trends and the fact that the AP changes more coarsely on a calendar year basis
  
 
 ```{r}
- # 5 yr adjustment (similar to birth cohort)
+ # 5 yr birth cohort (vs cal time)
 round_year <- 5
 
 dem_cal_time_hrs1 <- mydata %>%
-  mutate(year_cohort = factor(round(exposure_year/round_year)*round_year),) %>%
+  #mutate(year_cohort = factor(round(exposure_year/round_year)*round_year),) %>%
   coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  
-          year_cohort, 
+          birth_cohort_5yr, #year_cohort, 
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2180,7 +2215,7 @@ dem_cal_time_hrs1 <- mydata %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
+    Description = paste0(round_year, " Yr Birth Cohort (vs 2 Yr Cal Time)"))
 
 
 # 2 yr adjustment
@@ -2189,12 +2224,13 @@ round_year <- 2
 dem_cal_time_hrs2 <-
   mydata %>%
   mutate(
+    birth_cohort_2yr = factor(floor(year(birthdt)/round_year)*round_year)
     # using floor instead of round() to match Rachel's 2 yr categories, which start in 1994 (e.g., 1994-1995). rachel binned 2016-2018
-    exposure_year = ifelse(exposure_year == 2018, 2017, exposure_year),
-    year_cohort = factor(floor(exposure_year/round_year)*round_year),
+    # exposure_year = ifelse(exposure_year == 2018, 2017, exposure_year),
+    # year_cohort = factor(floor(exposure_year/round_year)*round_year),
   ) %>%
   coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu +  
-          year_cohort, 
+          birth_cohort_2yr,#year_cohort, 
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2203,7 +2239,7 @@ dem_cal_time_hrs2 <-
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
+    Description = paste0(round_year, " Yr Birth Cohort (vs 2 Yr Cal Time)"))
 
 ## combine both year bins
 dem_cal_time_hrs <- rbind(
@@ -2223,7 +2259,7 @@ ad_cal_time_hrs1 <- mydata %>%
   mutate(year_cohort = factor(round(exposure_year/round_year)*round_year)) %>%
                 #pm25
   coxph(s.ad ~ no2 + strata(apoe) + male + race_white + income + edu +  
-        year_cohort, 
+        birth_cohort_5yr, #year_cohort,  
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2232,22 +2268,17 @@ ad_cal_time_hrs1 <- mydata %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
+    Description = paste0(round_year, " Yr Birth Cohort (vs 2 Yr Cal Time)"))
 
 
 # 2 yr calendar time
 round_year <- 2
 
 ad_cal_time_hrs2 <- mydata %>%
-  mutate(
-    # using floor instead of round() to match Rachel's 2 yr categories, which start in 1994 (e.g., 1994-1995)
-    # rachel binned 2016-2018
-    exposure_year = ifelse(exposure_year == 2018, 2017, exposure_year),
-    year_cohort = factor(floor(exposure_year/round_year)*round_year),
-  ) %>%
+  mutate(birth_cohort_2yr = factor(floor(year(birthdt)/round_year)*round_year)) %>%
                 #pm25
   coxph(s.ad ~ no2 + strata(apoe) + male + race_white + income + edu +  
-        year_cohort, 
+        birth_cohort_2yr, #year_cohort, 
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2256,7 +2287,7 @@ ad_cal_time_hrs2 <- mydata %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = paste0(round_year, " yr Calendar Time Instead of Birth Cohort"))
+    Description = paste0(round_year, " Yr Birth Cohort (vs 2 Yr Cal Time)"))
 
 ad_cal_time_hrs <- rbind(
   ad_cal_time_hrs1,
@@ -2288,7 +2319,7 @@ dem_spline_cal_time_hrs <- mydata %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Spline Calendar Year Instead of Birth Cohort") 
+    Description = "Spline 1 Yr Cal Time (vs Linear 2 Yr Cal Time)") 
 
 ```
 
@@ -2306,11 +2337,11 @@ ad_spline_cal_time_hrs <- mydata %>%
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Spline Calendar Year Instead of Birth Cohort") 
+    Description = "Spline 1 Yr Cal Time (vs Linear 2 Yr Cal Time)") 
 
 ```
 
-## Calendar time as time axis, adjusted for age?
+## Calendar time as time axis, adjusted for birth cohort (2 yrs)
 
 Dementia
 
@@ -2319,16 +2350,10 @@ round_year <- 5
 
 dem_cal_time_axis_hrs <-
   mydata %>%
-  mutate(
-    # adjust for birth cohort  
-    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year")))),
-    birth_cohort_5yr = factor(birth_cohort_5yr),
-    #year_cohort = factor(round(exposure_year/round_year)*round_year)
-    
-  ) %>%
-                
+    mutate(birth_cohort_2yr = factor(floor(year(birthdt)/round_year)*round_year)) %>%
+
   coxph(s.dem_calendar ~ no2 + strata(apoe) + male + race_white + income + edu +  
-        birth_cohort_5yr #what primary model is using
+        birth_cohort_2yr #birth_cohort_5yr #what primary model is using
           #year_cohort
         , 
         data=., 
@@ -2339,7 +2364,7 @@ dem_cal_time_axis_hrs <-
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Calendar Time Axis")  #adjusted for [5 yr] Birth Cohort 
+    Description = "Cal Time Axis w/ 2 Yr Birth Cohort Adj")  #adjusted for [5 yr] Birth Cohort 
 
 
 #dem_cal_time_axis_hrs
@@ -2350,16 +2375,9 @@ AD
 ```{r}
 ad_cal_time_axis_hrs <-
   mydata %>%
-  mutate(
-    # adjust for birth cohort  
-    #birth_cohort = factor(year(round_date(birthdt, unit = paste(round_year, "year")))),
-    birth_cohort_5yr = factor(birth_cohort_5yr),
-    #year_cohort = factor(round(exposure_year/round_year)*round_year)
-    
-  ) %>%
-                
+      mutate(birth_cohort_2yr = factor(floor(year(birthdt)/round_year)*round_year)) %>%
   coxph(s.ad_calendar ~ no2 + strata(apoe) + male + race_white + income + edu +  
-        birth_cohort_5yr #what primary model is using
+        birth_cohort_2yr #birth_cohort_5yr #what primary model is using
           #year_cohort
         , 
         data=., 
@@ -2370,7 +2388,7 @@ ad_cal_time_axis_hrs <-
   mutate(
     Exposure = "10yr",
     Model = "2",
-    Description = "Calendar Time Axis") 
+    Description = "Cal Time Axis w/ 2 Yr Birth Cohort Adj")  #adjusted for [5 yr] Birth Cohort 
 
 
 #ad_cal_time_axis_hrs
@@ -2410,7 +2428,7 @@ Dementia
 
 dem_near_road_cat_proximity_hrs <- mydata %>%
   coxph(s.dem ~  near_rd_cat +  
-          strata(apoe) + male + race_white + income + edu + birth_cohort,
+          strata(apoe) + male + race_white + income + edu + cal_t, #birth_cohort,
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2421,7 +2439,7 @@ dem_near_road_cat_proximity_hrs1 <- dem_near_road_cat_proximity_hrs %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("major road proximity: near (vs far)")
+      Description = paste0("Major Road Proximity: Near (vs Far)")
     )
 
 dem_near_road_cat_proximity_hrs2 <- dem_near_road_cat_proximity_hrs %>%
@@ -2429,7 +2447,7 @@ dem_near_road_cat_proximity_hrs2 <- dem_near_road_cat_proximity_hrs %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("major road proximity: midway (vs far)")
+      Description = paste0("Major Road Proximity: Midway (vs Far)")
     )
 
 dem_near_road_cat_proximity_hrs <- rbind(
@@ -2445,7 +2463,7 @@ AD
 
 ad_near_road_cat_proximity_hrs <- mydata %>%
   coxph(s.ad ~  near_rd_cat + 
-          strata(apoe) + male + race_white + income + edu + birth_cohort,
+          strata(apoe) + male + race_white + income + edu + cal_t, #birth_cohort,
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2456,14 +2474,14 @@ ad_near_road_cat_proximity_hrs1 <- ad_near_road_cat_proximity_hrs %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("major road proximity: near (vs far)")
+      Description = paste0("Major Road Proximity: Near (vs Far)")
     )
 ad_near_road_cat_proximity_hrs2 <- ad_near_road_cat_proximity_hrs %>%
     hr.output.fn(., no2.coef = "near_rd_catMid (E)") %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("major road proximity: midway (vs far)")
+      Description = paste0("Major Road Proximity: Midway (vs Far)")
     )
 
 ad_near_road_cat_proximity_hrs <- rbind(
@@ -2523,10 +2541,10 @@ Dementia
 
 dem_time_near_road <- mydata %>%
   #drop_na(no2) %>%
-  #convert from a 10 yr proportion to 1 yr estimates
-  mutate(near_rd_10yr = near_rd_10yr*10) %>%
+  # don't do. #convert from a 10 yr proportion to 1 yr estimates
+  #mutate(near_rd_10yr = near_rd_10yr*10) %>%
   coxph(s.dem ~  near_rd_10yr + 
-          strata(apoe) + male + race_white + income + edu + birth_cohort,
+          strata(apoe) + male + race_white + income + edu + cal_t, #birth_cohort,
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2535,7 +2553,7 @@ dem_time_near_road <- mydata %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("Time near road")
+      Description = paste0("Time Near Road (10 vs 0 yr)")
     )
  
 dem_time_near_road
@@ -2546,10 +2564,10 @@ AD
 
 ```{r}
 ad_time_near_road <- mydata %>%
-  #convert from a 10 yr proportion to 1 yr estimates
-  mutate(near_rd_10yr = near_rd_10yr*10) %>%
+  # don't do #convert from a 10 yr proportion to 1 yr estimates
+  #mutate(near_rd_10yr = near_rd_10yr*10) %>%
   coxph(s.ad ~  near_rd_10yr + 
-          strata(apoe) + male + race_white + income + edu + birth_cohort,
+          strata(apoe) + male + race_white + income + edu + cal_t, #birth_cohort,
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2558,7 +2576,7 @@ ad_time_near_road <- mydata %>%
     mutate(
       Exposure = "10yr",
       Model = "2",
-      Description = paste0("Time near road")
+      Description = paste0("Time Near Road (10 vs 0 yr)")
     )
 ```
 
@@ -2566,10 +2584,9 @@ ad_time_near_road <- mydata %>%
 
 ## Stratify by all confounders
 
-Plots checking to see if the proportional hazards assumptions appear to be true.
+Plots checking to see if the proportional hazards assumptions appear to be true. **Crossing curves indicate non-proportinality**
 
 **Note**
--these do not include CIs
 -these do not adjust for other covariates in our models  
 
 -gender 
@@ -2589,6 +2606,45 @@ legend("topleft",
 
 ```
 
+- education
+
+```{r, eval=F}
+#plot is grouped cruder than in the models
+plot(survfit(s.dem~1, subset = dem.w$degree <=1), 
+     col=1,  
+     cumhaz = T, conf.int = F,   
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Degree (smaller numbers are less edu)",
+     xlim=c(65,110))
+lines(survfit(s.dem~1, subset = dem.w$degree %in% c(3:4)), col=3, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$degree %in% c(5:6)), col=5, cumhaz = T, conf.int = F)
+legend("topleft", 
+       fill = c(0,3,5), 
+       legend = c("0 or 1","3 or 4","5 or 6"))
+
+```
+
+```{r}
+plot(survfit(s.dem~1, subset = dem.w$degree ==0), 
+     col=7,  
+     cumhaz = T, conf.int = F,   
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Degree (smaller numbers are less edu)",
+     xlim=c(65,110))
+lines(survfit(s.dem~1, subset = dem.w$degree ==1), col=1, cumhaz = T, conf.int = F)
+#lines(survfit(s.dem~1, subset = dem.w$degree ==2), col=2, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$degree ==3), col=3, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$degree ==4), col=4, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$degree ==5), col=5, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$degree ==6), col=6, cumhaz = T, conf.int = F)
+legend("topleft", 
+       fill = c(7,1, 3:6), 
+       legend = c("Less HS", "HS or GED", "Bachelor's", "Master's", "Doctoral", "Other")
+       )
+```
+
 -race
 
 ```{r}
@@ -2606,6 +2662,8 @@ legend("topleft",
 
 ```
 
+-income 
+
 ```{r}
 plot(survfit(s.dem~1, subset = dem.w$income_cat ==1), 
      col=1,  
@@ -2619,26 +2677,102 @@ lines(survfit(s.dem~1, subset = dem.w$income_cat ==3), col=3, cumhaz = T, conf.i
 lines(survfit(s.dem~1, subset = dem.w$income_cat ==4), col=4, cumhaz = T, conf.int = F)
 legend("topleft", 
        fill = c(1:4), 
-       legend = c(1:4))
+       legend = c("[$0 - $35k]", "($35k - 50k]", "($50k - $75k]", "> $75k") #c(1:4)
+       )
 
 ```
 
-- education
+-birth cohort
 
 ```{r}
-plot(survfit(s.dem~1, subset = dem.w$degree <=1), 
+plot(survfit(s.dem~1, subset = dem.w$birth_cohort  ==1895), 
      col=1,  
      cumhaz = T, conf.int = F,   
      ylab = "Cumulative Hazard",
      xlab = "Age",
-     main = "Cumulative Hazard of Dementia by Degree (smaller numbers are less edu)",
+     main = "Cumulative Hazard of Dementia by Birth Cohort",
      xlim=c(65,110))
-lines(survfit(s.dem~1, subset = dem.w$degree %in% c(3:4)), col=3, cumhaz = T, conf.int = F)
-lines(survfit(s.dem~1, subset = dem.w$degree %in% c(5:6)), col=5, cumhaz = T, conf.int = F)
-legend("topleft", 
-       fill = c(0,3,5), 
-       legend = c("0 or 1","3 or 4","5 or 6"))
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort  ==1910), col=2, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort  ==1915), col=3, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort  ==1920), col=4, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort  ==1925), col=5, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort  ==1930), col=6, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$birth_cohort  ==1935), col=7, cumhaz = T, conf.int = F)
 
+legend("topleft", 
+       fill = c(1:7), 
+       legend = c("1895", "1910", "1915", "1920", "1925", "1930", "1935")
+       )
+
+```
+
+-calendar time
+
+```{r}
+plot(survfit(s.dem~1, subset = dem.w$cal_t  %in%c(1994, 1996)), 
+     col=1,  
+     cumhaz = T, conf.int = F,   
+     ylab = "Cumulative Hazard",
+     xlab = "Age",
+     main = "Cumulative Hazard of Dementia by Calendar Year",
+     xlim=c(65,110))
+lines(survfit(s.dem~1, subset = dem.w$cal_t  %in%c(1998, 2000)), col=2, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$cal_t  %in%c(2002, 2004)), col=3, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$cal_t  %in%c(2006, 2008)   ), col=4, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$cal_t    %in%c(2010, 2012)), col=5, cumhaz = T, conf.int = F)
+lines(survfit(s.dem~1, subset = dem.w$cal_t    %in%c(2014, 2016)), col=6, cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$cal_t  ==2006), col=7, cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$cal_t  ==2008), col=8, cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$cal_t  ==2010), col=9, cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$cal_t  ==2012), col=10, cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$cal_t  ==2014), col=11, cumhaz = T, conf.int = F)
+# lines(survfit(s.dem~1, subset = dem.w$cal_t  ==2016), col=12, cumhaz = T, conf.int = F)
+
+legend("topleft", 
+       fill = c(1:6), 
+       legend = c("1994", "1998", "2002", "2006", "2010", "2014")
+       )
+
+```
+
+```{r}
+#count in each calendar year bin
+dem.w %>%
+  ggplot(aes(x=cal_t)) + 
+  geom_bar() + 
+  
+  labs(title = "Person-years per calendar year bin",
+       x = "Year",
+       y = "person-years"
+       )
+
+```
+ 
+* there are few individuals and person years > 80 yrs and especially > 90 yrs of age in the 1994-1997 bin? You can tell by the cruder steps when compared to the other strata
+
+```{r}
+dem.w %>%
+  mutate(
+    between_80_90yr = ifelse(age_start_exposure >= 80 & age_start_exposure < 90, TRUE, FALSE ),
+    above_90yr = ifelse(age_start_exposure >= 90, TRUE, FALSE ),
+    cal_t = ifelse(cal_t %in% c(1994, 1996), 1994,
+                   ifelse(cal_t %in% c(1998, 2000), 1998,
+                          ifelse(cal_t %in% c(2002, 2004), 2002,
+                                 ifelse(cal_t %in% c(2006, 2008), 2006,
+                                        ifelse(cal_t %in% c(2010, 2012), 2010,
+                                               2014
+                   )))))
+    ) %>%
+  group_by(
+    between_80_90yr, above_90yr, cal_t
+  ) %>%
+  summarize(
+    n = n(),
+    prop = round(n/nrow(.), 2)
+  ) %>%
+  kable(caption = "Person-years in each 4-yr calendar bin, stratified by whether individuals are less than or greater than 80 yrs of age") %>%
+  kable_styling()
+  
 ```
 
 
@@ -2646,7 +2780,7 @@ Dementia
 
 ```{r}
 dem_stratification_hrs <- mydata %>%
-  coxph(s.dem ~ no2 + strata(apoe) + strata(male) + strata(race_white) + strata(income) + strata(edu) + strata(birth_cohort), 
+  coxph(s.dem ~ no2 + strata(apoe) + strata(male) + strata(race_white) + strata(income) + strata(edu) + strata(cal_t), #strata(birth_cohort), 
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2663,7 +2797,7 @@ AD
 
 ```{r}
 ad_stratification_hrs <- mydata %>%
-  coxph(s.ad ~ no2 + strata(apoe) + strata(male) + strata(race_white) + strata(income) + strata(edu) + strata(birth_cohort), 
+  coxph(s.ad ~ no2 + strata(apoe) + strata(male) + strata(race_white) + strata(income) + strata(edu) + strata(cal_t), #strata(birth_cohort), 
         data=., 
         cluster = study_id,
         weights = model_wt) %>% 
@@ -2675,6 +2809,553 @@ ad_stratification_hrs <- mydata %>%
     Description = "(M6) Full Confounder Stratification")
 ```
 
+## Competing Events
+
+See Waller 2020 review article for additional details.
+
+### Descriptives
+
+Number and proportion of deaths before dementia (censored due to death)
+
+* everybody has a status: alive, withdrew or died   
+* if status = dead, then deathdt = status_date   
+* if status = withdrew, discontinue_reason is also available (otherwise not available)   
+  - some of these also have deathdt, but not all   
+
+Dates should be fairly accurate. Roy's email regarding this:
+* "I think ACT’s death dates are pretty good. Every month, Pete runs a SAS program that looks for new death dates in [our research data warehouse (RDW)], and anything new that the ACT staff don’t already know about, it gets added to the ACT database. (I am over-simplifying the part about Pete’s program and the RDW; check with Pete if you want to know exactly how he pulls the death dates.) Besides the RDW, ACT staff get info about death from other places. Sometimes the family member will call and tell us about a new death, or we find out when we call to schedule a follow-up visit. And if someone has consented to brain autopsy, we get a call when the brain arrives at the hospital. Also, ACT staff sometimes finds deaths of participants in the obituary section of local newspapers."
+
+```{r}
+# dem0.0
+# deathdt
+# discontinue_reason 
+  ##"" "Refused" "Moved Out of Area" "Other" "Terminal Illness" "Unable to Locate" "Disc Referral" "Disc Annual"   
+
+# status, status_date          
+  # "died"     "withdrew" "alive"   
+
+
+# using raw dataset 
+competing <- dem0.0 %>%
+  select(study_id, birthdt,
+         intakedt, last_visit,
+         deathdt, discontinue_reason,
+         status, status_date
+         ) %>%
+  unique()
+
+```
+
+ 
+* Roy's email regarding different discontinuation reasons: "Discontinuation reason 7 is simply saying that a participant discontinued from ACT while he is in the “referral” track. “Referral” is a transitional state between the Biennial track (normal cognition) and the Annual track (demented). And reason 8 is used when someone discontinues from ACT while she is in the Annual track. These reasons were selected probably because the real reason could not be obtained; thus, all we could say was that they left the study during those periods. There may be more info in the paper charts if Magali needs to know more or wants to dig deeper. There aren’t very many cases of these."
+
+```{r}
+# status of individuals
+competing %>%
+  group_by(status, discontinue_reason) %>%
+  summarise(
+    N_people = n()
+  )
+  
+```
+
+check that they had a last biennial visit before their death data, **using dem.w**
+
+* using 2 yr cut off to define death prior to dementia in the no dementia panel since:    
+  - this is "near" the last study visit and **the last visit is the last time we can be "sure" that individuals did not have dementia** (and thus could experience the competing risk). Anything later than that would require too strong of an assumption since participants were not followed long enough to assess whether they developed dementia.   
+    - we can imagine that these people were still being "followed" after their last visit up until their death since this study has interval censoring
+    - assigning death before dementia follow-up time at last study visit is similar to how non-cases are assigned follow-up time  
+
+  
+```{r}
+dem.w %>%
+  # person-level statistics
+  select(study_id, last_visit, deathdt, anydementia) %>% unique() %>%  
+  # only those that have died have a deathdt
+  filter(!is.na(deathdt)) %>%
+  mutate(died_after_censored = deathdt > last_visit,
+         anydementia = ifelse(anydementia==0, "No Dementia", "Dementia")
+         ) %>%  {
+  ggplot(data=., aes(x=last_visit, y=deathdt,
+             col = died_after_censored
+             )) + 
+  geom_point(alpha=0.3) + 
+  geom_abline(intercept = 0, slope = 1, col="1-1") +
+  geom_abline(intercept = 2*365, slope = 1, col="2 yr later") + 
+      
+      facet_wrap(~anydementia) +
+
+  labs(title = "Among those that have died, \nchecking that the last vist date occurred before the death date",
+       subtitle = paste0("N = ", nrow(.)),
+       x = "Last Visit Date",
+       y = "Death Date",
+       col = "Death Date After\nLast Visit",
+       caption = "red line is 2 yr after the last visit date"
+       )
+  }
+
+```
+
+* One person 'died' ~1 month before having a last visit. 
+  - roy's email regarding this: "Yes, we know about [subject w/deathdt < last_visit] and its date anomaly. The death date is correct. What happened was that this person was in the Referral track, but then died before the dementia evaluation was completed. According to the ACT tracking database, he did not actually have that “last visit” (probably too sick by then). But in the ACT research database, **because a dementia diagnosis was made posthumously (about 1 month after death), that diagnosis was keyed in with a Visit ID and date, and the date of the diagnosis was used as the visit date.** I believe this is going to get corrected in the next data freeze. But to be honest, I don’t how they’ll correct it. It’s perfectly OK to have a dementia diagnosis date later than death date. I think this is a scenario that the original database designer did not anticipate—how to key in a diagnosis without a visit."
+
+```{r}
+dem.w %>%
+  filter(last_visit > deathdt) %>%
+  select(study_id,  
+         intakedt, last_visit,
+         deathdt, anydementia, #censored_death 
+         ) %>%
+  unique() %>%
+  kable(caption = "One person 'died' before having a last visit (where dementia was diagnosed) ??") %>%
+  kable_styling()
+
+```
+
+
+### 1. Cause-specific Cox PH Model for death before dementia  
+
+purpose: To identify if AP is associated with death before dementia (if it's a competing risk). If we do see a relationship, AP could appear to be protectie of Dementia
+
+* outcome: death **before**/(?)without a dementia diagnosis
+* censoring: age at last study visit (both for dementia diagnosis or non-cases)
+  - dat of a dementia diagnosis occurs during last visit (for primary analysis), meaning that they developed it within the last ~2 years. Thus, any cases that also die within the *next* 2 yrs died after (not at the same time) as a dementia diagnosis   
+* predictors: same as primary model   
+### --> ?? or any predictors we think may be associated with death?
+
+
+define censored due to death if:    
+1. they were not diagnosed w/ dementia during their last FU visit   
+2. there is a death date on record (otherwise, we are assuming they are not still alive)   
+  * these individuals could have been diagnosed with dementia beforehand    
+3. the recorded death date was within 2 yrs of last biennial visit (i.e., we are assuming that this is why they didn't have another follow-up)       
+4. use age at last visit as the follow up time (slightly less than age at death) since
+  * we may not have accurate residence location after they leave the study
+      - this assumption may not be true when people approach death?       
+  * This is the time for which we have AP data   
+      - assumption may be for up to 2 yrs later     
+  - **??** death dates are not subject to interval censoring like dementia diagnoses and would thus be more accurate. This way, the event of interest is identified or censored for at the last study visit    
+
+* Otherwise, we have to assume constant AP and residence after leaving the study     
+* is this similar to the dementia cause-specific Cox PH model?    
+
+
+* note   
+- don't use "status" variable as outcome since it reflects a person's "status" after the end of the study (e.g., cases may have a 'died' status if they died after being diagnosed)   
+
+
+```{r}
+
+mort.w <- dem.w %>% 
+  # # need?  # add mortality variables: discontinue_reason, status, status_date
+  left_join(competing) %>%
+  
+  #select(study_id:deathdt, discontinue_reason:status_date, everything())
+ 
+  mutate(
+    # define censored due to death before dementia if...
+    censored_death = as.numeric(
+      # they were not diagnosed with dementia before leaving the study
+      (anydementia ==0) &
+        # a death date is on record (otherwise, we think they are still alive)
+        (!is.na(deathdt)) &
+        # they died within 2 yrs of last biennial visit (and couldn't attend a follow-up)
+        (deathdt <= last_visit + 365*2)
+      ),
+    # status for fine & gray model (dementia as primary outcome: 1, death as competing risk: 2, censored: 0)
+    dementia_fine_gray = ifelse(anydementia ==1, 1, 
+                       # if censored due to dying, recode as 2
+                       ifelse(censored_death == 1, 2, 0)
+                       )
+  ) %>%
+  
+  # generate time-varying death incidene (similar to dementia_now variable)
+  group_by(study_id) %>%
+                              # incidence doesn't happen until last visit, if at all
+  mutate(death_now = ifelse(test = (enrollment_yr == max(enrollment_yr)), 
+                       # can be 0 or 1
+                       yes = censored_death, 
+                       # always 0 before the end of their FU period
+                       no = 0), 
+         dementia_fine_gray_now = ifelse(test = (enrollment_yr == max(enrollment_yr)), 
+                       yes = dementia_fine_gray, 
+                       no = 0),
+         
+         ) %>%
+  
+  # for modeling 
+  ##want to use 5 yr bins instead of this one w/ larger categories (similar to primary analysis)
+  select(-birth_cohort) %>%
+  rename(
+    #m1 
+    no2 = no2_10yr,
+    birth_cohort = birth_cohort_5yr,
+    #m2
+    income = income_cat,
+    edu = degree,
+    #m6
+    pm25 = pm25_10yr
+    ) %>%
+  mutate_at(
+    c("income",
+      "edu",
+      "birth_cohort",
+      
+      "cohort",
+      "smoke",
+      "bmi"
+      ), 
+    as.factor) %>%
+  mutate(
+    #adjust AP units
+    no2 = as.double(no2/my.no2.units),
+    pm25 = as.double(pm25/my.pm25.units),
+  ) %>%
+  
+  select(study_id, intakedt, last_visit, deathdt, 
+         anydementia, censored_death, dementia_fine_gray,
+         dementia_now, death_now, dementia_fine_gray_now,
+         everything()
+         )  
+  
+
+```
+
+tables of change in status from dementia-specific Cox models 
+
+```{r}
+
+mort.w %>%
+  # create a person-level data
+  select(study_id, last_visit, anydementia, dementia_fine_gray, censored_death) %>%
+  unique() %>% 
+  group_by(anydementia, dementia_fine_gray, censored_death) %>%
+  summarize(
+    N = n(),
+    Proportion = round(N/nrow(.), 2)
+  ) %>%
+  kable(caption = "Person-level outcomes. N = people") %>%
+  kable_styling()
+  
+mort.w %>%
+  group_by(anydementia, dementia_fine_gray, censored_death) %>%
+  summarize(
+    N = n(),
+    Proportion = round(N/nrow(.), 2)
+  ) %>%
+  kable(caption = "Person-year level outcomes. N = person-years. ~ weighted version of previous table since longer enrollment periods contribute more to the numerator and denominator counts") %>%
+  kable_styling()
+
+mort.w %>%
+  group_by(dementia_now, dementia_fine_gray_now, death_now) %>%
+  summarize(
+    N = n(),
+    Proportion = round(N/nrow(.), 2)
+  ) %>%
+  kable(caption = "Total Person-years associated with no event, death and dementia incidnece. N = person-years") %>%
+  kable_styling()
+
+
+
+```
+
+#### Table 1 Alternative, stratified by outcome
+
+* showing those in primary analysis  
+
+* e.g., smokers are more likely to leave the risk set due to death before/without dementia
+
+* note, that there are some AD cases in no-dementia and censored columns. This is because dementia and AD diagnoses use different criteria (DSM-IV anydementia vs NINCDS possible/probably AD) 
+
+### --> fix py count?
+
+Dementia 
+
+```{r}
+#mort.w %>%
+
+t1_tot_merged <- t1_tot %>%
+  mutate(Total = paste(Total_a, Total_b)) %>%
+  select(-Total_a, -Total_b)
+
+t1_censored <- mort.w %>%
+  
+  # fn is expecting diff names
+  rename(
+    income_cat = income,
+    degree = edu,
+    no2_10yr = no2
+  ) %>%
+  
+  # ???? only keep individuals included in Model 2
+  drop_na(m2_all_vars) %>%
+  
+  #1st year of enrollment (baseline)
+  filter(enrollment_yr == 1) %>%  
+
+    group_by(factor(dementia_fine_gray, levels = c(1, 2, 0))) %>%
+
+  t1.fn() %>%  
+  rename(Dementia = V1,
+         Death = V2,
+         Censored = V3
+         ) #%>%
+  # #separate N & %s
+  # separate(col = V1, into = c("Total_a", "Total_b"), sep = " ", fill = "right")  %>%
+  #   mutate_all(~str_replace(., "0 \\(NaN%\\)", "NA"))   
+
+  
+  #column_to_rownames(var = "Variable") 
+  
+  
+## Replace NAs w/ ""
+#t1_tot$Total_b[is.na(t1_tot$Total_b)] <- ""
+  
+  
+  
+t1_tot_merged %>% left_join(t1_censored) %>% #View() 
+  #slice(-1) %>%
+  kable(caption = "Alternative Table 1. Cohort characteristics, stratified by outcome. Table includes everyone in primary analysis.", 
+        col.names = c("Variable", 
+                       "Total", "Dementia", "Death (without Dementia)", "Censored"
+          ), 
+        align = c("l", rep("r", 4))
+        ) %>%
+  add_indent(c(8:14,18:23,25:28, 30:32, 35:38, 40:42, 47:49)) %>%
+  add_footnote(c(
+    "Table includes participants in primary analysis (those with complete observations for: APOE status, gender, race, Census Tract income, education and birth cohort)",
+    "Baseline cognition is based on CASI scores that have been adjusted for accuracy using Item Response Theory (IRT). Higher numbers indicate greater cognitive function."
+    ))   
+  
+```
+
+### --> AD 
+
+```{r}
+
+```
+
+
+Cox models 
+
+```{r}
+# generate survival object 
+## 2 ppl are dropped b/c of minor error? their intakedt was a few days sooner than their last_visit. we'll assume these dates were the same such that these individuals were censored and had "no" follow-up time. Thus dropping them is fine. 
+
+s.death <- Surv(
+  time = mort.w$age_start_exposure, 
+  time2 = mort.w$age_end_exposure, 
+  event = mort.w$death_now)
+
+# see why 2 times age_start_exposure >= age_end_exposure 
+#mort.w %>% filter(age_start_exposure >= age_end_exposure) %>% View()
+
+```
+
+M2: no2 + strata(apoe) + male + race_white + income + birth_cohort
+
+* AP is not significantly associated with death before a dementia diagnosis
+
+```{r}
+# # death Cox PH
+death_hrs_m2 <- mort.w %>%
+  coxph(s.death ~  no2 +
+          strata(apoe) + male + race_white + income + edu + cal_t # birth_cohort #+ pm25
+          ,
+        data=.,
+        cluster = study_id,
+        weights = model_wt) %>%
+  summary()
+
+death_hrs_m2
+
+death_hrs_m2 <- death_hrs_m2 %>%
+    hr.output.fn(.) %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "2",
+      Description = paste0("(M2) Death Censored at Last Visit")
+    )
+
+```
+
+model with additional adjustment for smoking and exercise (pontential confounders of the AP-death relationship)
+
+m3a: m2 +  smoking & exercise 
+
+```{r}
+# m3a: m2 +  smoking & exercise 
+death_hrs_m3a <- mort.w %>%
+  coxph(s.death ~  no2 +
+          strata(apoe) + male + race_white + income + edu + cal_t + #birth_cohort +
+          smoke + exercise_reg
+          ,
+        data=.,
+        cluster = study_id,
+        weights = model_wt) %>%
+  summary()
+
+death_hrs_m3a
+
+death_hrs_m3a <- death_hrs_m3a %>%
+    hr.output.fn(.) %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "3a",
+      Description = paste0("(M3a) Death Censored at Last Visit")
+    )
+
+```
+
+M4 (extended and mediation 1): M3a + vascular health + heart disease + BMI
+
+* some covariates to be predictive of censoring due to death prior to dementia   
+* idea: we would like to have a risk set after people leave due to death prior to dementia to still be representative of the sample population (interval validity) and general population (external validity).  
+  - non-informative sensoring: censoring b/c of deaths prior to dementia should not be associated w/ dementia 
+  
+* This may not be the case if those that are sick are more likely to leave the study. For example, what we are left with is a population with fewer cardiovascuar health issues and fewer smokers. 
+
+* some of these significant findings are in line with Waller 2020 (Table 3)
+
+```{r}
+# M4 (extended and mediation 1): M3a + vascular health + heart disease + BMI
+death_hrs_m4 <- mort.w %>%
+  coxph(s.death ~  no2 +
+          strata(apoe) + male + race_white + income + edu + cal_t + #birth_cohort +
+          smoke + exercise_reg +
+          Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi,
+        data=.,
+        cluster = study_id,
+        weights = model_wt) %>%
+  summary()
+
+death_hrs_m4
+
+death_hrs_m4 <- death_hrs_m4 %>%
+    hr.output.fn(.) %>%
+    mutate(
+      Exposure = "10yr",
+      Model = "4",
+      Description = paste0("(M4) Death Censored at Last Visit")
+    )
+
+```
+
+* MP: censoring due to death before a dementia diagnosis is happening, but it is not significanlty associated with NO2 exposure. **Thus, death is not a competing event?**
+
+```{r}
+# combine death HR models
+death_hrs <- rbind(
+   death_hrs_m2,
+   death_hrs_m3a,
+   death_hrs_m4
+   )
+
+death_hrs %>%
+  kable(caption = "HRs for death without dementia for 10 yr avg NO2 exposure increase of 10 ppb") %>%
+  kable_styling()
+
+```
+
+
+### [Maybe - Sindana's suggestion] IPW cause-specific Cox PH modlel
+
+```{r}
+
+```
+
+
+### 2. Subdistributional - Fine and Gray Model
+
+* "The sub-distribution hazard ratio is interpreted as the relative change in the instantaneous rate of the occurrence of dementia in those without dementia **or** those who died without dementia during follow-up" - Waller 2020
+
+* in this model, those who experience the competing event (death) are retained in the risk set after the competing event, but their weight/influence is diminished over time. These people are "immortal".
+
+*	If there are a lot more deaths than dementia And there is a strong relationship btwn AP & the competing event, if we use Fine and Gray model, we will get an attenuated HR b/c deaths before dementia cases will remain in the risk set as never having had the event through the end of the study period (be "immortal")
+
+* In this model, you are looking at the direct (vs intermediate) effect of AP on dementia since you are analzying a "population" without the competing event  
+  - vs the real world where experience the competing event (people die before dementia)
+
+### --> does crr() work /w delayed entry?      
+### --> how to run crr() with TVCs? need th cov2 and tf arguments. receive error: "Error in solve.default(h, z[[2]]) : Lapack routine dgesv: system is exactly singular: U[24,24] = 0"     
+cov2 = mort.w$no2[use_rows],
+tf = function(t) cbind(t)
+
+?? alternatively, could use the riskRegression package. ? use the Beyersmann and Schumacher for time-varying covariates (FG model is more suited for time-independent analyses?)
+
+```{r, eval=F}
+library(cmprsk) # crr() fn for competing risks 
+ 
+# need to code categorical variables numerically (generate dummy variables)
+cov_matrix <- model.matrix(~no2 + apoe + male + race_white + income + edu + birth_cohort,
+                           mort.w)[,-1]
+
+# rows w/ complete covariates (since there is missingness). for comparability w/ cov_matrix, above
+use_rows <- mort.w %>%
+  mutate(use = !is.na(no2) & !is.na(apoe) & !is.na(male) & !is.na(race_white) & !is.na(income) & !is.na(edu) & !is.na(birth_cohort)) %>%
+  pull(use)
+
+# Scrucca 2010: "The main function to fit regression models for competing risks data is cmprsk::crr(). In the simplest form it requires a vector of follow-up times, a vector of status with a code for each failure type or censoring, and a matrix of fixed covariates. By default, the censoring code for status is set by the optional argument cencode=0, and the code that denotes the failure type of interest is set by the optional argument failcode=1. (In our example, transplant-related death, which is the competing event, is coded with 2.)
+
+m1 <- crr(mort.w$age_start_exposure[use_rows], mort.w$age_end_exposure[use_rows], 
+          
+          fstatus = mort.w$dementia_fine_gray_now[use_rows], 
+          # predictors
+          cov1 = cov_matrix, 
+          # default values. looking at dementia incidence as primary outcome (failcode 1)
+          failcode = 1, cencode = 0,
+          
+          #for TVCs, need to alsos use cov2 and tf arguments
+          ### --> ?? how to use this???
+          cov2 = mort.w$no2[use_rows], 
+          tf = function(t) t # no function #cbind(t)
+          )
+          
+           
+
+```
+
+
+### 3. Modified Fine and Gray Model w/ Propensity scores
+
+* purpose of this analysis: to address a weakness in the Fine and Gray Model, which assumes that none of the individuals who exeprienced the competing event (died) would have experienced the terminating event of interest (dementia) had they survived during the rest of the study period. 
+  - This is unlikely in an older population.
+
+* use propensity scores (logistic regression) to estimate the probability that those w/ the competing event Would have gotten dementia
+
+Approach:  
+1. fit a logistic regression model for dementia incidence *among people who did not experience the competing event* (those who were not censored due to death before dementia) using the covariate predictors from the primary model    
+2. use the model to predict propensity scores for those who experienced the competing event (the probability that, based on their characteristics, they would have developed dementia)   
+3. if a person's score is greater than the median predicted propensity score ___?for dementia cases__, a person is reclassified as having had the outcome of interest (dementia), otherwise they are left as censored   
+4. fit a Fine and Gray Model using this modified dataset 
+
+
+```{r}
+
+```
+
+
+### 4. Time to diagnosis models
+
+Approach: use a parametric survival time model (w/ time of diagnosis of dementia as the outcome). deaths w/ a predicted date of dementia before the end of the follow-up period were recoded as having a dementia diagnosis, w/ the date of diagnosis estimated from the model   
+
+1. fit a parametric survival time model (w/ time of diagnosis of dementia as the outcome) w/ a Weibull distribution, among women who did not die during the follow-up period   
+2. use model to predict the time of a dementia diagnosis among those that died before a dementia diagnosis   
+3. if the predicted time of dementia for an individual was between their death date and the end of the study period, reclassify them as having had dementia w/ the diagnosis date being predicted from the model. If the predicted date of dementia is after the end of the study period, no changes are made. 
+
+
+```{r}
+
+```
+
+
+
+### --> combine other Dem/AD models adjusting for death??
+
+```{r}
+
+```
+
 
 
 
@@ -2683,7 +3364,7 @@ ad_stratification_hrs <- mydata %>%
 
 ### Dementia
 
-```{r, fig.height=8}
+```{r}
 #combine HRs from all analyses 
 
 dem_all_hrs <- rbind(
@@ -2740,17 +3421,18 @@ dem_all_hrs <- rbind(
     grepl("Primary", Description) ~ "Primary",
     #!grepl("Primary", Description) ~ "Sensitivity",
     grepl("Reduced|PM2.5|Extended|Stratification", Description) ~ "Confounding & Mediation",
-    grepl("address", Description) ~ "Address Quality",
-    grepl("Calendar|Onset", Description) ~ "Time Variants",
+    grepl("Address", Description) ~ "Address Quality",
+    grepl("Calendar|Onset|Cal ", Description) ~ "Time Variants",
     #TRUE ~ "Other",
     
     #secondary
     grepl("Exposure", Description) ~ "Exposure Period",
-    grepl("road", Description) ~ "Major Road Exposure",
+    grepl("Road", Description) ~ "Major Road Exposure",
     grepl("Interaction", Description) ~ "APOE Interaction",
     TRUE ~ "Other"
     
     ),
+    #Description = str_to_title(Description),
     Type = factor(Type, levels = c("Primary",
                                    "Confounding & Mediation",
                                    "Time Variants",
@@ -2786,27 +3468,16 @@ dem_results_table <- dem_all_hrs %>%
 ```
 
 primary & sensitivity analyses
+### --> ? add ad_all_hrs ?
 
-```{r}
+```{r, fig.height=8}
  
 dem_all_hrs %>% 
-  filter(!grepl("Exposure|road|Interaction", Description)) %>%
+  
+  #rbind(ad_all_hrs) %>%
+  
+  filter(!grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
   mutate(
-    # Type =case_when(
-    # grepl("Primary", Description) ~ "Primary",
-    # #!grepl("Primary", Description) ~ "Sensitivity",
-    # grepl("Reduced|PM2.5|Extended|Stratification", Description) ~ "Confounding & Mediation",
-    # grepl("address", Description) ~ "Address Quality",
-    # grepl("Calendar|Onset Age", Description) ~ "Time Variants",
-    # TRUE ~ "Other"
-    # ),
-    # Type = factor(Type, levels = c("Primary",
-    #                                "Confounding & Mediation",
-    #                                "Time Variants",
-    #                                "Address Quality",
-    #                                "Other"
-    #                                )
-    #               ),
   Description = gsub("Primary", "Primary Analysis", Description) 
   ) %>%
   hr.plot(., outcome_var = "dementia",
@@ -2818,7 +3489,7 @@ dem_all_hrs %>%
              )
 
 dem_results_table %>%
-    filter(!grepl("Exposure|road|Interaction", Description)) %>%
+    filter(!grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
    mutate(
   #    Type =case_when(
   #   grepl("Primary", Description) ~ "Primary",
@@ -2838,11 +3509,11 @@ dem_results_table %>%
 
 secondary analyses
 
-```{r} 
+```{r, fig.height=8} 
  
 ## secondary analyses 
 dem_all_hrs %>% 
-  filter(grepl("Exposure|road|Interaction", Description)) %>%
+  filter(grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
   mutate(
     #Type =case_when(
     # grepl("Exposure", Description) ~ "Exposure Period",
@@ -2869,11 +3540,11 @@ dem_all_hrs %>%
              )
 
 dem_results_table %>%
-    filter(grepl("Exposure|road|Interaction", Description)) %>%
+    filter(grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
     mutate(Type =case_when(
-    grepl("Exposure", Description) ~ "Exposure Period",
-    grepl("road", Description) ~ "Major Road Exposure",
-    grepl("Interaction", Description) ~ "APOE Interaction"
+    grepl("Exposure", Description, ignore.case = T) ~ "Exposure Period",
+    grepl("Road", Description, ignore.case = T) ~ "Major Road Exposure",
+    grepl("Interaction", Description, ignore.case = T) ~ "APOE Interaction"
   ),
   Description = gsub("Interaction, | Exposure", "", Description) 
   ) %>%
@@ -2936,15 +3607,15 @@ ad_all_hrs <- rbind(
     Type =case_when(
     grepl("Primary", Description) ~ "Primary",
     #!grepl("Primary", Description) ~ "Sensitivity",
-    grepl("Reduced|PM2.5|Extended|Stratification", Description) ~ "Confounding & Mediation",
-    grepl("address", Description) ~ "Address Quality",
-    grepl("Calendar|Onset", Description) ~ "Time Variants",
+    grepl("Reduced|PM2.5|Extended|Stratification", Description, ignore.case = T) ~ "Confounding & Mediation",
+    grepl("Address", Description, ignore.case = T) ~ "Address Quality",
+    grepl("Calendar|Onset|Cal ", Description, ignore.case = T) ~ "Time Variants",
     #TRUE ~ "Other",
     
     #secondary
-    grepl("Exposure", Description) ~ "Exposure Period",
-    grepl("road", Description) ~ "Major Road Exposure",
-    grepl("Interaction", Description) ~ "APOE Interaction",
+    grepl("Exposure", Description, ignore.case = T) ~ "Exposure Period",
+    grepl("Road", Description, ignore.case = T) ~ "Major Road Exposure",
+    grepl("Interaction", Description, ignore.case = T) ~ "APOE Interaction",
     TRUE ~ "Other"
     
     ),
@@ -2984,11 +3655,11 @@ ad_results_table <- ad_all_hrs %>%
 
 primary & sensitivity analyses
 
-```{r}
+```{r, fig.height=8}
  
 # plot
 ad_all_hrs %>%  
-  filter(!grepl("Exposure|road|Interaction", Description)) %>%
+  filter(!grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
   mutate(
     # Type =case_when(
     # grepl("Primary", Description) ~ "Primary",
@@ -3017,7 +3688,7 @@ ad_all_hrs %>%
 
 #table
 ad_results_table %>%
-    filter(!grepl("Exposure|road|Interaction", Description)) %>%
+    filter(!grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
    mutate(
     #  Type =case_when(
     # grepl("Primary", Description) ~ "Primary",
@@ -3035,14 +3706,14 @@ ad_results_table %>%
 
 secondary analyses
 
-```{r}
+```{r, fig.height=8}
 # plot
 ad_all_hrs %>%
- filter(grepl("Exposure|road|Interaction", Description)) %>%
+ filter(grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
   mutate(Type =case_when(
-    grepl("Exposure", Description) ~ "Exposure Period",
-    grepl("road", Description) ~ "Major Road Exposure",
-    grepl("Interaction", Description) ~ "APOE Interaction"
+    grepl("Exposure", Description, ignore.case = T) ~ "Exposure Period",
+    grepl("Road", Description, ignore.case = T) ~ "Major Road Exposure",
+    grepl("Interaction", Description, ignore.case = T) ~ "APOE Interaction"
   ),
   Description = gsub("Interaction, | Exposure", "", Description),
   Exposure = factor(Exposure, 
@@ -3055,7 +3726,7 @@ ad_all_hrs %>%
                                )
                     )
   ) %>%
-  hr.plot(., outcome_var = "dementia", 
+  hr.plot(., outcome_var = "AD", 
           title_pollutant = "Secondary analyses for NO2 (10 ppb)\n") +
   facet_grid(vars(Type),  
              scales = "free_y", 
@@ -3065,13 +3736,13 @@ ad_all_hrs %>%
 
 #table
 ad_results_table %>%
-    filter(grepl("Exposure|road|Interaction", Description)) %>%
+    filter(grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
     mutate(Type =case_when(
-    grepl("Exposure", Description) ~ "Exposure Period",
-    grepl("road", Description) ~ "Major Road Exposure",
-    grepl("Interaction", Description) ~ "APOE Interaction"
+    grepl("Exposure", Description, ignore.case = T) ~ "Exposure Period",
+    grepl("Road", Description, ignore.case = T) ~ "Major Road Exposure",
+    grepl("Interaction", Description, ignore.case = T) ~ "APOE Interaction"
   ),
-  Description = gsub("Interaction, | Exposure", "", Description) 
+  Description = gsub("Interaction, | Exposure", "", Description, ignore.case = T) 
   ) %>%
   select(`Model Covariates`, Type, everything()) %>%
   kable(caption = "Secondary analyses: AD hazard ratios for a 10 ppb increase in NO2 exposure", 
@@ -3081,6 +3752,174 @@ ad_results_table %>%
 
  
 ```
+
+
+### Combine plots
+
+```{r}
+dem_all_hrs1 <- dem_all_hrs %>% mutate(Outcome = "All-Cause Dementia")
+ad_all_hrs1 <- ad_all_hrs %>% mutate(Outcome = "AD")
+all_hrs1 <- rbind(dem_all_hrs1, ad_all_hrs1)
+
+```
+
+primary & sensitivity 
+
+```{r, fig.height=8}
+
+
+all_hrs1 %>%
+  
+  filter(!grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
+  mutate(
+    
+    Outcome = factor(Outcome, levels = c("All-Cause Dementia", "AD")),
+    
+  Description = gsub("Primary", "Primary Analysis", Description) 
+  ) %>%
+  hr.plot(., outcome_var = "dementia & AD",
+          title_pollutant = "Primary & sensitivity analyses for NO2 (10 ppb)\n") +
+  facet_grid(Type~Outcome,  
+             scales = "free_y", 
+             space = "free_y", 
+             switch = "y"
+             )
+
+```
+
+secondary analyses
+
+```{r}
+ 
+all_hrs1 %>%
+ filter(grepl("Exposure|Road|Interaction", Description, ignore.case = T)) %>%
+  mutate(Outcome = factor(Outcome, levels = c("All-Cause Dementia", "AD")),
+         Type =case_when(
+    grepl("Exposure", Description, ignore.case = T) ~ "Exposure Period",
+    grepl("Road", Description, ignore.case = T) ~ "Major Road Exposure",
+    grepl("Interaction", Description, ignore.case = T) ~ "APOE Interaction"
+  ),
+  Description = gsub("Interaction, | Exposure", "", Description),
+  Exposure = factor(Exposure, 
+                    levels = c("10 yr",
+                               "1 yr",
+                               "5 yr",
+                               "20 yr",
+                               "10 yr 5 yr lag",
+                               "10 yr 10 yr lag"
+                               )
+                    )
+  ) %>%
+  hr.plot(., outcome_var = "dementia & AD", 
+          title_pollutant = "Secondary analyses for NO2 (10 ppb) and Major Road\n") +
+  facet_grid(Type~Outcome,  
+             scales = "free_y", 
+             space = "free_y", 
+             switch = "y"
+             )
+```
+
+
+## Competing Risks
+
+### Death before Dementia
+
+```{r}
+all_death_hrs <- death_hrs %>%
+  mutate(
+    model_description = paste0(Model, ". ", Description),
+    hr_ci = paste0(hr, " (", lower_limit, ", ", upper_limit, ")"),
+    Exposure = recode_factor(Exposure,
+                              #"1yr" = "1 yr",
+                              #"5yr" = "5 yr",
+                              "10yr" = "10 yr",
+                              #"20yr" = "20 yr",
+                              #"10yr10yrlag" = "10 yr 10 yr lag",
+                              #"10yr05yrlag" = "10 yr 5 yr lag"
+                              ),
+    Exposure = factor(Exposure,
+                      levels = c("10 yr" #,
+                                 # "1 yr",
+                                 # "5 yr",
+                                 # "20 yr",
+                                 # "10 yr 5 yr lag",
+                                 # "10 yr 10 yr lag"
+                                 )
+                      ),
+    #Description = factor(Description, levels = Description),
+    
+    ### --> Update once have more models?
+    Type = "",
+    # Type =case_when(
+    #   grepl("Primary", Description) ~ "Primary",
+    # 
+    #   TRUE ~ "Other"
+    # ),
+    # Type = factor(Type, levels = c(#"Primary",
+    #                                 
+    #                                
+    #                                "Other"
+    #                                )
+    #               )
+    
+    )  
+
+  
+  
+  
+```
+
+```{r}
+# table
+death_results_table <- all_death_hrs %>%
+  select(
+    Model, Description, Exposure,
+    hr_ci,
+    n, number_events,
+    Type
+    ) %>%
+  rename(
+    "Model Covariates" = Model,
+    "HR (95% CI)" = hr_ci,
+    "N" = n,
+    "No. events" = number_events,
+    ) 
+
+```
+
+```{r}
+all_death_hrs %>%
+  hr.plot(., outcome_var = "death before dementia",
+          title_pollutant = "Competing Risk Analyses for NO2 (10 ppb)\n") +
+  facet_grid(vars(Type),  
+             scales = "free_y", 
+             space = "free_y", 
+             switch = "y"
+             )
+
+death_results_table %>%
+    select(`Model Covariates`, Type, everything()) %>%
+  arrange(Type) %>%
+  kable(caption = "Competing risk analyses using cause-specific Cox proportional hazard models. Table shows hazard ratios for death before dementia for a 10 ppb increase in NO2 exposure", 
+        align = "l") %>%
+  kable_styling() 
+
+```
+
+
+
+
+
+
+
+
+### Death before AD
+
+```{r}
+
+```
+
+
 
 
 # Running models for PM2.5 as the primary exposure (Rachel's analysis)
@@ -3245,6 +4084,33 @@ dem_all_hrs_pm25 %>%
 dem_all_hrs_pm25 %>% hr.plot(., outcome_var = "dementia", title_pollutant = "PM2.5 (ug/m3)")
 
 ```
+
+
+
+# Competing Risks analysis
+
+Competing risks analysis: does high AP cause loss to FU, e.g. due to death (e.g., AP —> CVD —> death)?
+
+potential descriptive statistics   
+-? show cumulative incidence curves for prop of deaths among those w/ “high” vs “low” ??10 yr AP exposure
+-show survival curves for incidence of: dementia, death
+-run coxph() models for both dementia and death outcomes
+
+Chang 2012    
+-calc propensity (probability) scores: 
+logit(AD) ~ smk + edu + MI + diabetes….   
+-reassign those who were lost to FU b/c they died as “AD” if above ?median propensity score for those w/ AD, or keep “censored” if below  
+-run modified Fine-Gray competing risks regressions   
+
+
+```{r}
+
+```
+
+
+
+
+
 
 
 

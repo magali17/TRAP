@@ -182,8 +182,14 @@ validation_idx <- sample(c(TRUE, FALSE), replace = T,
 number of unique covariates used in PLS: `r length(cov_names_log)`
 
 ```{r}
+# stud grid
 grid_covars <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_preprocessed.rda"))  
-  
+
+# small grid  
+small_grid_covars <- readRDS(file = file.path("Data", "Aim 2", "Geocovariates", "cov_grid_small_preprocessed.rda"))  
+
+
+
 project_crs <- 4326
 
 # only keep points in study area & not on water
@@ -201,17 +207,37 @@ grid_covars_shp <- grid_covars %>%
   st_as_sf(., coords=c("longitude","latitude"), remove=F,
            crs=project_crs)
 
+small_grid_covars_shp <- small_grid_covars %>%
+  st_as_sf(., coords=c("longitude","latitude"), remove=F,
+           crs=project_crs)
+
+
 # intersection
 grid_covars_shp$in_study_area <- st_intersects(grid_covars_shp, study_area_shp, sparse = F) %>%
   apply(., 1, any)
+
+## should all be in study area
+small_grid_covars_shp$in_study_area <- st_intersects(small_grid_covars_shp, study_area_shp, sparse = F) %>%
+  apply(., 1, any)
+
 
 #points not in water
 grid_covars_shp$not_in_water <- !st_intersects(grid_covars_shp, water_shp, sparse = F) %>%
   apply(., 1, any)
 
+small_grid_covars_shp$not_in_water <- !st_intersects(small_grid_covars_shp, water_shp, sparse = F) %>%
+  apply(., 1, any)
+
 
 #convert back to df
 grid_covars <- grid_covars_shp %>%
+  st_drop_geometry() %>% 
+  #only need these points
+  filter(in_study_area == TRUE,
+         not_in_water == TRUE
+         )
+
+small_grid_covars <- small_grid_covars_shp %>%
   st_drop_geometry() %>% 
   #only need these points
   filter(in_study_area == TRUE,
@@ -245,6 +271,33 @@ map0 <- suppressMessages(get_stamenmap(bbox = bbox,
 
 ## usage example: 
 # map0 + geom_point()
+
+```
+
+```{r}
+# same for small grid
+
+# create background map for grid/mapping
+bbox_small <- st_bbox(small_grid_covars_shp)
+names(bbox_small) <- c("left", "bottom", "right", "top")
+
+# make a bit wider
+wider <- (max(small_grid_covars_shp$longitude) - min(small_grid_covars_shp$longitude))*0.3
+bbox_small[1] <- bbox_small[1] - wider
+#this side is wider for some reason
+bbox_small[3] <- bbox_small[3] + wider*.6
+
+
+# background map
+small_map0 <- suppressMessages(get_stamenmap(bbox = bbox_small, 
+                                      zoom = 15,
+                                      maptype = "terrain" 
+                                      )) %>%
+  # Make basic map image from the tiles
+  ggmap(ggmap = ., darken = c(0.5, "white")) + theme_void()
+
+# small_map0 
+
 
 ```
 
@@ -324,6 +377,8 @@ markers <-data.frame(x = c(-122.335,
                 )
                  
                 )
+
+#saveRDS(object = markers, file = file.path("Data", "GIS", "markers.rda"))
 
 ```
 
@@ -1950,6 +2005,51 @@ for (i in seq_along(analysis_names)) {
 
 ```
 
+```{r}
+#repeate above for small grid
+
+# empty columns to save predictions
+small_grid_covars[,uk_names] <- NA
+ 
+for (i in seq_along(analysis_names)) {
+  #i=1
+  # validation results
+  pls_components <- cv_results$PLS_Components[cv_results$Analysis==analysis_names[i]]
+  pls_variogram_dist <- cv_results$Variogram_Distance_Fraction[cv_results$Analysis==analysis_names[i]]
+  
+  if(!grepl("native_scale", analysis_names[i])) {
+    
+    df <-  uk_predictions(dt = annual,
+                     cov_loc_new = small_grid_covars,
+                      y_name = analysis_names[i],
+                      cov_names. = cov_names_log,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist)
+    
+    # save predictions in native scale
+    small_grid_covars[uk_names[i]] <- exp(df$dt$uk_pred)
+    }
+
+  #native scale analyses
+    if(grepl("native_scale", analysis_names[i])) {
+      
+      df <-  uk_predictions(dt = annual,
+                     cov_loc_new = small_grid_covars,
+                      y_name = analysis_names[i],
+                      cov_names. = cov_names_native,
+                      pls_comp = pls_components, 
+                      variogram_dist_fract = pls_variogram_dist)
+      
+      small_grid_covars[uk_names[i]] <- df$dt$uk_pred
+    }
+}
+
+
+
+```
+
+
+
 ```{r, results = "hide", eval=F}
 # predictions for KAYA's grid
 
@@ -2012,14 +2112,17 @@ We see higher predicted UFP concentrations between downtown and the airport as w
 #make long format for plotting
 
 grid_covars_l <- grid_covars %>%
-  # #drop points not in study area
-  # filter(in_study_area == TRUE,
-  #        not_in_water == TRUE
-  #        ) %>%
   select(native_id, latitude, longitude, contains(c("ufp", "bc"))) %>%
   gather("Analysis", "Prediction", contains(c("ufp", "bc"))) %>%
   label_analysis(var="Analysis", end_character = 3) 
    
+#small grid
+small_grid_covars_l <- small_grid_covars %>%
+  select(native_id, latitude, longitude, contains(c("ufp", "bc"))) %>%
+  gather("Analysis", "Prediction", contains(c("ufp", "bc"))) %>%
+  label_analysis(var="Analysis", end_character = 3) 
+
+
 ```
 
 Primary UFP & BC predictions  
@@ -2120,6 +2223,131 @@ gridExtra::grid.arrange(ufp_p,bc_p,
                         )
 
 ```
+
+
+### --> reduce small grid extent to update the scale & help w/ spatial contrast? 
+
+### --> add other markers?
+### --> change eval=F
+
+```{r, eval=F}
+pt_size <- 3
+a <- 1 #.8 #0.8
+
+# xlim = c(-122.335, -122.32)
+# ylim = c(47.515, 47.53)
+ 
+bc_p <- small_map0 +
+  geom_point(data = subset(small_grid_covars_l, 
+                           subset = grepl("BC", Pollutant) &
+                             grepl("Primary", Analysis) &
+                             longitude >=-122.335 & longitude <=-122.32 &
+                             latitude >= 47.515 & latitude <= 47.53
+                             
+                             ),
+             aes(x=longitude, y=latitude, col=Prediction),
+             alpha=a,
+             size=pt_size
+             ) + 
+  scale_color_gradient(name = "BC (ng/m3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  # add scale & N arrow to top left
+  geom_sf(data = small_grid_covars_shp, inherit.aes = FALSE,
+          #don't actually show dots
+          alpha=0
+          ) +
+    annotation_scale(data = small_grid_covars_shp, location = "tr") +
+    annotation_north_arrow(location = "tr",
+                           #point towards North Pole
+                           which_north = "true",
+                           pad_y = unit(0.5, "in"),
+                           style = north_arrow_fancy_orienteering
+                           ) +
+  
+  # #markers
+  # geom_point(data = markers, aes(x=x, y=y, shape = marker)) +
+  # scale_shape_manual(values=c(12, 1, 2)) +
+  # #make longer legend text appear at top
+  # guides(col = guide_colorbar(order = 2), 
+  #             shape = guide_legend(order = 1)
+  #        ) +
+  
+  #scale_x_continuous(n.breaks = 4) +
+  
+  theme_bw() +
+  theme(
+    legend.justification=c(0,1), #legend.justification=c(1,0), 
+    legend.position=c(0,1),  #legend.position=c(1,0), 
+    legend.background =  element_blank()
+    ) +
+  labs(title = "BC",
+       x = "Longitude",
+       y = "Latitude",
+       shape = ""
+       )  + 
+  coord_sf(
+    xlim = c(-122.335, -122.32),
+    ylim = c(47.515, 47.53) #, expand = FALSE
+    )
+
+ bc_p
+
+
+
+ 
+ ufp_p <- small_map0 +
+  geom_point(data = subset(small_grid_covars_l, 
+                           subset = grepl("UFP", Pollutant) &
+                             grepl("Primary", Analysis)
+                             ),
+             aes(x=longitude, y=latitude, col=Prediction),
+             alpha=a,
+             size=pt_size
+             ) + 
+  #make plot same dimensions as BC 
+  geom_sf(data = small_grid_covars_shp, inherit.aes = FALSE,
+          #don't actually show dots
+          alpha=0
+          ) + 
+  scale_color_gradient(name = "UFP (pt/cm3)", 
+                        low = "yellow", high = "red",
+                        ) +
+  
+  # #markers
+  # geom_point(data = markers, aes(x=x, y=y, shape = marker)) +
+  # scale_shape_manual(values=c(12, 1, 2)) +
+  # #make longer legend text appear at top
+  # guides(col = guide_colorbar(order = 2), 
+  #             shape = guide_legend(order = 1)
+  #        ) +
+  
+  #scale_x_continuous(n.breaks = 4) +
+  theme_bw() +
+  theme(
+    legend.justification=c(0,1), 
+    legend.position=c(0,1), 
+    legend.background =  element_blank()
+    ) +
+  labs(title = "UFP",
+       x = "Longitude",
+       y = "Latitude",
+       shape = ""
+       )
+
+#ufp_p
+ 
+gridExtra::grid.arrange(ufp_p,bc_p, 
+                        nrow=1,
+                        top = "Small grid predictions from primary models"
+                        )
+
+
+```
+
+
+
+
 
 
 UFP - primary & sensitivity 
@@ -2609,11 +2837,16 @@ annual %>%
 # 
 # ## on a grid
 # saveRDS(grid_covars[, c("site_id", "latitude", "longitude", uk_names)], file.path("Data", "Aim 2", "Predictions", "grid_uk_predictions.rda"))
+# saveRDS(small_grid_covars[, c("site_id", "latitude", "longitude", uk_names)], file.path("Data", "Aim 2", "Predictions", "small_grid_uk_predictions.rda"))
+
+
 # saveRDS(pred_differences_grid, file.path("Data", "Aim 2", "Predictions", "grid_uk_prediction_diffs.rda"))
 #
 # ### as CSV
 # write.csv(grid_covars[, c("site_id", "latitude", "longitude", uk_names)],
 #           file.path("Data", "Aim 2", "Predictions", "grid_uk_predictions.csv"))
+# write.csv(small_grid_covars[, c("site_id", "latitude", "longitude", uk_names)],
+#           file.path("Data", "Aim 2", "Predictions", "small_grid_uk_predictions.csv"))
 #
 #kaya
 # write.csv(kaya_grid[, c("site_id", "latitude", "longitude", uk_names, "in_monitoring_area", "in_study_area")],

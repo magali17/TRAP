@@ -95,6 +95,9 @@ summarize_variable <- function(dt, var, var_label,
 
 #function returns Table 1 summary statistics for a given dataset, with a column name describing group 
 
+library(qwraps2)
+# define the markup language we are working in.
+options(qwraps2_markup = "markdown")
 
 t1.fn <- function(data, 
                   #description variables
@@ -109,6 +112,9 @@ t1.fn <- function(data,
     dplyr::summarize(
       N = n(),
       N_perc = round(N/nrow(.)*100, round.var),
+      
+      pys_total = sum(fu_yrs), #qwraps2::n_perc(fu_yrs, digits = 0, show_denom = "never", na_rm = TRUE), #tot_py[1], 
+      
       follow_up_yrs_mean = round(mean(fu_yrs), round.var), 
       follow_up_yrs_sd = round(sd(fu_yrs), round.var),
       
@@ -126,6 +132,9 @@ t1.fn <- function(data,
       birth_cohort6_pct = round(birth_cohort6_n/N*100, round.var),
       birth_cohort7_n = sum(birth_cohort==1935, na.rm=T),
       birth_cohort7_pct = round(birth_cohort7_n/N*100, round.var),
+      
+      dementia_cases = n_perc(anydementia==1, digits = 0),
+      ad_cases = n_perc(ad_nincds==1, digits = 0),
 
       age_entry_median = round(median(age_intake), round.var),
       age_entry_iqr = round(IQR(age_intake), round.var),
@@ -206,13 +215,20 @@ t1.fn <- function(data,
       casi_irt_mean = round(mean(casi_irt, na.rm=T), 2), 
       casi_irt_sd = round(sd(casi_irt, na.rm=T), 2),
       
+      model_wt_mean_sd = qwraps2::mean_sd(model_wt, digits = 2, na_rm = T, denote_sd = "paren")
     ) 
   
   t1 <- t1 %>%
     mutate(
       "Participants (n, %)" = paste0(N, " (", N_perc, "%)" ),
+      "Person-years (n, %)" = pys_total,
+      
       "Entry age, years (median, IQR)" = paste0(age_entry_median, " (", age_entry_iqr, ")"),
       "Follow-up years (mean, SD)" = paste0(follow_up_yrs_mean, " (", follow_up_yrs_sd, ")"),
+      
+      # cases
+      "Dementia Cases (n, %)" = dementia_cases,
+      "Alzheimer's Disease Cases (n, %)" = ad_cases,
       
       # Demographics 
       "Birth Cohort (n, %)" = "",
@@ -223,6 +239,7 @@ t1.fn <- function(data,
       "1925-1929" =  paste0(birth_cohort5_n, " (", birth_cohort5_pct, "%)"), 
       "1930-1934" =  paste0(birth_cohort6_n, " (", birth_cohort6_pct, "%)"), 
       "1935 or later" =  paste0(birth_cohort7_n, " (", birth_cohort7_pct, "%)"), 
+      
       "Female (n, %)" = paste0(female_n, " (", female_pct, "%)"),
       "White Race (n, %)" = paste0(race_white_n, " (", race_white_pct, "%)"),
       "Education (n, %)" = "",
@@ -265,9 +282,13 @@ t1.fn <- function(data,
       "Expansion" =  paste0(act_cohort2_n, " (", act_cohort2_pct, "%)"),
       "Replacement" =  paste0(act_cohort3_n, " (", act_cohort3_pct, "%)"),
       
+      #IPW weights
+      "IPW Weight, (mean, SD)" = model_wt_mean_sd
+      
     ) %>%
     #get rid of repeat columns
-    select(-c(N, N_perc, follow_up_yrs_mean:casi_irt_sd))  
+    select(-c(N:model_wt_mean_sd #, N_perc, follow_up_yrs_mean:model_wt_mean_sd
+              ))  
   
   # transpose
   t1 <- t(t1) %>% 
@@ -342,11 +363,11 @@ models.fn <- function(mydata = dem.w,
   #rename variables for fns
   mydata <- mydata %>%
     #want to use 5 yr bins instead of this one w/ larger categories
-    select(-birth_cohort) %>%
+    #select(-birth_cohort) %>%
     rename(
       #m1 
       no2 = no2.var,
-      birth_cohort = birth_cohort_5yr,
+      #birth_cohort = birth_cohort_5yr,
       #m2
       income = income_cat,
       edu = degree,
@@ -358,7 +379,7 @@ models.fn <- function(mydata = dem.w,
     mutate_at(
       c("income",
         "edu",
-        "birth_cohort",
+        #"birth_cohort",
         "cohort",
         "smoke",
         "bmi"), 
@@ -391,7 +412,7 @@ models.fn <- function(mydata = dem.w,
   #assuming missing values (e.g., APOE) are MCAR and doing a complete case analysis. This method can be bias if values are not MCAR.
   
     m2 <- coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + 
-              edu +  birth_cohort, 
+              edu + cal_t, #birth_cohort, 
             data=mydata, 
             #robust = T, 
             # --> ? correct? need this for robust SEs
@@ -404,7 +425,7 @@ models.fn <- function(mydata = dem.w,
   #M3 (extended): M2 + smoking + physical activity 
   if("m3a" %in% models) {
     m3a <- mydata %>%
-      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + birth_cohort + 
+      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + cal_t + #birth_cohort + 
               smoke + exercise_reg, 
             data=., 
             #robust = T,          
@@ -417,7 +438,7 @@ models.fn <- function(mydata = dem.w,
   #M3b (extended + ACT cohort): M2 + smoking + physical activity + ACT cohort
   if("m3b" %in% models) {
     m3b <-  mydata %>%
-      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + birth_cohort +
+      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + cal_t + #birth_cohort +
               smoke + exercise_reg  + cohort,
             data=.,
             #robust = T,          
@@ -431,8 +452,7 @@ models.fn <- function(mydata = dem.w,
   #Model 4a (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI
   if("m4a" %in% models) {
     m4a <- mydata %>%
-      coxph(s.dem ~ no2 + 
-              male + edu + race_white + income + birth_cohort + strata(apoe) + 
+      coxph(s.dem ~ no2 + strata(apoe) + male + race_white + income + edu + cal_t + #birth_cohort + 
               smoke + exercise_reg +
               Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi, 
             data=., 
@@ -446,8 +466,8 @@ models.fn <- function(mydata = dem.w,
   #Model 4b (Extended & mediation): M3 + hypertension, diabetes, CV summary, heart disease summary, BMI + CASI score
   if("m4b" %in% models) {
     m4b <- mydata %>%
-      coxph(s.dem ~ no2 + 
-              male + edu + race_white + income + birth_cohort + strata(apoe) + 
+      coxph(s.dem ~ no2 + strata(apoe) + 
+              male + race_white + income + edu + cal_t + #birth_cohort + 
               smoke + exercise_reg +
               Hypertension + Diabetes + CV_DIS + Heart_Dis + bmi +
               casi_irt, 
@@ -469,8 +489,8 @@ models.fn <- function(mydata = dem.w,
       no2_apoe = apoe*no2)
   
   m5 <- mydata %>%
-    coxph(s.dem ~ no2_noapoe + no2_apoe + apoe +
-            male + edu + race_white + income + birth_cohort + strata(apoe),
+    coxph(s.dem ~ no2_noapoe + no2_apoe + apoe + strata(apoe) +
+            male + race_white + income + edu + cal_t, #birth_cohort 
           data=., 
           #robust = T,          
           cluster = study_id,
@@ -483,8 +503,8 @@ models.fn <- function(mydata = dem.w,
   #Model 6 (copollutant): M2 + PM2.5 (time-varying)
   if("m6" %in% models) {
     m6 <- mydata %>%
-      coxph(s.dem ~ no2 +
-              male + race_white + income + edu + birth_cohort + strata(apoe) +
+      coxph(s.dem ~ no2 + strata(apoe) +
+              male + race_white + income + edu + cal_t + #birth_cohort + 
               pm25,  
             data=.,
             #robust = T,          
@@ -548,11 +568,11 @@ apoe_model <- function(mydata = dem.w,
   #rename variables for fns
   mydata <- mydata %>%
     #want to use 5 yr bins instead of this one w/ larger categories
-    select(-birth_cohort) %>%
+    #select(-birth_cohort) %>%
     rename(
       #m1 
       no2 = no2.var,
-      birth_cohort = birth_cohort_5yr,
+      #birth_cohort = birth_cohort_5yr,
       #m2
       income = income_cat,
       edu = degree,
@@ -564,7 +584,7 @@ apoe_model <- function(mydata = dem.w,
     mutate_at(
       c("income",
         "edu",
-        "birth_cohort",
+        #"birth_cohort",
         "cohort",
         "smoke",
         "bmi"), 
@@ -592,8 +612,8 @@ apoe_model <- function(mydata = dem.w,
     #     )
     
     m5 <- mydata %>%
-      coxph(s.dem ~ apoe*no2 + apoe +
-              male + edu + race_white + income + birth_cohort + strata(apoe),
+      coxph(s.dem ~ apoe*no2 + apoe + strata(apoe) +
+              male + edu + race_white + income + cal_t, # birth_cohort + 
             data=., 
             #robust = T,          
             cluster = study_id,
